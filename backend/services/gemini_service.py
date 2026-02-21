@@ -3,7 +3,6 @@ import json
 import logging
 import asyncio
 import google.generativeai as genai
-from models.schemas import QuizQuestion, ValidateAnswerResponse
 
 logger = logging.getLogger(__name__)
 
@@ -210,8 +209,13 @@ Student's question:
     try:
         response = await model.generate_content_async(full_prompt, stream=True)
         async for chunk in response:
-            if chunk.text:
-                yield chunk.text
+            try:
+                text = chunk.text
+                if text:
+                    yield text
+            except ValueError:
+                # Final chunk carries finish_reason but no text parts — safe to skip
+                pass
     except Exception as e:
         logger.error(f"Gemini API streaming error: {str(e)}")
         yield f"\n\n[API Error: {str(e)}]"
@@ -227,7 +231,6 @@ async def generate_quiz(struggling_nodes: list, raw_text: str) -> list[dict]:
         "gemini-2.5-flash",
         generation_config=genai.GenerationConfig(
             response_mime_type="application/json",
-            response_schema=list[QuizQuestion],
         ),
     )
 
@@ -256,7 +259,7 @@ async def generate_quiz(struggling_nodes: list, raw_text: str) -> list[dict]:
         "covered in the Gemini answer but is NOT in the PDF, you MUST still test it — do NOT skip "
         "it or restrict yourself only to PDF content.\n\n"
         "Format Rules:\n"
-        "  • Generate EXACTLY {n} questions total.\n"
+        f"  • Generate EXACTLY {num_questions} questions total.\n"
         "  • Mix question types intelligently:\n"
         "      - Use 'mcq' when the concept has clearly defined, distinct alternatives "
         "(definitions, comparisons, cause-effect, best/worst choice).\n"
@@ -269,8 +272,11 @@ async def generate_quiz(struggling_nodes: list, raw_text: str) -> list[dict]:
         "  • For short_answer questions: leave 'options' as null and 'correct_option' as null.\n\n"
         f"Struggling topics:\n{nodes_summary}\n\n"
         f"Document (secondary context only):\n{raw_text}\n\n"
-        f"Return exactly {num_questions} questions as a JSON array. No markdown fencing."
-    ).format(n=num_questions)
+        f"Return exactly {num_questions} questions as a JSON array. No markdown fencing, no extra keys.\n"
+        "Each object must have exactly these keys: question (string), question_type ('mcq' or 'short_answer'), "
+        "options (array of 4 strings for mcq, null for short_answer), "
+        "correct_option (0-based integer for mcq, null for short_answer)."
+    )
 
     response = await asyncio.to_thread(model.generate_content, prompt)
     return json.loads(response.text)
@@ -310,7 +316,6 @@ async def validate_answer(
         "gemini-2.5-flash",
         generation_config=genai.GenerationConfig(
             response_mime_type="application/json",
-            response_schema=ValidateAnswerResponse,
         ),
     )
 
@@ -328,7 +333,11 @@ async def validate_answer(
         "4. Be concise but helpful.\n\n"
         f"Document context (for reference):\n{raw_text}\n\n"
         f"Question:\n{question}\n\n"
-        f"Student's Answer:\n{student_answer}\n"
+        f"Student's Answer:\n{student_answer}\n\n"
+        "Respond with a JSON object with exactly two keys:\n"
+        "  \"status\": one of \"correct\", \"partial\", or \"incorrect\"\n"
+        "  \"explanation\": a concise string addressed directly to the student\n"
+        "No markdown fencing, no extra keys."
     )
 
     response = await asyncio.to_thread(model.generate_content, prompt)

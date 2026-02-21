@@ -19,7 +19,7 @@ import ToolsModal from './ToolsModal'
 import { useTextSelection } from '../hooks/useTextSelection'
 import { useCanvasStore } from '../store/canvasStore'
 import { streamQuery, generateTitle } from '../api/studyApi'
-import { getNewNodePosition, recalculateSiblingPositions, resolveOverlaps, isOverlapping } from '../utils/positioning'
+import { getNewNodePosition, recalculateSiblingPositions, resolveOverlaps, isOverlapping, rerouteEdgeHandles } from '../utils/positioning'
 import type { AnswerNodeData } from '../types'
 import { pdf } from '@react-pdf/renderer'
 import { buildQATree } from '../utils/buildQATree'
@@ -41,12 +41,14 @@ interface SelectionState {
     selectedText: string
     sourceNodeId: string
     rect: DOMRect
+    containerRect: DOMRect | null
 }
 
 interface ModalState {
     selectedText: string
     sourceNodeId: string
     preGeneratedNodeId: string
+    selectionRect: DOMRect | null
 }
 
 let toastTimeout: ReturnType<typeof setTimeout> | null = null
@@ -86,8 +88,17 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
 
     // Text selection hook
     const handleSelection = useCallback((result: SelectionState | null) => {
-        setSelection(result)
-    }, [])
+        if (result) {
+            // Capture the bounding rect of the content node for zone computation
+            const containerEl = contentNodeId
+                ? document.querySelector(`[data-nodeid="${contentNodeId}"]`)
+                : null
+            const containerRect = containerEl ? containerEl.getBoundingClientRect() : null
+            setSelection({ ...result, containerRect })
+        } else {
+            setSelection(null)
+        }
+    }, [contentNodeId])
     useTextSelection(handleSelection)
 
     // Dismiss popup on mousedown outside
@@ -129,6 +140,7 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
             selectedText: selection.selectedText,
             sourceNodeId: selection.sourceNodeId,
             preGeneratedNodeId,
+            selectionRect: selection.rect,
         })
         setSelection(null)
     }, [selection])
@@ -145,11 +157,24 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
             addHighlight({ id: highlightId, text: selectedText, nodeId: preGeneratedNodeId })
 
             // Calculate new node position
-            const { x, y, sourceHandle, targetHandle } = getNewNodePosition(
+            const { x, y, sourceHandle: side, targetHandle } = getNewNodePosition(
                 sourceNodeId,
                 nodes,
                 contentNodeId
             )
+
+            // Pick the handle on the ContentNode closest to the highlighted text
+            let sourceHandle = side
+            if (sourceNodeId === contentNodeId && modal.selectionRect) {
+                const contentEl = document.querySelector(`[data-nodeid="${contentNodeId}"]`)
+                if (contentEl) {
+                    const contentRect = contentEl.getBoundingClientRect()
+                    const selCenterY = modal.selectionRect.top + modal.selectionRect.height / 2
+                    const relativeY = (selCenterY - contentRect.top) / contentRect.height
+                    const idx = Math.min(Math.max(Math.round(relativeY * 9), 0), 9)
+                    sourceHandle = `${side}-${idx}`
+                }
+            }
 
             // Create the Answer Node
             const newNode: Node = {
@@ -293,6 +318,27 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
         setNodes(corrected)
     }, [nodes, contentNodeId, contentNode, setNodes])
 
+    // Re-route connected edge handles after a drag so arrows take the shortest path
+    const handleNodeDragStop = useCallback(
+        (_evt: React.MouseEvent, draggedNode: Node) => {
+            if (draggedNode.type === 'answerNode') {
+                // Merge the final dragged position into the node list so the
+                // reroute calculation uses the up-to-date position even if the
+                // Zustand store is one render behind.
+                const freshNodes = nodes.map((n) =>
+                    n.id === draggedNode.id
+                        ? { ...n, position: draggedNode.position, measured: draggedNode.measured ?? n.measured }
+                        : n
+                )
+                setEdges((prevEdges) =>
+                    rerouteEdgeHandles(draggedNode.id, freshNodes, prevEdges)
+                )
+            }
+            persistToLocalStorage()
+        },
+        [nodes, setEdges, persistToLocalStorage],
+    )
+
     // Revision mode
     const handleRevisionMode = useCallback(() => {
         const strugglingNodes = nodes.filter(
@@ -431,6 +477,7 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
                 nodesConnectable={false}
                 edgesFocusable={false}
                 deleteKeyCode={null}
+                onNodeDragStop={handleNodeDragStop}
             >
                 <Background variant={BackgroundVariant.Dots} />
                 <Controls position="bottom-left" />
@@ -439,7 +486,7 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
 
             {/* Ask Gemini popup */}
             {selection && (
-                <AskGeminiPopup rect={selection.rect} onAsk={handleAsk} />
+                <AskGeminiPopup rect={selection.rect} containerRect={selection.containerRect} onAsk={handleAsk} />
             )}
 
             {/* Question modal */}

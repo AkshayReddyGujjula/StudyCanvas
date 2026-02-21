@@ -1,4 +1,4 @@
-import type { Node } from '@xyflow/react'
+import type { Node, Edge } from '@xyflow/react'
 
 /**
  * Calculates the position and edge handle configuration for a new child node.
@@ -61,7 +61,7 @@ export function getNewNodePosition(
                     x: contentX - 360 - 80,
                     y: contentY,
                     sourceHandle: 'left',
-                    targetHandle: 'right',
+                    targetHandle: 'right-target',
                 }
             }
             const sortedLeft = [...leftSideNodes].sort((a, b) => a.position.y - b.position.y)
@@ -71,7 +71,7 @@ export function getNewNodePosition(
                 x: contentX - 360 - 80,
                 y: last.position.y + lastHeight + 40,
                 sourceHandle: 'left',
-                targetHandle: 'right',
+                targetHandle: 'right-target',
             }
         }
     } else {
@@ -208,6 +208,167 @@ export function resolveOverlaps(nodes: Node[]): Node[] {
         }
         return n
     })
+}
+
+/**
+ * Re-routes all edges connected to a dragged node so the arrow takes the
+ * shortest path between source and target based on their current positions.
+ *
+ * ContentNode has 10 handles per side (right-0..right-9 / left-0..left-9).
+ * AnswerNode has single handles: right, left, right-target, top, bottom.
+ */
+export function rerouteEdgeHandles(
+    draggedNodeId: string,
+    nodes: Node[],
+    edges: Edge[],
+): Edge[] {
+    return edges.map((edge) => {
+        const isSource = edge.source === draggedNodeId
+        const isTarget = edge.target === draggedNodeId
+        if (!isSource && !isTarget) return edge
+
+        const sourceNode = nodes.find((n) => n.id === edge.source)
+        const targetNode = nodes.find((n) => n.id === edge.target)
+        if (!sourceNode || !targetNode) return edge
+
+        const sourceWidth =
+            typeof sourceNode.style?.width === 'number' ? sourceNode.style.width : 700
+        const targetWidth =
+            typeof targetNode.style?.width === 'number' ? targetNode.style.width : 360
+
+        const sourceCenterX = sourceNode.position.x + (sourceWidth as number) / 2
+        const targetCenterX = targetNode.position.x + (targetWidth as number) / 2
+
+        const targetIsRight = targetCenterX >= sourceCenterX
+
+        let sourceHandle: string
+        let targetHandle: string
+
+        if (sourceNode.type === 'contentNode') {
+            // ContentNode: pick the vertical bucket closest to the target node's centre Y
+            const sourceHeight = sourceNode.measured?.height ?? 400
+            const targetCenterY =
+                targetNode.position.y + (targetNode.measured?.height ?? 200) / 2
+            const relY = (targetCenterY - sourceNode.position.y) / sourceHeight
+            const bucketIdx = Math.min(Math.max(Math.round(relY * 9), 0), 9)
+
+            if (targetIsRight) {
+                sourceHandle = `right-${bucketIdx}`
+                targetHandle = 'left'
+            } else {
+                sourceHandle = `left-${bucketIdx}`
+                targetHandle = 'right-target'
+            }
+        } else {
+            // AnswerNode → AnswerNode
+            if (targetIsRight) {
+                sourceHandle = 'right'
+                targetHandle = 'left'
+            } else {
+                sourceHandle = 'left'
+                targetHandle = 'right-target'
+            }
+        }
+
+        return {
+            ...edge,
+            sourceHandle,
+            targetHandle,
+            // Keep arrow style in sync with side
+            style: { ...edge.style },
+        }
+    })
+}
+
+/**
+ * Snaps a leaf answerNode (one with no children) to the nearest valid column
+ * position next to the content node after a drag-stop event.
+ *
+ * Rules:
+ * - Determines the target column (left or right of PDF) based on the dropped X.
+ * - Snaps X to the canonical column X for that side.
+ * - Finds the best Y slot in that column by Euclidean distance to neighbouring
+ *   nodes, inserting the node above or below its nearest neighbour.
+ *
+ * Returns the updated nodes array with the snapped position applied.
+ */
+export function snapLeafNodeToColumn(
+    draggedNodeId: string,
+    nodes: Node[],
+    contentNodeId: string,
+): Node[] {
+    const draggedNode = nodes.find((n) => n.id === draggedNodeId)
+    const contentNode = nodes.find((n) => n.id === contentNodeId)
+    if (!draggedNode || !contentNode) return nodes
+
+    const contentX = contentNode.position.x
+    const contentWidth = typeof contentNode.style?.width === 'number' ? contentNode.style.width : 700
+    const GAP = 80
+    const NODE_W = 360
+
+    // Determine target side
+    const contentCenterX = contentX + (contentWidth as number) / 2
+    const isRight = draggedNode.position.x >= contentCenterX
+
+    const columnX = isRight
+        ? contentX + (contentWidth as number) + GAP   // right column
+        : contentX - NODE_W - GAP                     // left column
+
+    // All nodes in the target column, excluding the dragged node
+    const columnNodes = nodes
+        .filter(
+            (n) =>
+                n.id !== draggedNodeId &&
+                n.id !== contentNodeId &&
+                (isRight ? n.position.x >= contentCenterX : n.position.x < contentCenterX),
+        )
+        .sort((a, b) => a.position.y - b.position.y)
+
+    let snappedY: number
+
+    if (columnNodes.length === 0) {
+        // Only node in column — align with the content node's top
+        snappedY = contentNode.position.y
+    } else {
+        // Find the nearest node in the column by vertical distance
+        const dragCenterY = draggedNode.position.y + (draggedNode.measured?.height ?? 200) / 2
+        let nearestIdx = 0
+        let nearestDist = Infinity
+        for (let i = 0; i < columnNodes.length; i++) {
+            const cn = columnNodes[i]
+            const cnCenterY = cn.position.y + (cn.measured?.height ?? 200) / 2
+            const dist = Math.abs(dragCenterY - cnCenterY)
+            if (dist < nearestDist) {
+                nearestDist = dist
+                nearestIdx = i
+            }
+        }
+
+        const nearest = columnNodes[nearestIdx]
+        const nearestH = nearest.measured?.height ?? 200
+        const nearestCenterY = nearest.position.y + nearestH / 2
+
+        if (dragCenterY < nearestCenterY) {
+            // Place above nearest
+            const above = nearestIdx > 0 ? columnNodes[nearestIdx - 1] : null
+            if (above) {
+                const aboveBottom = above.position.y + (above.measured?.height ?? 200)
+                snappedY = aboveBottom + GAP / 2
+            } else {
+                const draggedH = draggedNode.measured?.height ?? 200
+                snappedY = nearest.position.y - draggedH - GAP / 2
+            }
+        } else {
+            // Place below nearest
+            snappedY = nearest.position.y + nearestH + GAP / 2
+        }
+    }
+
+    return nodes.map((n) =>
+        n.id === draggedNodeId
+            ? { ...n, position: { x: columnX, y: snappedY } }
+            : n,
+    )
 }
 
 /**

@@ -30,10 +30,24 @@ type AnswerNodeProps = NodeProps & { data: AnswerNodeData }
 export default function AnswerNode({ id, data }: AnswerNodeProps) {
     const updateNodeData = useCanvasStore((s) => s.updateNodeData)
     const persistToLocalStorage = useCanvasStore((s) => s.persistToLocalStorage)
+    const setNodes = useCanvasStore((s) => s.setNodes)
+    const setEdges = useCanvasStore((s) => s.setEdges)
     const fileData = useCanvasStore((s) => s.fileData)
     const userDetails = useCanvasStore((s) => s.userDetails)
     const [followUp, setFollowUp] = useState('')
     const [isFollowUpLoading, setIsFollowUpLoading] = useState(false)
+    const [confirmDelete, setConfirmDelete] = useState(false)
+
+    const handleDeleteClick = useCallback(() => {
+        if (!confirmDelete) {
+            setConfirmDelete(true)
+            return
+        }
+        // Confirmed — remove node and its edges
+        setNodes((prev) => prev.filter((n) => n.id !== id))
+        setEdges((prev) => prev.filter((e) => e.source !== id && e.target !== id))
+        persistToLocalStorage()
+    }, [confirmDelete, id, setNodes, setEdges, persistToLocalStorage])
 
     const borderClass = STATUS_BORDER_CLASSES[data.status] || 'border-blue-500'
 
@@ -141,28 +155,69 @@ export default function AnswerNode({ id, data }: AnswerNodeProps) {
                     </button>
                 </div>
 
-                <button
-                    title={data.isMinimized ? "Expand" : "Minimize"}
-                    onClick={() => {
-                        const willBeMinimized = !data.isMinimized
-                        updateNodeData(id, {
-                            isMinimized: willBeMinimized,
-                            isExpanding: !willBeMinimized
-                        })
-                        persistToLocalStorage()
-                    }}
-                    className="p-1 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-200/50 transition-colors"
-                >
-                    {data.isMinimized ? (
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
-                        </svg>
+                <div className="flex items-center gap-0.5">
+                    {/* Delete button — two-step confirmation */}
+                    {confirmDelete ? (
+                        <div
+                            className="flex items-center gap-1"
+                            onMouseLeave={() => setConfirmDelete(false)}
+                        >
+                            <span className="text-[10px] text-red-600 font-semibold whitespace-nowrap">Delete?</span>
+                            <button
+                                title="Confirm delete"
+                                onClick={handleDeleteClick}
+                                className="p-1 text-white bg-red-500 hover:bg-red-600 rounded-md transition-colors"
+                            >
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                            </button>
+                            <button
+                                title="Cancel"
+                                onClick={() => setConfirmDelete(false)}
+                                className="p-1 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-200/50 transition-colors"
+                            >
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
                     ) : (
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7" />
-                        </svg>
+                        <button
+                            title="Delete node"
+                            onClick={handleDeleteClick}
+                            className="p-1 text-gray-400 hover:text-red-500 rounded-md hover:bg-red-50 transition-colors"
+                        >
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                        </button>
                     )}
-                </button>
+
+                    {/* Minimise button */}
+                    <button
+                        title={data.isMinimized ? "Expand" : "Minimize"}
+                        onClick={() => {
+                            const willBeMinimized = !data.isMinimized
+                            updateNodeData(id, {
+                                isMinimized: willBeMinimized,
+                                isExpanding: !willBeMinimized
+                            })
+                            persistToLocalStorage()
+                        }}
+                        className="p-1 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-200/50 transition-colors"
+                    >
+                        {data.isMinimized ? (
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+                            </svg>
+                        ) : (
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7" />
+                            </svg>
+                        )}
+                    </button>
+                </div>
             </div>
 
             {/* Content Area */}
@@ -252,7 +307,7 @@ export default function AnswerNode({ id, data }: AnswerNodeProps) {
             <Handle type="target" position={Position.Left} id="left" style={{ background: '#6366f1' }} />
             <Handle type="source" position={Position.Top} id="top" style={{ background: '#6366f1' }} />
             <Handle type="source" position={Position.Bottom} id="bottom" style={{ background: '#6366f1' }} />
-            <Handle type="target" position={Position.Right} id="right-target" style={{ background: '#6366f1', top: '60%' }} />
+            <Handle type="target" position={Position.Right} id="right-target" style={{ background: '#6366f1' }} />
         </div>
     )
 }

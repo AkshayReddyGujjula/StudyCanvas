@@ -145,31 +145,39 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
                 </div>
             </div>
 
-            {/* Connection handles — source and target on both sides */}
-            <Handle
-                type="source"
-                position={Position.Right}
-                id="right"
-                style={{ background: '#6366f1' }}
-            />
-            <Handle
-                type="target"
-                position={Position.Right}
-                id="right-target"
-                style={{ background: '#6366f1', top: '60%' }}
-            />
-            <Handle
-                type="source"
-                position={Position.Left}
-                id="left"
-                style={{ background: '#6366f1' }}
-            />
-            <Handle
-                type="target"
-                position={Position.Left}
-                id="left-target"
-                style={{ background: '#6366f1', top: '60%' }}
-            />
+            {/* 10 source handles per side, evenly spaced */}
+            {Array.from({ length: 10 }, (_, i) => (
+                <Handle
+                    key={`right-${i}`}
+                    type="source"
+                    position={Position.Right}
+                    id={`right-${i}`}
+                    style={{
+                        background: '#6366f1',
+                        width: 8,
+                        height: 8,
+                        border: '2px solid white',
+                        borderRadius: '50%',
+                        top: `${(i + 0.5) * 10}%`,
+                    }}
+                />
+            ))}
+            {Array.from({ length: 10 }, (_, i) => (
+                <Handle
+                    key={`left-${i}`}
+                    type="source"
+                    position={Position.Left}
+                    id={`left-${i}`}
+                    style={{
+                        background: '#6366f1',
+                        width: 8,
+                        height: 8,
+                        border: '2px solid white',
+                        borderRadius: '50%',
+                        top: `${(i + 0.5) * 10}%`,
+                    }}
+                />
+            ))}
         </div>
     )
 }
