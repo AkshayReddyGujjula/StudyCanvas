@@ -11,6 +11,54 @@ logger = logging.getLogger(__name__)
 genai.configure(api_key=os.environ.get("GEMINI_API_KEY", ""))
 
 
+async def generate_title(raw_text: str) -> str:
+    """
+    Asks Gemini for a concise, descriptive document title (4-6 words).
+    Receives the cleaned Markdown content (not raw PDF extraction) for accuracy.
+    Returns plain text with no markdown, punctuation, or explanation.
+    """
+    model = genai.GenerativeModel("gemini-2.5-flash")
+    # Use up to 6000 chars of the (already-clean) markdown content
+    excerpt = raw_text[:6000]
+    prompt = (
+        "You are an academic document titling assistant.\n\n"
+        "Your task: read the document excerpt below and produce a SINGLE, SHORT, DESCRIPTIVE TITLE "
+        "that accurately captures the main subject matter.\n\n"
+        "Rules (follow every one):\n"
+        "- The title MUST be between 3 and 6 words.\n"
+        "- The title must describe the SPECIFIC topic, subject, or concept of the document. "
+        "Do NOT use generic titles like 'Study Notes', 'Document Summary', 'Course Notes', or similar.\n"
+        "- Use title case (capitalise main words).\n"
+        "- Output ONLY the title. No explanation, no punctuation at the end, no quotes, no markdown.\n\n"
+        "Examples of GOOD titles: 'Introduction to Neural Networks', "
+        "'World War Two Causes and Effects', 'Python Data Structures Guide', "
+        "'Human Digestive System Overview'\n\n"
+        f"Document excerpt:\n\n{excerpt}"
+    )
+    response = await asyncio.to_thread(
+        lambda: model.generate_content(
+            prompt,
+            generation_config=genai.GenerationConfig(max_output_tokens=50, temperature=0.3),
+        )
+    )
+    # Safely extract text — finish_reason 2 (MAX_TOKENS) or blocked candidates
+    # can leave response.text inaccessible, so check candidates directly.
+    try:
+        raw = response.text
+    except ValueError:
+        # Fallback: try pulling text from the first candidate's parts
+        try:
+            raw = response.candidates[0].content.parts[0].text
+        except Exception:
+            return "Study Notes"
+    title = raw.strip().strip('"').strip("'")
+    # Hard-cap at 6 words as a safety net
+    words = title.split()
+    if len(words) > 6:
+        title = " ".join(words[:6])
+    return title
+
+
 def convert_to_markdown(raw_text: str) -> str:
     """
     Sends the raw extracted PDF text to Gemini and returns structured Markdown.
@@ -171,9 +219,9 @@ Student's question:
 
 async def generate_quiz(struggling_nodes: list, raw_text: str) -> list[dict]:
     """
-    Generates between 3 and 15 short-answer questions based on struggling nodes.
-    Uses response_mime_type='application/json' with response_schema for structured output.
-    Wraps the blocking Gemini call in asyncio.to_thread to avoid blocking the event loop.
+    Generates between 3 and 15 mixed-format (MCQ + short-answer) questions.
+    Primary source is the Gemini answers the student already struggled with;
+    PDF text is used only for additional/overlapping context.
     """
     model = genai.GenerativeModel(
         "gemini-2.5-flash",
@@ -184,33 +232,80 @@ async def generate_quiz(struggling_nodes: list, raw_text: str) -> list[dict]:
     )
 
     nodes_summary = "\n".join(
-        f"- Topic: {n['highlighted_text']}\n  Question: {n['question']}\n  Answer: {n['answer']}"
+        f"- Highlighted passage: {n['highlighted_text']}\n"
+        f"  Student's question:   {n['question']}\n"
+        f"  Gemini's answer:      {n['answer']}"
         for n in struggling_nodes
     )
 
-    # Determine optimal question count based on number of struggling topics
     num_topics = len(struggling_nodes)
     num_questions = min(max(3, num_topics * 3), 15)
 
     prompt = (
-        "You are a quiz generator for university students. "
-        f"Generate exactly {num_questions} short-answer questions to help a student review the topics they are struggling with.\n\n"
-        f"Topics the student is struggling with:\n{nodes_summary}\n\n"
-        f"Source document for full context:\n{raw_text}\n\n"
-        "Each question must have:\n"
-        "- question: a clear, specific short-answer question string\n\n"
-        f"Return exactly {num_questions} questions. No markdown fencing."
-    )
+        "You are an intelligent quiz generator for university students.\n\n"
+        "A student has been studying and has marked certain topics as ones they are struggling with. "
+        "For each struggling topic you are given three things:\n"
+        "  1. The highlighted passage from the document\n"
+        "  2. The question the student asked about it\n"
+        "  3. The answer that was provided to the student\n\n"
+        "CRITICAL RULE — Source Priority:\n"
+        "  • The PRIMARY source for questions is the GEMINI ANSWER given to the student. "
+        "Test whether the student understood and retained what the answer explained.\n"
+        "  • If the topic appears in the PDF as well, you may draw on that overlap too.\n"
+        "  • If the topic (e.g. macOS efficiency, a specific algorithm, a historical event) was "
+        "covered in the Gemini answer but is NOT in the PDF, you MUST still test it — do NOT skip "
+        "it or restrict yourself only to PDF content.\n\n"
+        "Format Rules:\n"
+        "  • Generate EXACTLY {n} questions total.\n"
+        "  • Mix question types intelligently:\n"
+        "      - Use 'mcq' when the concept has clearly defined, distinct alternatives "
+        "(definitions, comparisons, cause-effect, best/worst choice).\n"
+        "      - Use 'short_answer' when the concept requires explanation, reasoning, or "
+        "open-ended understanding.\n"
+        "  • For MCQ questions:\n"
+        "      - Provide EXACTLY 4 options in the 'options' array.\n"
+        "      - Set 'correct_option' to the 0-based index (0–3) of the correct option.\n"
+        "      - Make distractors plausible but clearly wrong on reflection.\n"
+        "  • For short_answer questions: leave 'options' as null and 'correct_option' as null.\n\n"
+        f"Struggling topics:\n{nodes_summary}\n\n"
+        f"Document (secondary context only):\n{raw_text}\n\n"
+        f"Return exactly {num_questions} questions as a JSON array. No markdown fencing."
+    ).format(n=num_questions)
 
-    # Run blocking Gemini call in a thread to avoid freezing the asyncio event loop
     response = await asyncio.to_thread(model.generate_content, prompt)
     return json.loads(response.text)
 
 
-async def validate_answer(question: str, student_answer: str, raw_text: str) -> dict:
+async def validate_answer(
+    question: str,
+    student_answer: str,
+    raw_text: str,
+    question_type: str = "short_answer",
+    correct_option: int | None = None,
+) -> dict:
     """
-    Validates a student's answer to a short-answer question against the source document.
+    Validates a student's answer.
+    For MCQ: the student_answer is the index (as a string) of the option they selected.
+             We compare directly against correct_option — no Gemini call needed.
+    For short_answer: uses Gemini to grade the free-text answer.
     """
+    # ── MCQ: pure index comparison, no LLM needed ──────────────────────────
+    if question_type == "mcq" and correct_option is not None:
+        try:
+            selected = int(student_answer)
+        except (ValueError, TypeError):
+            selected = -1
+        is_correct = selected == correct_option
+        return {
+            "status": "correct" if is_correct else "incorrect",
+            "explanation": (
+                "Great job! That's the correct answer."
+                if is_correct
+                else f"Actually, the correct answer was choice {correct_option + 1}. Review this topic once more!"
+            ),
+        }
+
+    # ── Short answer: ask Gemini ────────────────────────────────────────────
     model = genai.GenerativeModel(
         "gemini-2.5-flash",
         generation_config=genai.GenerationConfig(
@@ -220,11 +315,18 @@ async def validate_answer(question: str, student_answer: str, raw_text: str) -> 
     )
 
     prompt = (
-        "You are a university grader. Based on the provided source document context, evaluate "
-        "whether the student's answer to the question is correct. "
-        "Provide a boolean 'is_correct' (true if right, false if wrong) and a short 'explanation' "
-        "explaining why it is right or wrong based on the document.\n\n"
-        f"Document:\n{raw_text}\n\n"
+        "You are a supportive university teacher grading a study quiz. "
+        "Evaluate whether the student's answer is correct.\n\n"
+        "Status Selection:\n"
+        "- 'correct': The answer matches the core content accurately.\n"
+        "- 'partial': The answer contains some correct points but is incomplete or has minor inaccuracies.\n"
+        "- 'incorrect': The answer is fundamentally wrong or entirely misses the point.\n\n"
+        "Guidelines for your 'explanation':\n"
+        "1. Address the student DIRECTLY using 'You' or 'Your'.\n"
+        "2. NEVER use third-person phrases like 'The student said' or 'They stated'.\n"
+        "3. Act as a patient mentor explaining the concept clearly, especially if they are wrong or only partially right.\n"
+        "4. Be concise but helpful.\n\n"
+        f"Document context (for reference):\n{raw_text}\n\n"
         f"Question:\n{question}\n\n"
         f"Student's Answer:\n{student_answer}\n"
     )

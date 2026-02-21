@@ -39,10 +39,13 @@ export interface UploadResponse {
 
 export interface QuizQuestion {
     question: string
+    question_type: 'short_answer' | 'mcq'
+    options?: string[]        // exactly 4 items when question_type === 'mcq'
+    correct_option?: number   // 0-based index of correct option for MCQ
 }
 
 export interface ValidateAnswerResponse {
-    is_correct: boolean
+    status: 'correct' | 'incorrect' | 'partial'
     explanation: string
 }
 

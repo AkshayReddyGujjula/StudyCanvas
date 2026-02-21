@@ -1,7 +1,7 @@
 import logging
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
-from models.schemas import QueryRequest
+from models.schemas import QueryRequest, GenerateTitleRequest
 from services import gemini_service
 
 logger = logging.getLogger(__name__)
@@ -23,3 +23,9 @@ async def query_stream(request: QueryRequest):
         chat_history=request.chat_history,
     )
     return StreamingResponse(generator, media_type="text/plain")
+
+
+@router.post("/generate-title")
+async def generate_title(request: GenerateTitleRequest):
+    title = await gemini_service.generate_title(request.raw_text)
+    return {"title": title}

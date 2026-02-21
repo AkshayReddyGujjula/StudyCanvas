@@ -36,17 +36,26 @@ def _validate_quiz(result: list) -> None:
     if not isinstance(result, list) or len(result) == 0:
         raise ValueError("Quiz result is not a non-empty list")
     for item in result:
-        QuizQuestion(**item)  # will raise if schema mismatch
+        q = QuizQuestion(**item)  # will raise if schema mismatch
+        if q.question_type == "mcq":
+            if not q.options or len(q.options) != 4:
+                raise ValueError(f"MCQ question must have exactly 4 options: {q.question}")
+            if q.correct_option is None or not (0 <= q.correct_option <= 3):
+                raise ValueError(f"MCQ question must have correct_option 0-3: {q.question}")
 
 
 @router.post("/validate")
 async def validate_answer(request: ValidateAnswerRequest):
     """
-    Validates the user's short answer against the document context.
+    Validates the user's answer (short-answer via Gemini, MCQ via index comparison).
     """
     try:
         result = await gemini_service.validate_answer(
-            request.question, request.student_answer, request.raw_text
+            request.question,
+            request.student_answer,
+            request.raw_text,
+            question_type=request.question_type or "short_answer",
+            correct_option=request.correct_option,
         )
         return result
     except Exception as e:

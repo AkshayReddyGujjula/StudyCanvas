@@ -18,9 +18,12 @@ import RevisionModal from './RevisionModal'
 import ToolsModal from './ToolsModal'
 import { useTextSelection } from '../hooks/useTextSelection'
 import { useCanvasStore } from '../store/canvasStore'
-import { streamQuery } from '../api/studyApi'
+import { streamQuery, generateTitle } from '../api/studyApi'
 import { getNewNodePosition, recalculateSiblingPositions, resolveOverlaps, isOverlapping } from '../utils/positioning'
 import type { AnswerNodeData } from '../types'
+import { pdf } from '@react-pdf/renderer'
+import { buildQATree } from '../utils/buildQATree'
+import StudyNotePDF from './StudyNotePDF'
 
 const NODE_TYPES = {
     contentNode: ContentNode,
@@ -56,6 +59,7 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
     const [showMenu, setShowMenu] = useState(false)
     const [showTools, setShowTools] = useState(false)
     const [toast, setToast] = useState<string | null>(null)
+    const [isGeneratingPDF, setIsGeneratingPDF] = useState(false)
     const streamingNodesRef = useRef<Set<string>>(new Set())
 
     const nodes = useCanvasStore((s) => s.nodes)
@@ -301,6 +305,72 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
         setShowRevision(true)
     }, [nodes, showToast])
 
+    // Download Q&A as a PDF
+    const handleDownloadPDF = useCallback(async () => {
+        setShowMenu(false)
+        const qaTree = buildQATree(nodes, edges)
+        if (qaTree.length === 0) {
+            showToast('No questions yet — ask Gemini something first!')
+            return
+        }
+
+        setIsGeneratingPDF(true)
+
+        const now = new Date()
+        const exportDate = now.toLocaleDateString('en-GB', {
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+        })
+
+        // Fetch a Gemini-generated title — send clean markdown_content, not raw_text
+        let docTitle = 'Study Notes'
+        if (fileData?.markdown_content) {
+            try {
+                const fetched = await generateTitle(fileData.markdown_content)
+                if (fetched && fetched.trim().length > 0) {
+                    docTitle = fetched.trim()
+                }
+            } catch (err: unknown) {
+                const msg = err instanceof Error ? err.message : String(err)
+                console.warn('generate-title failed:', msg)
+                showToast(`Title generation failed: ${msg}. Using default title.`)
+                // Wait a beat so the toast is readable before the PDF downloads
+                await new Promise((r) => setTimeout(r, 1500))
+            }
+        }
+
+        try {
+            const blob = await pdf(
+                <StudyNotePDF
+                    qaTree={qaTree}
+                    filename={fileData?.filename ?? 'Document'}
+                    exportDate={exportDate}
+                    totalQuestions={qaTree.length}
+                    title={docTitle}
+                />
+            ).toBlob()
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            a.href = url
+            // Use original filename (stripped of extension) + StudyCanvas suffix
+            const originalName = fileData?.filename?.replace(/\.[^/.]+$/, '') ?? 'Notes'
+            a.download = `${originalName}-StudyCanvas.pdf`
+            document.body.appendChild(a)
+            a.click()
+            document.body.removeChild(a)
+            URL.revokeObjectURL(url)
+        } catch (err) {
+            console.error('PDF generation error:', err)
+            showToast('Failed to generate PDF — please try again.')
+        } finally {
+            setIsGeneratingPDF(false)
+        }
+    }, [nodes, edges, fileData, showToast])
+
     return (
         <div style={{ width: '100vw', height: '100vh' }}>
             <ReactFlow
@@ -427,9 +497,28 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
                         >
                             ⚙️ Tools (Context)
                         </button>
+                        <div style={{ height: 1, backgroundColor: '#e5e7eb', margin: '4px 6px' }} />
+                        <button
+                            onClick={handleDownloadPDF}
+                            disabled={!nodes.some((n) => n.type === 'answerNode') || isGeneratingPDF}
+                            className="text-left px-3 py-2 hover:bg-indigo-50 rounded-md text-sm text-indigo-700 font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                            {isGeneratingPDF ? '⏳ Generating...' : '💾 Save Notes (PDF)'}
+                        </button>
                     </div>
                 )}
             </div>
+
+            {/* PDF generation loading overlay */}
+            {isGeneratingPDF && (
+                <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 bg-indigo-700 text-white text-sm font-medium rounded-xl shadow-xl">
+                    <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                    </svg>
+                    Generating PDF title with Gemini…
+                </div>
+            )}
 
             {/* Toast notification */}
             {toast && (

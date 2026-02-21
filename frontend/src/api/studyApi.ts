@@ -30,14 +30,26 @@ export const generateQuiz = async (
 export const validateAnswer = async (
     question: string,
     student_answer: string,
-    raw_text: string
+    raw_text: string,
+    question_type: 'short_answer' | 'mcq' = 'short_answer',
+    correct_option?: number
 ): Promise<ValidateAnswerResponse> => {
     const response = await api.post<ValidateAnswerResponse>('/api/validate', {
         question,
         student_answer,
         raw_text,
+        question_type,
+        correct_option,
     })
     return response.data
+}
+
+/**
+ * Ask Gemini for a short title (max 5 words) summarising the document.
+ */
+export const generateTitle = async (raw_text: string): Promise<string> => {
+    const response = await api.post<{ title: string }>('/api/generate-title', { raw_text })
+    return response.data.title
 }
 
 /**
