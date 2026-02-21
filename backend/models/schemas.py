@@ -9,11 +9,25 @@ class UploadResponse(BaseModel):
     page_count: int
 
 
+class UserDetails(BaseModel):
+    name: str
+    age: str
+    status: str
+    educationLevel: str
+
+
+class ChatMessage(BaseModel):
+    role: Literal["user", "model"]
+    content: str
+
+
 class QueryRequest(BaseModel):
     question: str
     highlighted_text: str
     raw_text: str
     parent_response: Optional[str] = None
+    user_details: Optional[UserDetails] = None
+    chat_history: Optional[list[ChatMessage]] = None
 
 
 class QuizNode(BaseModel):
@@ -29,6 +43,14 @@ class QuizRequest(BaseModel):
 
 class QuizQuestion(BaseModel):
     question: str
-    options: dict[str, str]
-    answer: Literal["A", "B", "C", "D"]
+
+
+class ValidateAnswerRequest(BaseModel):
+    question: str
+    student_answer: str
+    raw_text: str
+
+
+class ValidateAnswerResponse(BaseModel):
+    is_correct: bool
     explanation: str

@@ -9,12 +9,20 @@ interface FileData {
     page_count: number
 }
 
+export interface UserDetails {
+    name: string
+    age: string
+    status: string
+    educationLevel: string
+}
+
 interface CanvasState {
     nodes: Node[]
     edges: Edge[]
     fileData: FileData | null
     highlights: HighlightEntry[]
     activeAbortController: AbortController | null
+    userDetails: UserDetails
 }
 
 interface CanvasActions {
@@ -26,6 +34,7 @@ interface CanvasActions {
     setActiveAbortController: (controller: AbortController | null) => void
     resetCanvas: () => void
     persistToLocalStorage: () => void
+    setUserDetails: (details: UserDetails) => void
 }
 
 const STORAGE_KEY = 'studycanvas_state'
@@ -36,6 +45,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
     fileData: null,
     highlights: [],
     activeAbortController: null,
+    userDetails: { name: '', age: '', status: '', educationLevel: '' },
 
     setNodes: (nodes) =>
         set((state) => ({
@@ -71,16 +81,19 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
             fileData: null,
             highlights: [],
             activeAbortController: null,
+            userDetails: { name: '', age: '', status: '', educationLevel: '' },
         })
         localStorage.removeItem(STORAGE_KEY)
     },
 
     persistToLocalStorage: () => {
-        const { nodes, edges, fileData, highlights } = get()
+        const { nodes, edges, fileData, highlights, userDetails } = get()
         // Never persist activeAbortController — it is a transient runtime field
-        const state = { nodes, edges, fileData, highlights }
+        const state = { nodes, edges, fileData, highlights, userDetails }
         localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
     },
+
+    setUserDetails: (details) => set({ userDetails: details }),
 }))
 
 export { STORAGE_KEY }

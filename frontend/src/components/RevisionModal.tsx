@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import type { Node } from '@xyflow/react'
-import { generateQuiz } from '../api/studyApi'
-import type { AnswerNodeData, QuizQuestion } from '../types'
+import { generateQuiz, validateAnswer } from '../api/studyApi'
+import type { AnswerNodeData, QuizQuestion, ValidateAnswerResponse } from '../types'
 
 interface RevisionModalProps {
     nodes: Node[]
@@ -14,7 +14,9 @@ export default function RevisionModal({ nodes, rawText, onClose }: RevisionModal
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
     const [currentIndex, setCurrentIndex] = useState(0)
-    const [selected, setSelected] = useState<string | null>(null)
+    const [answerText, setAnswerText] = useState('')
+    const [validating, setValidating] = useState(false)
+    const [validationResult, setValidationResult] = useState<ValidateAnswerResponse | null>(null)
     const [score, setScore] = useState(0)
     const [showScore, setShowScore] = useState(false)
 
@@ -43,11 +45,20 @@ export default function RevisionModal({ nodes, rawText, onClose }: RevisionModal
             })
     }, [nodes, rawText])
 
-    const handleOptionSelect = (key: string) => {
-        if (selected !== null) return // already answered
-        setSelected(key)
-        if (questions && key === questions[currentIndex].answer) {
-            setScore((s) => s + 1)
+    const handleSubmit = async (e?: React.FormEvent) => {
+        if (e) e.preventDefault()
+        if (!answerText.trim() || !current || validationResult || validating) return
+
+        setValidating(true)
+        try {
+            const res = await validateAnswer(current.question, answerText, rawText)
+            setValidationResult(res)
+            if (res.is_correct) setScore((s) => s + 1)
+        } catch (err) {
+            console.error(err)
+            // Error handling fallback
+        } finally {
+            setValidating(false)
         }
     }
 
@@ -57,7 +68,8 @@ export default function RevisionModal({ nodes, rawText, onClose }: RevisionModal
             setShowScore(true)
         } else {
             setCurrentIndex((i) => i + 1)
-            setSelected(null)
+            setAnswerText('')
+            setValidationResult(null)
         }
     }
 
@@ -86,12 +98,12 @@ export default function RevisionModal({ nodes, rawText, onClose }: RevisionModal
                     <div className="text-center py-12">
                         <div className="text-6xl mb-4">🎯</div>
                         <h2 className="text-2xl font-bold text-gray-800 mb-2">
-                            You scored {score}/{questions?.length ?? 4}
+                            You scored {score}/{questions?.length ?? 0}
                         </h2>
                         <p className="text-gray-600 mb-6">
                             {score === questions?.length
                                 ? "Perfect score! You've got this! 🎉"
-                                : score >= Math.floor((questions?.length ?? 4) / 2)
+                                : score >= Math.floor((questions?.length ?? 0) / 2)
                                     ? 'Good effort! Keep reviewing the topics you missed.'
                                     : 'Keep studying — you\'ll get there!'}
                         </p>
@@ -109,7 +121,7 @@ export default function RevisionModal({ nodes, rawText, onClose }: RevisionModal
                         {/* Progress */}
                         <div className="flex items-center justify-between mb-6">
                             <span className="text-sm text-gray-500 font-medium">
-                                Question {currentIndex + 1} of {questions?.length ?? 4}
+                                Question {currentIndex + 1} of {questions?.length ?? 0}
                             </span>
                             <div className="flex gap-1">
                                 {questions?.map((_, i) => (
@@ -129,45 +141,52 @@ export default function RevisionModal({ nodes, rawText, onClose }: RevisionModal
                         {/* Question */}
                         <h3 className="text-lg font-semibold text-gray-800 mb-5">{current.question}</h3>
 
-                        {/* Options */}
-                        <div className="space-y-3 mb-6">
-                            {Object.entries(current.options).map(([key, value]) => {
-                                let cls =
-                                    'w-full text-left px-4 py-3 rounded-lg border text-sm transition-colors cursor-pointer'
-                                if (selected === null) {
-                                    cls += ' border-gray-200 hover:border-indigo-400 hover:bg-indigo-50'
-                                } else if (key === current.answer) {
-                                    cls += ' border-green-500 bg-green-50 text-green-800 font-medium'
-                                } else if (key === selected) {
-                                    cls += ' border-red-500 bg-red-50 text-red-800'
-                                } else {
-                                    cls += ' border-gray-200 text-gray-400'
-                                }
-
-                                return (
-                                    <button key={key} className={cls} onClick={() => handleOptionSelect(key)}>
-                                        <span className="font-bold mr-2">{key}.</span>
-                                        {value}
+                        {/* Text Input area */}
+                        <form onSubmit={handleSubmit} className="mb-6">
+                            <textarea
+                                value={answerText}
+                                onChange={(e) => setAnswerText(e.target.value)}
+                                disabled={validationResult !== null || validating}
+                                placeholder="Type your answer here..."
+                                className="w-full p-4 rounded-lg border border-gray-200 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400 outline-none resize-none disabled:bg-gray-50 disabled:text-gray-500"
+                                rows={4}
+                            />
+                            {!validationResult && (
+                                <div className="mt-3 flex justify-end">
+                                    <button
+                                        type="submit"
+                                        disabled={!answerText.trim() || validating}
+                                        className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors disabled:bg-indigo-300 flex flex-row items-center gap-2"
+                                    >
+                                        {validating ? (
+                                            <>
+                                                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                                Validating...
+                                            </>
+                                        ) : 'Submit Answer'}
                                     </button>
-                                )
-                            })}
-                        </div>
+                                </div>
+                            )}
+                        </form>
 
                         {/* Explanation */}
-                        {selected !== null && (
-                            <div className="mb-4 px-4 py-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
-                                <strong>Explanation:</strong> {current.explanation}
+                        {validationResult && (
+                            <div className={`mb-4 px-4 py-3 border rounded-lg text-sm ${validationResult.is_correct ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
+                                <div className="flex items-center gap-2 mb-1.5 font-bold text-base">
+                                    {validationResult.is_correct ? '✅ Correct' : '❌ Incorrect'}
+                                </div>
+                                <strong>Explanation:</strong> {validationResult.explanation}
                             </div>
                         )}
 
                         {/* Next button */}
-                        {selected !== null && (
+                        {validationResult !== null && (
                             <div className="flex justify-end">
                                 <button
                                     onClick={handleNext}
                                     className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors"
                                 >
-                                    {currentIndex >= (questions?.length ?? 4) - 1 ? 'See Score' : 'Next →'}
+                                    {currentIndex >= (questions?.length ?? 0) - 1 ? 'See Score' : 'Next →'}
                                 </button>
                             </div>
                         )}

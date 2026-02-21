@@ -1,5 +1,5 @@
 import axios from 'axios'
-import type { UploadResponse, QuizQuestion, QuizNodeInput } from '../types'
+import type { UploadResponse, QuizQuestion, QuizNodeInput, ValidateAnswerResponse } from '../types'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
 
@@ -27,6 +27,19 @@ export const generateQuiz = async (
     return response.data
 }
 
+export const validateAnswer = async (
+    question: string,
+    student_answer: string,
+    raw_text: string
+): Promise<ValidateAnswerResponse> => {
+    const response = await api.post<ValidateAnswerResponse>('/api/validate', {
+        question,
+        student_answer,
+        raw_text,
+    })
+    return response.data
+}
+
 /**
  * Stream a query response using native fetch + ReadableStream + AbortController.
  * Axios cannot stream in the browser. Returns the Response object for the caller
@@ -38,6 +51,13 @@ export const streamQuery = async (
         highlighted_text: string
         raw_text: string
         parent_response: string | null
+        chat_history?: { role: 'user' | 'model'; content: string }[]
+        user_details?: {
+            name: string
+            age: string
+            status: string
+            educationLevel: string
+        }
     },
     signal: AbortSignal
 ): Promise<Response> => {

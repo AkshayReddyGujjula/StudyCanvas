@@ -6,9 +6,32 @@
   box-sizing: border-box;
 }
 
-html, body, #root {
+html,
+body,
+#root {
   margin: 0;
   padding: 0;
   width: 100%;
   height: 100%;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+/* Override React Flow's global user-select: none and grab cursor inside node text areas */
+.react-flow__node .nodrag,
+.react-flow__node .nodrag * {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+.react-flow__node .nodrag {
+  cursor: text !important;
 }

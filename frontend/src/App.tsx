@@ -5,13 +5,6 @@ import UploadPanel from './components/UploadPanel'
 import { useCanvasStore, STORAGE_KEY } from './store/canvasStore'
 import './index.css'
 
-// Inline styles needed for Tailwind's fade-in animation not available by default
-const fadeInStyle = `
-  @keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
-  }
-`
 
 export default function App() {
   const setNodes = useCanvasStore((s) => s.setNodes)
@@ -62,20 +55,9 @@ export default function App() {
 
   return (
     <>
-      <style>{fadeInStyle}</style>
       {hasCanvas ? (
         <ReactFlowProvider>
-          {/* Upload new PDF button — always visible when canvas is shown */}
-          <div className="fixed top-4 left-4 z-40">
-            <button
-              onClick={handleReset}
-              className="flex items-center gap-2 px-3 py-2 bg-white text-gray-700 text-sm font-medium
-                         rounded-lg shadow-md border border-gray-200 hover:bg-gray-50 transition-colors"
-            >
-              ↩ Upload new PDF
-            </button>
-          </div>
-          <Canvas />
+          <Canvas onReset={handleReset} />
         </ReactFlowProvider>
       ) : (
         <UploadPanel onUploaded={handleUploaded} />

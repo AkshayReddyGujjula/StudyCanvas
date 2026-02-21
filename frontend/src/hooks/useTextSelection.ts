@@ -19,9 +19,18 @@ export function useTextSelection(onSelection: SetterFn) {
                 return
             }
 
-            // Find the nearest ancestor with data-nodeid
-            const target = event.target as Element
-            const nodeEl = target.closest('[data-nodeid]')
+            const range = selection!.getRangeAt(0)
+            let nodeEl = null
+
+            // Prefer finding the node from the selection's actual DOM nodes instead of where the mouse was released
+            if (range.commonAncestorContainer) {
+                const container = range.commonAncestorContainer
+                const element = container.nodeType === Node.ELEMENT_NODE
+                    ? (container as Element)
+                    : container.parentElement
+                nodeEl = element?.closest('[data-nodeid]')
+            }
+
             if (!nodeEl) {
                 onSelection(null)
                 return
@@ -34,7 +43,6 @@ export function useTextSelection(onSelection: SetterFn) {
             }
 
             // Get bounding rect of the selection in viewport coordinates
-            const range = selection!.getRangeAt(0)
             const rect = range.getBoundingClientRect()
 
             onSelection({ selectedText: text, sourceNodeId, rect })

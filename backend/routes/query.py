@@ -9,17 +9,17 @@ router = APIRouter()
 
 
 @router.post("/query")
-def query_stream(request: QueryRequest):
+async def query_stream(request: QueryRequest):
     """
-    Streams Gemini response as plain text using a synchronous def generator.
-    FastAPI wraps synchronous generators in iterate_in_threadpool() automatically.
-    This is critical: the google-generativeai SDK's generate_content(stream=True)
-    is blocking/synchronous — using async def would freeze the event loop.
+    Streams Gemini response as plain text using an asynchronous generator.
+    Avoids blocking the event loop.
     """
     generator = gemini_service.stream_query(
         question=request.question,
         highlighted_text=request.highlighted_text,
         raw_text=request.raw_text,
         parent_response=request.parent_response,
+        user_details=request.user_details,
+        chat_history=request.chat_history,
     )
     return StreamingResponse(generator, media_type="text/plain")

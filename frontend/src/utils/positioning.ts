@@ -152,3 +152,110 @@ export function recalculateSiblingPositions(
 
     return updatedNodes
 }
+
+/**
+ * Resolves vertical overlaps between any AnswerNodes that overlap horizontally.
+ * Pushes nodes down to maintain a minimum spacing of 40px.
+ */
+export function resolveOverlaps(nodes: Node[]): Node[] {
+    const sortedOriginal = [...nodes].sort((a, b) => a.position.y - b.position.y)
+    const updatedNodes = sortedOriginal.map(n => ({ ...n, position: { ...n.position } }))
+
+    let shifted = false
+    let iterations = 0
+    let didAnyShift = false
+
+    do {
+        shifted = false
+        iterations++
+        updatedNodes.sort((a, b) => a.position.y - b.position.y)
+
+        for (let i = 0; i < updatedNodes.length; i++) {
+            const above = updatedNodes[i]
+            if (above.type === 'contentNode') continue
+
+            const aLeft = above.position.x
+            const aWidth = typeof above.style?.width === 'number' ? above.style.width : (above.measured?.width ?? 360)
+            const aRight = aLeft + (aWidth as number)
+            const aBottom = above.position.y + (above.measured?.height ?? 200)
+
+            for (let j = i + 1; j < updatedNodes.length; j++) {
+                const below = updatedNodes[j]
+                if (below.type === 'contentNode') continue
+
+                const bLeft = below.position.x
+                const bWidth = typeof below.style?.width === 'number' ? below.style.width : (below.measured?.width ?? 360)
+                const bRight = bLeft + (bWidth as number)
+                const bTop = below.position.y
+
+                const overlapX = aLeft < bRight && aRight > bLeft
+
+                if (overlapX && bTop < aBottom + 40) {
+                    below.position.y = aBottom + 40
+                    shifted = true
+                    didAnyShift = true
+                }
+            }
+        }
+    } while (shifted && iterations < 100)
+
+    if (!didAnyShift) return nodes
+
+    return nodes.map(n => {
+        const updated = updatedNodes.find(u => u.id === n.id)
+        if (updated && updated.position.y !== n.position.y) {
+            return { ...n, position: { ...updated.position } }
+        }
+        return n
+    })
+}
+
+/**
+ * Checks if a proposed position for a node overlaps with any other nodes.
+ * Used during drag to prevent overlapping.
+ */
+export function isOverlapping(
+    nodeId: string,
+    proposedPosition: { x: number, y: number },
+    nodes: Node[]
+): boolean {
+    const targetNode = nodes.find(n => n.id === nodeId)
+    if (!targetNode) return false
+
+    const aLeft = proposedPosition.x
+    const aWidth = typeof targetNode.style?.width === 'number'
+        ? targetNode.style.width
+        : (targetNode.measured?.width ?? 360)
+    const aRight = aLeft + (aWidth as number)
+
+    const aTop = proposedPosition.y
+    const aHeight = targetNode.measured?.height ?? 200
+    const aBottom = aTop + aHeight
+
+    // Minimum spacing
+    const padding = 20
+
+    for (const other of nodes) {
+        if (other.id === nodeId) continue
+
+        const bLeft = other.position.x
+        const bWidth = typeof other.style?.width === 'number'
+            ? other.style.width
+            : (other.measured?.width ?? 360)
+        const bRight = bLeft + (bWidth as number)
+
+        const bTop = other.position.y
+        const bHeight = other.measured?.height ?? 200
+        const bBottom = bTop + bHeight
+
+        // Check intersection with padding
+        const overlapX = aLeft < bRight + padding && aRight + padding > bLeft
+        const overlapY = aTop < bBottom + padding && aBottom + padding > bTop
+
+        if (overlapX && overlapY) {
+            return true
+        }
+    }
+
+    return false
+}

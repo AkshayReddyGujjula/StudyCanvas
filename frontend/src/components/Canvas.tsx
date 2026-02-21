@@ -15,10 +15,11 @@ import AnswerNode from './AnswerNode'
 import AskGeminiPopup from './AskGeminiPopup'
 import QuestionModal from './QuestionModal'
 import RevisionModal from './RevisionModal'
+import ToolsModal from './ToolsModal'
 import { useTextSelection } from '../hooks/useTextSelection'
 import { useCanvasStore } from '../store/canvasStore'
 import { streamQuery } from '../api/studyApi'
-import { getNewNodePosition, recalculateSiblingPositions } from '../utils/positioning'
+import { getNewNodePosition, recalculateSiblingPositions, resolveOverlaps, isOverlapping } from '../utils/positioning'
 import type { AnswerNodeData } from '../types'
 
 const NODE_TYPES = {
@@ -47,17 +48,20 @@ interface ModalState {
 
 let toastTimeout: ReturnType<typeof setTimeout> | null = null
 
-export default function Canvas() {
+export default function Canvas({ onReset }: { onReset?: () => void }) {
     const { setCenter, getZoom, fitView } = useReactFlow()
     const [selection, setSelection] = useState<SelectionState | null>(null)
     const [modal, setModal] = useState<ModalState | null>(null)
     const [showRevision, setShowRevision] = useState(false)
+    const [showMenu, setShowMenu] = useState(false)
+    const [showTools, setShowTools] = useState(false)
     const [toast, setToast] = useState<string | null>(null)
     const streamingNodesRef = useRef<Set<string>>(new Set())
 
     const nodes = useCanvasStore((s) => s.nodes)
     const edges = useCanvasStore((s) => s.edges)
     const fileData = useCanvasStore((s) => s.fileData)
+    const userDetails = useCanvasStore((s) => s.userDetails)
     const setNodes = useCanvasStore((s) => s.setNodes)
     const setEdges = useCanvasStore((s) => s.setEdges)
     const addHighlight = useCanvasStore((s) => s.addHighlight)
@@ -161,7 +165,6 @@ export default function Canvas() {
             }
 
             // Create the edge
-            const edgeLabel = question.length > 35 ? question.slice(0, 35) + '...' : question
             const newEdge = {
                 id: `edge-${sourceNodeId}-${preGeneratedNodeId}`,
                 source: sourceNodeId,
@@ -171,13 +174,6 @@ export default function Canvas() {
                 type: 'smoothstep',
                 animated: true,
                 style: { strokeDasharray: '5,5', stroke: '#6366f1', strokeWidth: 2 },
-                label: edgeLabel,
-                labelStyle: {
-                    background: 'white',
-                    padding: '0 4px',
-                    borderRadius: '4px',
-                    fontSize: '11px',
-                },
             }
 
             setNodes((prev) => [...prev, newNode])
@@ -205,6 +201,7 @@ export default function Canvas() {
                         highlighted_text: selectedText,
                         raw_text: fileData.raw_text,
                         parent_response: parentResponse,
+                        user_details: userDetails,
                     },
                     controller.signal
                 )
@@ -264,6 +261,7 @@ export default function Canvas() {
         [
             modal,
             fileData,
+            userDetails,
             nodes,
             contentNodeId,
             addHighlight,
@@ -312,17 +310,46 @@ export default function Canvas() {
                 onNodesChange={(changes) => {
                     // Apply position/selection changes without overriding our state
                     setNodes((prev) => {
-                        const next = [...prev]
+                        let next = [...prev]
+                        let dimensionsChanged = false
                         for (const change of changes) {
                             if (change.type === 'position' && change.position) {
                                 const idx = next.findIndex((n) => n.id === change.id)
-                                if (idx !== -1) next[idx] = { ...next[idx], position: change.position }
+                                if (idx !== -1) {
+                                    // Check if the proposed position overlaps with any existing nodes
+                                    if (!isOverlapping(change.id, change.position, prev)) {
+                                        next[idx] = { ...next[idx], position: change.position }
+                                    }
+                                }
                             }
                             if (change.type === 'dimensions' && change.dimensions) {
                                 const idx = next.findIndex((n) => n.id === change.id)
-                                if (idx !== -1) next[idx] = { ...next[idx], measured: change.dimensions }
+                                if (idx !== -1) {
+                                    next[idx] = { ...next[idx], measured: change.dimensions }
+                                    dimensionsChanged = true
+                                }
                             }
                         }
+
+                        if (dimensionsChanged) {
+                            const expandingIds = next
+                                .filter((n) => (n.data as unknown as AnswerNodeData)?.isExpanding)
+                                .map((n) => n.id)
+
+                            if (expandingIds.length > 0) {
+                                next = resolveOverlaps(next)
+                                next = next.map((n) => {
+                                    if (expandingIds.includes(n.id)) {
+                                        return {
+                                            ...n,
+                                            data: { ...n.data, isExpanding: false } as unknown as Record<string, unknown>
+                                        }
+                                    }
+                                    return n
+                                })
+                            }
+                        }
+
                         return next
                     })
                 }}
@@ -365,14 +392,44 @@ export default function Canvas() {
                 />
             )}
 
-            {/* Revision mode button */}
-            <button
-                onClick={handleRevisionMode}
-                className="fixed top-4 right-4 z-40 flex items-center gap-2 px-4 py-2 bg-white text-gray-700 text-sm font-medium
-                   rounded-lg shadow-md border border-gray-200 hover:bg-gray-50 transition-colors"
-            >
-                📝 Revision Mode
-            </button>
+            {/* Tools modal */}
+            {showTools && (
+                <ToolsModal onClose={() => setShowTools(false)} />
+            )}
+
+            {/* Top Left Menu */}
+            <div className="fixed top-4 left-4 z-40">
+                <button
+                    onClick={() => setShowMenu(!showMenu)}
+                    className="flex items-center gap-2 px-4 py-2 bg-white text-gray-700 text-sm font-medium rounded-lg shadow-md border border-gray-200 hover:bg-gray-50 transition-colors"
+                >
+                    ☰ Menu
+                </button>
+                {showMenu && (
+                    <div className="absolute top-full left-0 mt-2 flex flex-col gap-1 w-48 bg-white border border-gray-200 shadow-lg rounded-lg p-2">
+                        {onReset && (
+                            <button
+                                onClick={() => { setShowMenu(false); onReset(); }}
+                                className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors"
+                            >
+                                ↩ Upload new PDF
+                            </button>
+                        )}
+                        <button
+                            onClick={() => { setShowMenu(false); handleRevisionMode(); }}
+                            className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors"
+                        >
+                            📝 Revision Mode
+                        </button>
+                        <button
+                            onClick={() => { setShowMenu(false); setShowTools(true); }}
+                            className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors"
+                        >
+                            ⚙️ Tools (Context)
+                        </button>
+                    </div>
+                )}
+            </div>
 
             {/* Toast notification */}
             {toast && (

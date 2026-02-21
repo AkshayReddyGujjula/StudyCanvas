@@ -12,6 +12,11 @@ export interface ContentNodeData {
     page_count: number
 }
 
+export interface ChatMessage {
+    role: "user" | "model"
+    content: string
+}
+
 export interface AnswerNodeData {
     question: string
     highlighted_text: string
@@ -20,6 +25,9 @@ export interface AnswerNodeData {
     isStreaming: boolean
     status: NodeStatus
     parentResponseText?: string
+    isMinimized?: boolean
+    isExpanding?: boolean
+    chatHistory?: ChatMessage[]
 }
 
 export interface UploadResponse {
@@ -31,8 +39,10 @@ export interface UploadResponse {
 
 export interface QuizQuestion {
     question: string
-    options: Record<string, string>
-    answer: "A" | "B" | "C" | "D"
+}
+
+export interface ValidateAnswerResponse {
+    is_correct: boolean
     explanation: string
 }
 

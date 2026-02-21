@@ -65,17 +65,24 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
     const processedMarkdown = useMemo(() => {
         let content = data.markdown_content
 
-        // Step 1: identify code block ranges to protect
-        const codeBlockRanges = getCodeBlockRanges(content)
-
-        // Step 2: sort highlights longest-first to avoid partial matches
+        // Sort highlights longest-first to avoid partial matches
         const sortedHighlights = [...highlights].sort((a, b) => b.text.length - a.text.length)
 
-        // Step 3: replace only occurrences outside code block ranges
         for (const highlight of sortedHighlights) {
+            // Recompute protected ranges on every pass so already-injected <mark> tags
+            // and code blocks cannot be corrupted by subsequent replacements.
+            const codeBlockRanges = getCodeBlockRanges(content)
+            const markTagRanges: Array<{ start: number; end: number }> = []
+            const markTagRegex = /<mark[\s\S]*?<\/mark>/g
+            let m: RegExpExecArray | null
+            while ((m = markTagRegex.exec(content)) !== null) {
+                markTagRanges.push({ start: m.index, end: m.index + m[0].length })
+            }
+            const protectedRanges = [...codeBlockRanges, ...markTagRanges]
+
             const escaped = highlight.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
             const regex = new RegExp(escaped, 'g')
-            content = replaceOutsideCodeBlocks(content, regex, highlight, codeBlockRanges)
+            content = replaceOutsideCodeBlocks(content, regex, highlight, protectedRanges)
         }
 
         return content
@@ -124,8 +131,9 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
             {/* Scrollable Markdown content — nodrag and nopan prevent canvas interaction */}
             <div
                 className="nodrag nopan overflow-y-auto"
-                style={{ maxHeight: '80vh' }}
+                style={{ maxHeight: '80vh', cursor: 'text', userSelect: 'text' }}
                 onClick={handleMarkdownClick}
+                onWheelCapture={(e) => e.stopPropagation()}
             >
                 <div className="prose prose-base max-w-none p-4">
                     <ReactMarkdown
