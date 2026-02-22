@@ -89,4 +89,8 @@ export interface QuizQuestionNodeData {
     chatHistory?: ChatMessage[]
     /** If true, appears on all pages */
     isPinned?: boolean
+    /** Self-assessment status: 'understood' | 'struggling' | 'unread' */
+    status?: NodeStatus
+    /** If true, only the question header is shown */
+    isMinimized?: boolean
 }

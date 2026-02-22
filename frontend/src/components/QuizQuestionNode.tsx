@@ -5,7 +5,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeRaw from 'rehype-raw'
 import rehypeSanitize, { defaultSchema, type Options as SanitizeOptions } from 'rehype-sanitize'
-import type { QuizQuestionNodeData, ChatMessage } from '../types'
+import type { QuizQuestionNodeData, ChatMessage, NodeStatus } from '../types'
 import { useCanvasStore } from '../store/canvasStore'
 import { streamQuery } from '../api/studyApi'
 
@@ -44,6 +44,22 @@ export default function QuizQuestionNode({ id, data }: QuizQuestionNodeProps) {
         setEdges((prev) => prev.filter((e) => e.source !== id && e.target !== id))
         persistToLocalStorage()
     }, [confirmDelete, id, setNodes, setEdges, persistToLocalStorage])
+
+    const handleStatusClick = useCallback((clickedStatus: 'understood' | 'struggling') => {
+        const newStatus: NodeStatus = data.status === clickedStatus ? 'unread' : clickedStatus
+        updateQuizNodeData(id, { status: newStatus })
+        persistToLocalStorage()
+    }, [data.status, id, updateQuizNodeData, persistToLocalStorage])
+
+    const handleMinimize = useCallback(() => {
+        updateQuizNodeData(id, { isMinimized: !data.isMinimized })
+        persistToLocalStorage()
+    }, [data.isMinimized, id, updateQuizNodeData, persistToLocalStorage])
+
+    const handlePin = useCallback(() => {
+        updateQuizNodeData(id, { isPinned: !data.isPinned })
+        persistToLocalStorage()
+    }, [data.isPinned, id, updateQuizNodeData, persistToLocalStorage])
 
     const handleSubmitAnswer = useCallback(async (e: React.FormEvent) => {
         e.preventDefault()
@@ -132,14 +148,18 @@ export default function QuizQuestionNode({ id, data }: QuizQuestionNodeProps) {
 
     const fs = feedbackStyles[verdict ?? 'fallback']
 
+    const borderClass = data.status === 'understood' ? 'border-green-500'
+        : data.status === 'struggling' ? 'border-red-500'
+        : 'border-violet-500'
+
     return (
         <div
             data-nodeid={id}
-            className="bg-white rounded-xl shadow-lg border-t-4 border-violet-500 border border-gray-200 flex flex-col"
-            style={{ width: 360, height: 420 }}
+            className={`bg-white rounded-xl shadow-lg border-t-4 ${borderClass} border border-gray-200 flex flex-col`}
+            style={{ width: 360, ...(data.isMinimized ? {} : { height: 420 }) }}
         >
-            {/* Header — fixed */}
-            <div className="flex-shrink-0 px-3 py-2 bg-violet-50 border-b border-violet-100 flex items-center justify-between rounded-t-xl">
+            {/* Header — violet top bar */}
+            <div className="flex-shrink-0 px-3 py-2 bg-violet-50 border-b border-violet-100 flex items-center rounded-t-xl">
                 <div className="flex items-center gap-2">
                     <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-violet-600 text-white text-[10px] font-bold flex-shrink-0">
                         {data.questionNumber}
@@ -148,45 +168,113 @@ export default function QuizQuestionNode({ id, data }: QuizQuestionNodeProps) {
                         Page Quiz
                     </span>
                 </div>
-                {/* Delete button */}
-                {confirmDelete ? (
-                    <div className="flex items-center gap-1" onMouseLeave={() => setConfirmDelete(false)}>
-                        <span className="text-[10px] text-red-600 font-semibold whitespace-nowrap">Delete?</span>
-                        <button
-                            onClick={handleDelete}
-                            className="p-1 text-white bg-red-500 hover:bg-red-600 rounded-md transition-colors"
-                        >
-                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                            </svg>
-                        </button>
-                        <button
-                            onClick={() => setConfirmDelete(false)}
-                            className="p-1 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-200/50 transition-colors"
-                        >
-                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                        </button>
-                    </div>
-                ) : (
-                    <button
-                        onClick={handleDelete}
-                        className="p-1 text-gray-400 hover:text-red-500 rounded-md hover:bg-red-50 transition-colors"
-                    >
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                    </button>
-                )}
             </div>
 
-            {/* Scrollable body */}
-            <div className="flex-1 overflow-y-auto nodrag nopan" onWheelCapture={(e) => e.stopPropagation()}>
-                {/* Question */}
-                <div className="px-3 pt-3 pb-2" style={{ userSelect: 'text', cursor: 'text' }}>
-                    <p className="text-sm font-semibold text-gray-800 leading-snug">{data.question}</p>
+            {/* Action bar */}
+            <div className="flex-shrink-0 px-2 py-1.5 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
+                <div className="flex gap-1.5">
+                    <button
+                        onClick={() => handleStatusClick('understood')}
+                        className={`px-3 py-1 rounded-full text-[10px] font-bold transition-all border ${
+                            data.status === 'understood'
+                                ? 'bg-green-500 text-white border-green-500 shadow-sm'
+                                : 'bg-white text-gray-500 border-gray-200 hover:border-green-300 hover:text-green-600'
+                        }`}
+                    >
+                        got it
+                    </button>
+                    <button
+                        onClick={() => handleStatusClick('struggling')}
+                        className={`px-3 py-1 rounded-full text-[10px] font-bold transition-all border ${
+                            data.status === 'struggling'
+                                ? 'bg-red-500 text-white border-red-500 shadow-sm'
+                                : 'bg-white text-gray-500 border-gray-200 hover:border-red-300 hover:text-red-600'
+                        }`}
+                    >
+                        struggling
+                    </button>
                 </div>
+
+                <div className="flex items-center gap-0.5">
+                    {/* Delete — two-step confirm */}
+                    {confirmDelete ? (
+                        <div className="flex items-center gap-1" onMouseLeave={() => setConfirmDelete(false)}>
+                            <span className="text-[10px] text-red-600 font-semibold whitespace-nowrap">Delete?</span>
+                            <button
+                                title="Confirm delete"
+                                onClick={handleDelete}
+                                className="p-1 text-white bg-red-500 hover:bg-red-600 rounded-md transition-colors"
+                            >
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                            </button>
+                            <button
+                                title="Cancel"
+                                onClick={() => setConfirmDelete(false)}
+                                className="p-1 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-200/50 transition-colors"
+                            >
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+                    ) : (
+                        <button
+                            title="Delete node"
+                            onClick={handleDelete}
+                            className="p-1 text-gray-400 hover:text-red-500 rounded-md hover:bg-red-50 transition-colors"
+                        >
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                        </button>
+                    )}
+
+                    {/* Minimise */}
+                    <button
+                        title={data.isMinimized ? 'Expand' : 'Minimise'}
+                        onClick={handleMinimize}
+                        className="p-1 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-200/50 transition-colors"
+                    >
+                        {data.isMinimized ? (
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+                            </svg>
+                        ) : (
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7" />
+                            </svg>
+                        )}
+                    </button>
+
+                    {/* Pin */}
+                    <button
+                        title={data.isPinned ? 'Unpin from all pages' : 'Pin to all pages'}
+                        onClick={handlePin}
+                        className={`p-1 rounded-md transition-colors ${
+                            data.isPinned
+                                ? 'text-indigo-600 bg-indigo-50 hover:bg-indigo-100'
+                                : 'text-gray-400 hover:text-indigo-500 hover:bg-indigo-50'
+                        }`}
+                    >
+                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill={data.isPinned ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M15 4.5l-4 4L7 10l-1.5 1.5 7 7 1.5-1.5 1.5-4 4-4L15 4.5z" />
+                            <path d="M9 15l-4.5 4.5" />
+                            <path d="M14.5 9l1 1" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            {/* Question — always visible */}
+            <div className="flex-shrink-0 px-3 pt-3 pb-2" style={{ userSelect: 'text', cursor: 'text' }}>
+                <p className="text-sm font-semibold text-gray-800 leading-snug">{data.question}</p>
+            </div>
+
+            {/* Scrollable body — hidden when minimised */}
+            {!data.isMinimized && (
+            <div className="flex-1 overflow-y-auto nodrag nopan" onWheelCapture={(e) => e.stopPropagation()}>
 
                 {/* Answer area */}
                 {!submitted ? (
@@ -272,9 +360,10 @@ export default function QuizQuestionNode({ id, data }: QuizQuestionNodeProps) {
                     </div>
                 )}
             </div>
+            )}
 
-            {/* Follow-up input — fixed at bottom, only after feedback */}
-            {submitted && data.feedback && !data.isGrading && (
+            {/* Follow-up input — fixed at bottom, only after feedback and not minimised */}
+            {!data.isMinimized && submitted && data.feedback && !data.isGrading && (
                 <form
                     onSubmit={handleFollowUpSubmit}
                     className="flex-shrink-0 flex gap-2 items-center px-3 py-2 border-t border-gray-100 bg-white rounded-b-xl"
