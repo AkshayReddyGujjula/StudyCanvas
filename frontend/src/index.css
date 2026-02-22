@@ -36,6 +36,16 @@ body,
   cursor: text !important;
 }
 
+/* While a connection is being dragged from a handle, kill text selection everywhere.
+   This class is toggled on <body> by onConnectStart / onConnectEnd.
+   Higher specificity than .react-flow__node .nodrag * so it wins the !important fight. */
+body.rf-connecting .react-flow__node .nodrag,
+body.rf-connecting .react-flow__node .nodrag * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  cursor: crosshair !important;
+}
+
 /* ────────────────────────────────────────────────
    DARK MODE  –  white ↔ black only, colours kept
    ──────────────────────────────────────────────── */

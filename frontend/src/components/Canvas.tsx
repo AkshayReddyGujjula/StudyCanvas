@@ -340,6 +340,15 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
         return () => document.removeEventListener('keydown', handleKeyDown)
     }, [fitView])
 
+    // Safety net: always remove rf-connecting on mouseup so stale text-selection
+    // suppression can't get stuck if onConnectEnd doesn't fire (e.g. drag released
+    // outside the window or over an invalid target).
+    useEffect(() => {
+        const cleanup = () => document.body.classList.remove('rf-connecting')
+        document.addEventListener('mouseup', cleanup)
+        return () => document.removeEventListener('mouseup', cleanup)
+    }, [])
+
     // Show toast helper
     const showToast = useCallback((msg: string) => {
         setToast(msg)
@@ -867,6 +876,8 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
                     }
                 }}
                 onConnect={onConnect}
+                onConnectStart={() => document.body.classList.add('rf-connecting')}
+                onConnectEnd={() => document.body.classList.remove('rf-connecting')}
                 connectionMode={ConnectionMode.Loose}
                 connectionLineType={ConnectionLineType.SmoothStep}
                 connectionLineStyle={{ stroke: '#6366f1', strokeWidth: 2 }}
