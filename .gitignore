@@ -1,10 +1,11 @@
-# Environment variables
+# ─── Environment Variables ────────────────────────────────────────────────────
 **/.env
+.env
 .env.local
 .env.*.local
-backend/.env
+*.local
 
-# Node / Frontend
+# ─── Node / Frontend ──────────────────────────────────────────────────────────
 node_modules/
 dist/
 dist-ssr/
@@ -13,18 +14,18 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+lerna-debug.log*
 .npm/
 
-# Python / Backend
+# ─── Python / Backend ─────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
+*.pyd
 .Python
-env/
 build/
 develop-eggs/
-dist/
 downloads/
 eggs/
 .eggs/
@@ -38,10 +39,12 @@ wheels/
 .installed.cfg
 *.egg
 venv/
+env/
 ENV/
 .venv/
+.python-version
 
-# Testing & coverage
+# ─── Testing & Coverage ───────────────────────────────────────────────────────
 .pytest_cache/
 .coverage
 .coverage.*
@@ -50,31 +53,41 @@ htmlcov/
 nosetests.xml
 coverage.xml
 *.cover
+junit.xml
 
-# Type checking / linting caches
+# ─── Type Checking / Linting ──────────────────────────────────────────────────
 .mypy_cache/
 .dmypy.json
 dmypy.json
 .ruff_cache/
 .pytype/
 
-# Database
+# ─── Database ─────────────────────────────────────────────────────────────────
 *.sqlite3
 *.db
 
-# Uploaded / temporary files
+# ─── Uploaded / Temporary Files ───────────────────────────────────────────────
 uploads/
 tmp/
 temp/
+*.pdf
 
-# OS Files
+# ─── Security ─────────────────────────────────────────────────────────────────
+*.pem
+*.key
+*.cert
+*.crt
+
+# ─── OS Files ─────────────────────────────────────────────────────────────────
 .DS_Store
+.DS_Store?
+._*
 Thumbs.db
 ehthumbs.db
 Desktop.ini
 $RECYCLE.BIN/
 
-# IDEs
+# ─── IDEs & Editors ───────────────────────────────────────────────────────────
 .vscode/
 .idea/
 *.swp
@@ -83,3 +96,7 @@ $RECYCLE.BIN/
 *.user
 .project
 .classpath
+
+# ─── Build Outputs ────────────────────────────────────────────────────────────
+*.tsbuildinfo
+frontend/dist/

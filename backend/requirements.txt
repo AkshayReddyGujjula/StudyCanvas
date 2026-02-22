@@ -1,6 +1,7 @@
 # Web framework & server
 fastapi
 uvicorn[standard]
+pydantic
 
 # PDF extraction
 pymupdf4llm        # also installs PyMuPDF (fitz)
