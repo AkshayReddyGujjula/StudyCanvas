@@ -79,6 +79,20 @@ export const gradeAnswer = async (
 }
 
 /**
+ * Generate flash cards from struggling nodes.
+ */
+export const generateFlashcards = async (
+    struggling_nodes: QuizNodeInput[],
+    raw_text: string
+): Promise<{ question: string; answer: string }[]> => {
+    const response = await api.post<{ question: string; answer: string }[]>('/api/flashcards', {
+        struggling_nodes,
+        raw_text,
+    })
+    return response.data
+}
+
+/**
  * Stream a query response using native fetch + ReadableStream + AbortController.
  * Axios cannot stream in the browser. Returns the Response object for the caller
  * to read the stream via response.body.getReader().

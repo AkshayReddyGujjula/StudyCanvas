@@ -64,3 +64,13 @@ class ValidateAnswerResponse(BaseModel):
     status: Literal["correct", "incorrect", "partial"]
     explanation: str
 
+
+class FlashcardsRequest(BaseModel):
+    struggling_nodes: list[QuizNode]
+    raw_text: str
+
+
+class Flashcard(BaseModel):
+    question: str
+    answer: str
+

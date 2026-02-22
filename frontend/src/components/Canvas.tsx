@@ -13,15 +13,16 @@ import '@xyflow/react/dist/style.css'
 import ContentNode from './ContentNode'
 import AnswerNode from './AnswerNode'
 import QuizQuestionNode from './QuizQuestionNode'
+import FlashcardNode from './FlashcardNode'
 import AskGeminiPopup from './AskGeminiPopup'
 import QuestionModal from './QuestionModal'
 import RevisionModal from './RevisionModal'
 import ToolsModal from './ToolsModal'
 import { useTextSelection } from '../hooks/useTextSelection'
 import { useCanvasStore } from '../store/canvasStore'
-import { streamQuery, generateTitle, generatePageQuiz, gradeAnswer } from '../api/studyApi'
+import { streamQuery, generateTitle, generatePageQuiz, gradeAnswer, generateFlashcards } from '../api/studyApi'
 import { getNewNodePosition, recalculateSiblingPositions, resolveOverlaps, isOverlapping, rerouteEdgeHandles, getQuizNodePositions } from '../utils/positioning'
-import type { AnswerNodeData, QuizQuestionNodeData } from '../types'
+import type { AnswerNodeData, QuizQuestionNodeData, FlashcardNodeData } from '../types'
 import { pdf } from '@react-pdf/renderer'
 import { buildQATree } from '../utils/buildQATree'
 import StudyNotePDF from './StudyNotePDF'
@@ -30,6 +31,7 @@ const NODE_TYPES = {
     contentNode: ContentNode,
     answerNode: AnswerNode,
     quizQuestionNode: QuizQuestionNode,
+    flashcardNode: FlashcardNode,
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -61,6 +63,8 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
     const [modal, setModal] = useState<ModalState | null>(null)
     const [showRevision, setShowRevision] = useState(false)
     const [showMenu, setShowMenu] = useState(false)
+    const [showRevisionMenu, setShowRevisionMenu] = useState(false)
+    const [isGeneratingFlashcards, setIsGeneratingFlashcards] = useState(false)
     const [showTools, setShowTools] = useState(false)
     const [toast, setToast] = useState<string | null>(null)
     const [isGeneratingPDF, setIsGeneratingPDF] = useState(false)
@@ -212,6 +216,10 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
                 if (n.type === 'contentNode') return true
                 if (n.type === 'quizQuestionNode') {
                     const d = n.data as unknown as QuizQuestionNodeData
+                    return d.isPinned === true || d.pageIndex === currentPage
+                }
+                if (n.type === 'flashcardNode') {
+                    const d = n.data as unknown as FlashcardNodeData
                     return d.isPinned === true || d.pageIndex === currentPage
                 }
                 const d = n.data as unknown as AnswerNodeData
@@ -582,6 +590,7 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
 
     // Revision mode
     const handleRevisionMode = useCallback(() => {
+        setShowRevisionMenu(false)
         const strugglingNodes = nodes.filter(
             (n) => n.type === 'answerNode' && (n.data as unknown as AnswerNodeData).status === 'struggling'
         )
@@ -592,9 +601,114 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
         setShowRevision(true)
     }, [nodes, showToast])
 
+    // Create flashcards from struggling nodes
+    const handleCreateFlashCards = useCallback(async () => {
+        setShowRevisionMenu(false)
+        if (!fileData) return
+        const strugglingNodes = nodes.filter(
+            (n) => n.type === 'answerNode' && (n.data as unknown as AnswerNodeData).status === 'struggling'
+        )
+        if (strugglingNodes.length === 0) {
+            showToast("Mark some nodes as 'Struggling' first to create flashcards.")
+            return
+        }
+
+        setIsGeneratingFlashcards(true)
+        showToast('✨ Generating flashcards from your struggling topics…')
+
+        const payload = strugglingNodes.map((n) => {
+            const d = n.data as unknown as AnswerNodeData
+            return { highlighted_text: d.highlighted_text, question: d.question, answer: d.answer }
+        })
+
+        let cards: { question: string; answer: string }[]
+        try {
+            cards = await generateFlashcards(payload, fileData.raw_text)
+        } catch (err) {
+            console.error('Flashcard generation error:', err)
+            showToast('Failed to generate flashcards. Please try again.')
+            setIsGeneratingFlashcards(false)
+            return
+        }
+
+        if (!cards.length) {
+            showToast('No flashcards were generated — try again.')
+            setIsGeneratingFlashcards(false)
+            return
+        }
+
+        // Find the lowest Y position of all visible nodes to place cards below
+        const currentVisibleNodes = nodes.filter((n) => {
+            if (n.type === 'contentNode') return true
+            const d = n.data as unknown as AnswerNodeData
+            return d.isPinned === true || d.pageIndex === currentPage
+        })
+        const maxY = currentVisibleNodes.reduce((max, n) => {
+            const h = n.measured?.height ?? 200
+            return Math.max(max, n.position.y + h)
+        }, 0)
+        const startY = maxY + 80
+
+        // Find horizontal center from contentNode
+        const cNode = nodes.find((n) => n.type === 'contentNode')
+        const centerX = cNode ? cNode.position.x + 350 : 400
+        const cardWidth = 380
+        const gap = 40
+        const totalWidth = cards.length * cardWidth + (cards.length - 1) * gap
+        const startX = centerX - totalWidth / 2
+
+        const cardNodeIds: string[] = []
+        const flashcardNodes: Node[] = cards.map((card, i) => {
+            const nodeId = `flashcard-${currentPage}-${Date.now()}-${i}`
+            cardNodeIds.push(nodeId)
+            return {
+                id: nodeId,
+                type: 'flashcardNode',
+                position: { x: startX + i * (cardWidth + gap), y: startY },
+                data: {
+                    question: card.question,
+                    answer: card.answer,
+                    isFlipped: false,
+                    status: 'unread',
+                    isMinimized: false,
+                    isPinned: false,
+                    pageIndex: currentPage,
+                    isLoading: false,
+                } as unknown as Record<string, unknown>,
+                style: { width: cardWidth },
+            }
+        })
+
+        // Chain edges between consecutive flashcards (no edge to contentNode)
+        const chainEdges = cardNodeIds
+            .slice(0, -1)
+            .map((srcId, i) => ({
+                id: `edge-fc-${currentPage}-${i}-${i + 1}-${Date.now()}`,
+                source: srcId,
+                target: cardNodeIds[i + 1],
+                sourceHandle: 'right',
+                targetHandle: 'left',
+                type: 'smoothstep',
+                animated: true,
+                style: { stroke: '#0d9488', strokeWidth: 2 },
+            }))
+
+        setNodes((prev) => [...prev, ...flashcardNodes])
+        setEdges((prev) => [...prev, ...chainEdges])
+        persistToLocalStorage()
+        setIsGeneratingFlashcards(false)
+
+        if (flashcardNodes.length > 0) {
+            const mid = flashcardNodes[Math.floor(flashcardNodes.length / 2)]
+            setCenter(mid.position.x + cardWidth / 2, mid.position.y + 100, { zoom: getZoom(), duration: 700 })
+        }
+        showToast(`🃏 ${cards.length} flashcards created!`)
+    }, [nodes, fileData, currentPage, setNodes, setEdges, persistToLocalStorage, setCenter, getZoom, showToast])
+
     // Download Q&A as a PDF
     const handleDownloadPDF = useCallback(async () => {
         setShowMenu(false)
+        setShowRevisionMenu(false)
         const { qaTree, pageQuizzes } = buildQATree(nodes, edges)
         if (qaTree.length === 0 && pageQuizzes.length === 0) {
             showToast('No questions yet — ask Gemini something first!')
@@ -766,7 +880,7 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
             {/* Top Left Menu */}
             <div className="fixed top-4 left-4 z-40">
                 <button
-                    onClick={() => setShowMenu(!showMenu)}
+                    onClick={() => { setShowMenu(!showMenu); setShowRevisionMenu(false) }}
                     className="flex items-center gap-2 px-4 py-2 bg-white text-gray-700 text-sm font-medium rounded-lg shadow-md border border-gray-200 hover:bg-gray-50 transition-colors"
                 >
                     ☰ Menu
@@ -782,16 +896,37 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
                             </button>
                         )}
                         <button
-                            onClick={() => { setShowMenu(false); handleRevisionMode(); }}
-                            className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors"
-                        >
-                            📝 Revision Mode
-                        </button>
-                        <button
                             onClick={() => { setShowMenu(false); setShowTools(true); }}
                             className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors"
                         >
                             ⚙️ Tools (Context)
+                        </button>
+                    </div>
+                )}
+            </div>
+
+            {/* Top Right — Revision Menu */}
+            <div className="fixed top-4 right-4 z-40">
+                <button
+                    onClick={() => { setShowRevisionMenu(!showRevisionMenu); setShowMenu(false) }}
+                    className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white text-sm font-medium rounded-lg shadow-md hover:bg-teal-700 transition-colors"
+                >
+                    🔄 Revision
+                </button>
+                {showRevisionMenu && (
+                    <div className="absolute top-full right-0 mt-2 flex flex-col gap-1 w-56 bg-white border border-gray-200 shadow-lg rounded-lg p-2">
+                        <button
+                            onClick={() => handleRevisionMode()}
+                            className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors"
+                        >
+                            📝 Revision Mode (Quiz)
+                        </button>
+                        <button
+                            onClick={handleCreateFlashCards}
+                            disabled={isGeneratingFlashcards}
+                            className="text-left px-3 py-2 hover:bg-teal-50 rounded-md text-sm text-teal-700 font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                            {isGeneratingFlashcards ? '⏳ Generating flashcards…' : '🃏 Create Flash Cards'}
                         </button>
                         <div style={{ height: 1, backgroundColor: '#e5e7eb', margin: '4px 6px' }} />
                         <button

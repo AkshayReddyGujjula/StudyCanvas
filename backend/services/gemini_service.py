@@ -282,6 +282,56 @@ async def generate_quiz(struggling_nodes: list, raw_text: str) -> list[dict]:
     return json.loads(response.text)
 
 
+async def generate_flashcards(struggling_nodes: list, raw_text: str) -> list[dict]:
+    """
+    Generates one flashcard per struggling topic (plus a few overview cards).
+    Each flashcard has a concise 'question' (front) and a complete 'answer' (back).
+    Returns a JSON array of { "question": str, "answer": str } objects.
+    """
+    model = genai.GenerativeModel(
+        "gemini-2.5-flash",
+        generation_config=genai.GenerationConfig(
+            response_mime_type="application/json",
+        ),
+    )
+
+    nodes_summary = "\n".join(
+        f"- Highlighted passage: {n['highlighted_text']}\n"
+        f"  Student's question:   {n['question']}\n"
+        f"  Gemini's answer:      {n['answer']}"
+        for n in struggling_nodes
+    )
+
+    num_cards = min(max(len(struggling_nodes), 3), 12)
+
+    prompt = (
+        "You are an expert study-aid creator making flash cards for a university student.\n\n"
+        "A student has been studying and marked certain topics as ones they are struggling with. "
+        "For each struggling topic you are given:\n"
+        "  1. The highlighted passage from the document\n"
+        "  2. The question the student asked about it\n"
+        "  3. The answer that was provided to the student\n\n"
+        "Your task is to create flash cards that will help the student ACTIVELY RECALL these topics.\n\n"
+        "Flash card rules:\n"
+        f"  • Create EXACTLY {num_cards} flash cards.\n"
+        "  • The 'question' field (front of card): A concise, specific question that tests active recall of the concept.\n"
+        "    - Keep it SHORT — one sentence maximum.\n"
+        "    - It should test the CORE concept, not trivia.\n"
+        "  • The 'answer' field (back of card): A clear, complete explanation the student can use to learn.\n"
+        "    - 2-4 sentences. Not too short, not an essay.\n"
+        "    - Should directly answer the question and explain WHY/HOW if relevant.\n"
+        "  • Each card must correspond to ONE distinct struggling topic.\n"
+        "  • Do NOT add any intro text, markdown fencing, or extra keys.\n\n"
+        f"Struggling topics:\n{nodes_summary}\n\n"
+        f"Document context (for reference):\n{raw_text[:3000]}\n\n"
+        f"Return exactly {num_cards} flash cards as a JSON array of objects. "
+        "Each object must have exactly two keys: \"question\" (string) and \"answer\" (string)."
+    )
+
+    response = await asyncio.to_thread(model.generate_content, prompt)
+    return json.loads(response.text)
+
+
 async def generate_page_quiz(page_content: str) -> list[str]:
     """
     Generates 3-5 short-answer questions based ONLY on the provided page content.

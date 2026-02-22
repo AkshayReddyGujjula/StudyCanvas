@@ -59,6 +59,19 @@ export interface QuizNodeInput {
     answer: string
 }
 
+export interface FlashcardNodeData {
+    question: string
+    answer: string
+    isFlipped: boolean
+    status: NodeStatus
+    isMinimized?: boolean
+    isExpanding?: boolean
+    isPinned?: boolean
+    /** Which PDF page this card belongs to (1-based) */
+    pageIndex?: number
+    isLoading: boolean
+}
+
 export interface QuizQuestionNodeData {
     /** 1-based page index this quiz belongs to */
     pageIndex: number
