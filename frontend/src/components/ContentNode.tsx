@@ -1,4 +1,4 @@
-import { useMemo, useCallback } from 'react'
+import { useMemo, useCallback, useState } from 'react'
 import { Handle, Position, useReactFlow } from '@xyflow/react'
 import type { NodeProps } from '@xyflow/react'
 import ReactMarkdown from 'react-markdown'
@@ -17,6 +17,11 @@ const customSchema: SanitizeOptions = {
         ...defaultSchema.attributes,
         mark: ['className', 'dataHighlightId'],
     },
+}
+
+// Extend ContentNodeData with optional callback
+interface ExtendedContentNodeData extends ContentNodeData {
+    onTestMePage?: () => void
 }
 
 // Identify code block ranges to protect from highlight injection
@@ -55,12 +60,14 @@ function replaceOutsideCodeBlocks(
     })
 }
 
-type ContentNodeProps = NodeProps & { data: ContentNodeData }
+type ContentNodeProps = NodeProps & { data: ExtendedContentNodeData }
 
 export default function ContentNode({ id, data }: ContentNodeProps) {
     const { setCenter } = useReactFlow()
     const highlights = useCanvasStore((s) => s.highlights)
     const nodes = useCanvasStore((s) => s.nodes)
+    // true = full-page (no scroll), false = compact scrollable view
+    const [isExpanded, setIsExpanded] = useState(true)
 
     const processedMarkdown = useMemo(() => {
         let content = data.markdown_content
@@ -120,20 +127,37 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
         >
             {/* Header bar — draggable, no nodrag class */}
             <div className="flex items-center gap-2 px-4 py-3 bg-indigo-600 rounded-t-lg cursor-grab">
-                <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
+                <svg className="w-4 h-4 text-white flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                     <path d="M9 12l-3-3m0 0l3-3m-3 3h12M3 6v12" />
                 </svg>
-                <span className="text-white font-medium text-sm truncate">
+                <span className="text-white font-medium text-sm truncate flex-1">
                     {data.filename} — {data.page_count} page{data.page_count !== 1 ? 's' : ''}
                 </span>
+                <button
+                    title={isExpanded ? 'Compact view (scrollable)' : 'Full-page view'}
+                    onClick={(e) => { e.stopPropagation(); setIsExpanded((v) => !v) }}
+                    className="nodrag flex-shrink-0 p-1 rounded hover:bg-indigo-500 transition-colors text-white/80 hover:text-white"
+                >
+                    {isExpanded ? (
+                        // Collapse / minimise icon
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                        </svg>
+                    ) : (
+                        // Expand icon
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
+                    )}
+                </button>
             </div>
 
-            {/* Scrollable Markdown content — nodrag and nopan prevent canvas interaction */}
+            {/* Markdown content — full-page or compact scrollable depending on toggle */}
             <div
-                className="nodrag nopan overflow-y-auto"
-                style={{ maxHeight: '80vh', cursor: 'text', userSelect: 'text' }}
+                className={`nodrag nopan${isExpanded ? '' : ' overflow-y-auto'}`}
+                style={{ cursor: 'text', userSelect: 'text', ...(isExpanded ? {} : { maxHeight: '80vh' }) }}
                 onClick={handleMarkdownClick}
-                onWheelCapture={(e) => e.stopPropagation()}
+                onWheelCapture={isExpanded ? undefined : (e) => e.stopPropagation()}
             >
                 <div className="prose prose-base max-w-none p-4">
                     <ReactMarkdown
@@ -144,6 +168,21 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
                     </ReactMarkdown>
                 </div>
             </div>
+
+            {/* "Test me on this page" pill button */}
+            {data.onTestMePage && (
+                <div className="nodrag px-4 py-2 border-t border-gray-100 flex justify-center bg-gray-50 rounded-b-lg">
+                    <button
+                        onClick={(e) => { e.stopPropagation(); data.onTestMePage!() }}
+                        className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-violet-600 hover:bg-violet-700 active:bg-violet-800 text-white text-xs font-semibold rounded-full shadow-sm transition-colors select-none"
+                    >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                        </svg>
+                        Test me on this page
+                    </button>
+                </div>
+            )}
 
             {/* 10 source handles per side, evenly spaced */}
             {Array.from({ length: 10 }, (_, i) => (

@@ -43,12 +43,17 @@ export default function UploadPanel({ onUploaded }: UploadPanelProps) {
                     page_count: data.page_count,
                 })
 
+                // After setFileData the store has split the markdown into pages.
+                // Use page 1's markdown so the contentNode only shows the first page.
+                const firstPageMarkdown =
+                    useCanvasStore.getState().pageMarkdowns[0] ?? data.markdown_content
+
                 const contentNode: Node = {
                     id: crypto.randomUUID(),
                     type: 'contentNode',
                     position: { x: 100, y: 100 },
                     data: {
-                        markdown_content: data.markdown_content,
+                        markdown_content: firstPageMarkdown,
                         filename: data.filename,
                         page_count: data.page_count,
                     },

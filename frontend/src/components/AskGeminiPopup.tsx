@@ -13,46 +13,65 @@ function computePopupStyle(
     const vw = window.innerWidth
     const vh = window.innerHeight
     const BUTTON_HEIGHT = 38    // approximate button height in px
-    const GAP = 8               // gap between selection and popup
+    const BUTTON_WIDTH = 152    // approximate button width in px ("✨ Ask Gemini" + padding)
+    const GAP = 12              // gap between PDF edge and popup
     const EDGE_PADDING = 8      // minimum distance from viewport edges
 
-    // Determine the horizontal zone of the selection relative to the PDF container
+    const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
+
+    // Use containerRect to determine the PDF panel edges; fall back to selection rect edges.
+    const pdfLeft  = containerRect ? containerRect.left  : rect.left
+    const pdfRight = containerRect ? containerRect.right : rect.right
+
+    // How much space is available on each side of the PDF panel?
+    const spaceLeft  = pdfLeft - EDGE_PADDING              // px available to the left of PDF
+    const spaceRight = vw - pdfRight - EDGE_PADDING        // px available to the right of PDF
+    const neededWidth = BUTTON_WIDTH + GAP
+
+    // Where is the selected text within the PDF, expressed as a 0-1 fraction.
     const selectionCenterX = rect.left + rect.width / 2
-    let relativeX: number
-    if (containerRect && containerRect.width > 0) {
-        relativeX = (selectionCenterX - containerRect.left) / containerRect.width
-    } else {
-        relativeX = selectionCenterX / vw
-    }
+    const pdfWidth = pdfRight - pdfLeft
+    const relativeX = pdfWidth > 0
+        ? (selectionCenterX - pdfLeft) / pdfWidth
+        : 0.5
 
     // Zone thresholds: left < 35%, right > 65%, center in between
     const zone = relativeX < 0.35 ? 'left' : relativeX > 0.65 ? 'right' : 'center'
 
-    const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
+    // Vertical centre of the selection, clamped within the viewport
+    const verticalCenter = clamp(
+        rect.top + rect.height / 2 - BUTTON_HEIGHT / 2,
+        EDGE_PADDING,
+        vh - BUTTON_HEIGHT - EDGE_PADDING,
+    )
 
-    if (zone === 'left') {
-        // Popup appears to the LEFT of the selection, vertically centred on it
-        const top = clamp(rect.top + rect.height / 2 - BUTTON_HEIGHT / 2, EDGE_PADDING, vh - BUTTON_HEIGHT - EDGE_PADDING)
-        const right = vw - rect.left + GAP
-        return { position: 'fixed', top, right: clamp(right, EDGE_PADDING, vw - EDGE_PADDING) }
+    if (zone === 'left' && spaceLeft >= neededWidth) {
+        // Enough room to the LEFT of the PDF — anchor to PDF's left edge
+        const left = pdfLeft - GAP - BUTTON_WIDTH
+        return { position: 'fixed', top: verticalCenter, left }
     }
 
-    if (zone === 'right') {
-        // Popup appears to the RIGHT of the selection, vertically centred on it
-        const top = clamp(rect.top + rect.height / 2 - BUTTON_HEIGHT / 2, EDGE_PADDING, vh - BUTTON_HEIGHT - EDGE_PADDING)
-        const left = rect.right + GAP
-        return { position: 'fixed', top, left: clamp(left, EDGE_PADDING, vw - EDGE_PADDING) }
+    if (zone === 'right' && spaceRight >= neededWidth) {
+        // Enough room to the RIGHT of the PDF — anchor to PDF's right edge
+        const left = pdfRight + GAP
+        return { position: 'fixed', top: verticalCenter, left }
     }
 
-    // CENTER — popup appears BELOW the selection, horizontally centred under it
+    // CENTER, or sides with insufficient space — fall back to BELOW the selection.
+    // Prefer the side matching the zone so it doesn't feel misplaced.
     const top = clamp(rect.bottom + GAP, EDGE_PADDING, vh - BUTTON_HEIGHT - EDGE_PADDING)
-    const centreLeft = selectionCenterX
-    return {
-        position: 'fixed',
-        top,
-        left: clamp(centreLeft, EDGE_PADDING, vw - EDGE_PADDING),
-        transform: 'translateX(-50%)',
+    let left: number
+    if (zone === 'left') {
+        // Lean towards the left: align popup's right edge with the selection's left edge
+        left = clamp(rect.left - BUTTON_WIDTH / 2, EDGE_PADDING, vw - BUTTON_WIDTH - EDGE_PADDING)
+    } else if (zone === 'right') {
+        // Lean towards the right: align popup's left edge with the selection's right edge
+        left = clamp(rect.right - BUTTON_WIDTH / 2, EDGE_PADDING, vw - BUTTON_WIDTH - EDGE_PADDING)
+    } else {
+        // Centre below the selection
+        left = clamp(selectionCenterX - BUTTON_WIDTH / 2, EDGE_PADDING, vw - BUTTON_WIDTH - EDGE_PADDING)
     }
+    return { position: 'fixed', top, left }
 }
 
 export default function AskGeminiPopup({ rect, containerRect, onAsk }: AskGeminiPopupProps) {

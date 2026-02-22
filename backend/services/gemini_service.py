@@ -282,6 +282,99 @@ async def generate_quiz(struggling_nodes: list, raw_text: str) -> list[dict]:
     return json.loads(response.text)
 
 
+async def generate_page_quiz(page_content: str) -> list[str]:
+    """
+    Generates 3-5 short-answer questions based ONLY on the provided page content.
+    No struggling nodes, no user context — pure page comprehension test.
+    Returns a plain JSON array of question strings.
+    """
+    model = genai.GenerativeModel(
+        "gemini-2.5-flash",
+        generation_config=genai.GenerationConfig(
+            response_mime_type="application/json",
+        ),
+    )
+
+    prompt = (
+        "You are an expert academic tutor creating a short comprehension quiz.\n\n"
+        "Based ONLY on the page content below, generate between 3 and 5 concise short-answer "
+        "questions that test a student's understanding of the key concepts on this page.\n\n"
+        "Rules:\n"
+        "- Use ONLY information from the provided page content. Do not introduce outside concepts.\n"
+        "- Questions should be specific, not vague or generic.\n"
+        "- Questions should require a sentence or two to answer properly.\n"
+        "- Number the questions with the depth of understanding ranging from recall → application.\n"
+        "- Output ONLY a JSON array of question strings. No explanation, no extra keys.\n"
+        "- Example: [\"What is X?\", \"How does Y relate to Z?\", \"Why is W important?\"]\n\n"
+        f"Page content:\n\n{page_content}"
+    )
+
+    response = await asyncio.to_thread(model.generate_content, prompt)
+    data = json.loads(response.text)
+    # Ensure we always return a flat list of strings
+    if isinstance(data, list):
+        return [str(q) for q in data]
+    return []
+
+
+async def grade_answer(
+    question: str,
+    student_answer: str,
+    page_content: str,
+    user_details: dict | None = None,
+) -> str:
+    """
+    Grades a student's answer to a page-quiz question and returns direct, personalised
+    feedback as a plain text string (not JSON).
+    """
+    model = genai.GenerativeModel("gemini-2.5-flash")
+
+    personalisation = ""
+    if user_details:
+        name = user_details.get("name", "")
+        age = user_details.get("age", "")
+        status = user_details.get("status", "")
+        level = user_details.get("educationLevel", "")
+        if any([name, age, status, level]):
+            personalisation = (
+                f"\n\nStudent context (use to calibrate tone and depth):\n"
+                f"- Name: {name}\n"
+                f"- Age: {age}\n"
+                f"- Status: {status}\n"
+                f"- Education level: {level}\n"
+            )
+
+    prompt = (
+        "You are a supportive academic tutor marking a student's answer to a page quiz question.\n\n"
+        "Your feedback must:\n"
+        "1. Address the student DIRECTLY using 'You' — never use third-person ('The student said...').\n"
+        "2. Start by stating clearly whether the answer is correct, partially correct, or incorrect.\n"
+        "3. If wrong or partial: explain exactly what was missing or incorrect, and give the correct answer.\n"
+        "4. If correct: briefly affirm and add one interesting extension point from the page content.\n"
+        "5. Be concise but genuinely helpful — 2-4 sentences is ideal.\n"
+        "6. Do NOT use bullet points — write as flowing, natural prose.\n"
+        f"{personalisation}\n\n"
+        f"Page content (ground truth):\n{page_content}\n\n"
+        f"Quiz question:\n{question}\n\n"
+        f"Student's answer:\n{student_answer}\n\n"
+        "Write your feedback now (plain text, no markdown, no JSON):"
+    )
+
+    response = await asyncio.to_thread(
+        lambda: model.generate_content(
+            prompt,
+            generation_config=genai.GenerationConfig(max_output_tokens=600, temperature=0.4),
+        )
+    )
+    try:
+        return response.text.strip()
+    except ValueError:
+        try:
+            return response.candidates[0].content.parts[0].text.strip()
+        except Exception:
+            return "Unable to grade your answer at this time. Please try again."
+
+
 async def validate_answer(
     question: str,
     student_answer: str,

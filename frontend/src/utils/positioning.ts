@@ -50,7 +50,7 @@ export function getNewNodePosition(
             const lastHeight = (last.measured?.height ?? 200)
             return {
                 x: contentX + 700 + 80,
-                y: last.position.y + lastHeight + 40,
+                y: last.position.y + lastHeight + 1,
                 sourceHandle: 'right',
                 targetHandle: 'left',
             }
@@ -69,7 +69,7 @@ export function getNewNodePosition(
             const lastHeight = (last.measured?.height ?? 200)
             return {
                 x: contentX - 360 - 80,
-                y: last.position.y + lastHeight + 40,
+                y: last.position.y + lastHeight + 1,
                 sourceHandle: 'left',
                 targetHandle: 'right-target',
             }
@@ -96,7 +96,7 @@ export function getNewNodePosition(
                 const overlapY = finalY < nY + nHeight && finalY + 200 > nY
 
                 if (overlapX && overlapY) {
-                    finalY = nY + nHeight + 40
+                    finalY = nY + nHeight + 1
                     shifted = true
                     break
                 }
@@ -146,7 +146,7 @@ export function recalculateSiblingPositions(
                 ...updatedNodes[idx],
                 position: { ...updatedNodes[idx].position, y: currentY },
             }
-            currentY += (sibling.measured?.height ?? 200) + 40
+            currentY += (sibling.measured?.height ?? 200) + 1
         }
     }
 
@@ -190,8 +190,8 @@ export function resolveOverlaps(nodes: Node[]): Node[] {
 
                 const overlapX = aLeft < bRight && aRight > bLeft
 
-                if (overlapX && bTop < aBottom + 40) {
-                    below.position.y = aBottom + 40
+                if (overlapX && bTop < aBottom + 1) {
+                    below.position.y = aBottom + 1
                     shifted = true
                     didAnyShift = true
                 }
@@ -372,6 +372,67 @@ export function snapLeafNodeToColumn(
 }
 
 /**
+ * Calculates x/y positions for a row of quiz question nodes placed below the ContentNode.
+ * Nodes are centred horizontally on the ContentNode and spaced 380px apart.
+ * Pushes the row down until it is clear of every existing node (no overlaps).
+ */
+export function getQuizNodePositions(
+    contentNodeX: number,
+    contentNodeY: number,
+    contentNodeHeight: number,
+    contentNodeWidth: number,
+    count: number,
+    existingNodes: Node[] = []
+): Array<{ x: number; y: number }> {
+    const nodeWidth = 360
+    const horizontalGap = 380
+    const verticalGap = 1
+    const estimatedQuizHeight = 260  // conservative estimate for an unanswered quiz card
+    const padding = 1                // minimum gap around each quiz node
+
+    const totalWidth = count * nodeWidth + (count - 1) * (horizontalGap - nodeWidth)
+    const startX = contentNodeX + contentNodeWidth / 2 - totalWidth / 2
+    const endX = startX + totalWidth
+
+    // Start directly below the content node
+    let y = contentNodeY + contentNodeHeight + verticalGap
+
+    // Iteratively push the row down until no existing node overlaps with any quiz slot
+    let shifted = true
+    while (shifted) {
+        shifted = false
+        for (const node of existingNodes) {
+            if (node.type === 'contentNode') continue
+
+            const nLeft = node.position.x
+            const nWidth =
+                typeof node.style?.width === 'number'
+                    ? node.style.width
+                    : (node.measured?.width ?? 360)
+            const nRight = nLeft + (nWidth as number)
+            const nTop = node.position.y
+            const nBottom = nTop + (node.measured?.height ?? 200)
+
+            // Does this node share horizontal space with any part of the quiz row?
+            const overlapX = startX - padding < nRight && endX + padding > nLeft
+            // Would the quiz row overlap vertically with this node?
+            const overlapY = y < nBottom + padding && y + estimatedQuizHeight > nTop - padding
+
+            if (overlapX && overlapY) {
+                y = nBottom + 1
+                shifted = true
+                break
+            }
+        }
+    }
+
+    return Array.from({ length: count }, (_, i) => ({
+        x: startX + i * horizontalGap,
+        y,
+    }))
+}
+
+/**
  * Checks if a proposed position for a node overlaps with any other nodes.
  * Used during drag to prevent overlapping.
  */
@@ -394,7 +455,7 @@ export function isOverlapping(
     const aBottom = aTop + aHeight
 
     // Minimum spacing
-    const padding = 20
+    const padding = 1
 
     for (const other of nodes) {
         if (other.id === nodeId) continue

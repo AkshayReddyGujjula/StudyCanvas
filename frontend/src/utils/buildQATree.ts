@@ -1,5 +1,5 @@
 import type { Node, Edge } from '@xyflow/react'
-import type { AnswerNodeData, ChatMessage } from '../types'
+import type { AnswerNodeData, ChatMessage, QuizQuestionNodeData } from '../types'
 
 export interface QANode {
     id: string
@@ -11,14 +11,25 @@ export interface QANode {
     children: QANode[]
 }
 
+export interface PageQuizEntry {
+    pageIndex: number
+    questions: QuizQuestionNodeData[]
+}
+
+export interface BuildQATreeResult {
+    qaTree: QANode[]
+    pageQuizzes: PageQuizEntry[]
+}
+
 /**
- * Walks the React Flow nodes/edges and builds a tree of Q&A entries.
+ * Walks the React Flow nodes/edges and builds a tree of Q&A entries
+ * plus a list of page quiz entries grouped by page index.
  *
  * - Root nodes = answerNodes whose direct parent is a contentNode (or orphaned)
  * - Child nodes = answerNodes whose direct parent is another answerNode (branch questions)
  * - chatHistory on each node = in-node follow-up turns (user/model pairs)
  */
-export function buildQATree(nodes: Node[], edges: Edge[]): QANode[] {
+export function buildQATree(nodes: Node[], edges: Edge[]): BuildQATreeResult {
     const answerNodes = nodes.filter((n) => n.type === 'answerNode')
 
     // Map each node id → its parent node id (source of an incoming edge)
@@ -66,5 +77,24 @@ export function buildQATree(nodes: Node[], edges: Edge[]): QANode[] {
         }
     }
 
-    return rootAnswerNodes.map((n) => buildNode(n.id))
+    const qaTree = rootAnswerNodes.map((n) => buildNode(n.id))
+
+    // Collect quiz question nodes grouped by page
+    const quizNodes = nodes.filter((n) => n.type === 'quizQuestionNode')
+    const quizByPage = new Map<number, QuizQuestionNodeData[]>()
+    for (const n of quizNodes) {
+        const d = n.data as unknown as QuizQuestionNodeData
+        const page = d.pageIndex ?? 1
+        if (!quizByPage.has(page)) quizByPage.set(page, [])
+        quizByPage.get(page)!.push(d)
+    }
+    // Sort questions within each page by questionNumber
+    const pageQuizzes: PageQuizEntry[] = Array.from(quizByPage.entries())
+        .sort(([a], [b]) => a - b)
+        .map(([pageIndex, questions]) => ({
+            pageIndex,
+            questions: [...questions].sort((a, b) => a.questionNumber - b.questionNumber),
+        }))
+
+    return { qaTree, pageQuizzes }
 }

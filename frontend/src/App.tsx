@@ -11,6 +11,7 @@ export default function App() {
   const setEdges = useCanvasStore((s) => s.setEdges)
   const setFileData = useCanvasStore((s) => s.setFileData)
   const resetCanvas = useCanvasStore((s) => s.resetCanvas)
+  const setUserDetails = useCanvasStore((s) => s.setUserDetails)
 
   // Determine initial state: has canvas or needs upload
   const [hasCanvas, setHasCanvas] = useState(false)
@@ -24,7 +25,10 @@ export default function App() {
         const state = JSON.parse(saved)
         if (state.nodes) setNodes(state.nodes)
         if (state.edges) setEdges(state.edges)
+        // setFileData resets currentPage to 1 and recalculates pageMarkdowns —
+        // we override currentPage afterwards with the persisted value.
         if (state.fileData) setFileData(state.fileData)
+        if (state.userDetails) setUserDetails(state.userDetails)
         // highlights are already in store default [] — restore them
         // note: activeAbortController is always null on load (transient field)
         if (state.highlights && state.highlights.length > 0) {
@@ -34,6 +38,10 @@ export default function App() {
             store.addHighlight(h)
           )
         }
+        // Restore saved page — must come AFTER setFileData (which resets to page 1)
+        if (typeof state.currentPage === 'number' && state.currentPage > 1) {
+          useCanvasStore.getState().setCurrentPage(state.currentPage)
+        }
         if (state.nodes && state.nodes.length > 0) {
           setHasCanvas(true)
         }
@@ -42,7 +50,7 @@ export default function App() {
       }
     }
     setInitialized(true)
-  }, [setNodes, setEdges, setFileData])
+  }, [setNodes, setEdges, setFileData, setUserDetails])
 
   const handleUploaded = () => setHasCanvas(true)
 

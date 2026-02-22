@@ -9,8 +9,8 @@ import {
 } from '@react-pdf/renderer'
 
 type PDFStyle = Styles[string]
-import type { QANode } from '../utils/buildQATree'
-import type { ChatMessage } from '../types'
+import type { QANode, PageQuizEntry } from '../utils/buildQATree'
+import type { ChatMessage, QuizQuestionNodeData } from '../types'
 
 // Use only built-in fonts — no network requests, instant render
 Font.registerHyphenationCallback((w) => [w])
@@ -308,6 +308,103 @@ const s = StyleSheet.create({
     },
     childABody: {
         flex: 1,
+    },
+
+    // ── quiz section ──
+    quizSectionHeader: {
+        fontFamily: 'Helvetica-Bold',
+        fontSize: 13,
+        color: '#6d28d9',
+        marginBottom: 10,
+        marginTop: 16,
+        paddingBottom: 6,
+        borderBottomWidth: 1.5,
+        borderBottomColor: '#ddd6fe',
+    },
+    quizPageHeader: {
+        fontFamily: 'Helvetica-Bold',
+        fontSize: 10,
+        color: '#7c3aed',
+        marginBottom: 6,
+        marginTop: 10,
+        letterSpacing: 0.6,
+        textTransform: 'uppercase' as const,
+    },
+    quizBlock: {
+        marginBottom: 14,
+        paddingLeft: 0,
+    },
+    quizQRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        marginBottom: 5,
+        gap: 6,
+    },
+    quizQLabel: {
+        fontSize: 10,
+        fontFamily: 'Helvetica-Bold',
+        color: '#7c3aed',
+        minWidth: 22,
+    },
+    quizQText: {
+        fontSize: 10,
+        fontFamily: 'Helvetica-Bold',
+        color: C.text,
+        flex: 1,
+        lineHeight: 1.5,
+    },
+    quizAnswerBlock: {
+        marginLeft: 22,
+        marginBottom: 4,
+        backgroundColor: '#f5f3ff',
+        borderLeftWidth: 3,
+        borderLeftColor: '#8b5cf6',
+        paddingHorizontal: 8,
+        paddingVertical: 5,
+        borderRadius: 3,
+    },
+    quizAnswerLabel: {
+        fontSize: 7.5,
+        fontFamily: 'Helvetica-Bold',
+        color: '#7c3aed',
+        letterSpacing: 0.5,
+        textTransform: 'uppercase' as const,
+        marginBottom: 3,
+    },
+    quizAnswerText: {
+        fontSize: 9.5,
+        color: C.text,
+        lineHeight: 1.5,
+    },
+    quizFeedbackBlock: {
+        marginLeft: 22,
+        marginBottom: 4,
+        backgroundColor: '#fffbeb',
+        borderLeftWidth: 3,
+        borderLeftColor: '#f59e0b',
+        paddingHorizontal: 8,
+        paddingVertical: 5,
+        borderRadius: 3,
+    },
+    quizFeedbackLabel: {
+        fontSize: 7.5,
+        fontFamily: 'Helvetica-Bold',
+        color: '#d97706',
+        letterSpacing: 0.5,
+        textTransform: 'uppercase' as const,
+        marginBottom: 3,
+    },
+    quizFeedbackText: {
+        fontSize: 9.5,
+        color: C.text,
+        lineHeight: 1.5,
+    },
+    quizNoAnswer: {
+        marginLeft: 22,
+        fontSize: 9,
+        color: C.muted,
+        fontFamily: 'Helvetica-Oblique',
+        marginBottom: 4,
     },
 
     // ── paragraph text ──
@@ -630,17 +727,92 @@ function RootQABlock({ node, index }: { node: QANode; index: number }) {
     )
 }
 
+// ─── Quiz Page Section ───────────────────────────────────────────────────────
+
+function QuizQuestionBlock({ q, idx }: { q: QuizQuestionNodeData; idx: number }) {
+    const followUpPairs: Array<{ question: string; answer: string }> = []
+    const history = q.chatHistory ?? []
+    for (let i = 0; i < history.length - 1; i += 2) {
+        if (history[i].role === 'user' && history[i + 1]?.role === 'model') {
+            followUpPairs.push({ question: history[i].content, answer: history[i + 1].content })
+        }
+    }
+
+    return (
+        <View style={s.quizBlock}>
+            <View style={s.quizQRow}>
+                <Text style={s.quizQLabel}>Q{idx + 1}.</Text>
+                <Text style={s.quizQText}>{q.question}</Text>
+            </View>
+
+            {q.userAnswer ? (
+                <View style={s.quizAnswerBlock}>
+                    <Text style={s.quizAnswerLabel}>Your Answer</Text>
+                    <Text style={s.quizAnswerText}>{q.userAnswer}</Text>
+                </View>
+            ) : (
+                <Text style={s.quizNoAnswer}>— Not answered</Text>
+            )}
+
+            {q.feedback ? (
+                <View style={s.quizFeedbackBlock}>
+                    <Text style={s.quizFeedbackLabel}>Gemini Feedback</Text>
+                    <Text style={s.quizFeedbackText}>{q.feedback}</Text>
+                </View>
+            ) : null}
+
+            {followUpPairs.length > 0 && (
+                <View style={[s.followUpSection, { marginLeft: 22 }]}>
+                    <Text style={s.followUpHeader}>↳ Follow-up Questions ({followUpPairs.length})</Text>
+                    {followUpPairs.map((pair, fIdx) => (
+                        <View key={fIdx}>
+                            <View style={s.followUpQRow}>
+                                <Text style={s.followUpQLabel}>Q{fIdx + 1}.</Text>
+                                <Text style={s.followUpQText}>{pair.question}</Text>
+                            </View>
+                            <View style={s.followUpARow}>
+                                <Text style={s.followUpALabel}>A{fIdx + 1}.</Text>
+                                <View style={s.followUpABody}>
+                                    <MarkdownBody text={pair.answer} small />
+                                </View>
+                            </View>
+                        </View>
+                    ))}
+                </View>
+            )}
+        </View>
+    )
+}
+
+function QuizSection({ pageQuizzes }: { pageQuizzes: PageQuizEntry[] }) {
+    if (!pageQuizzes || pageQuizzes.length === 0) return null
+    return (
+        <View>
+            <Text style={s.quizSectionHeader}>📝 Page Quizzes</Text>
+            {pageQuizzes.map((entry) => (
+                <View key={entry.pageIndex}>
+                    <Text style={s.quizPageHeader}>Page {entry.pageIndex} Quiz</Text>
+                    {entry.questions.map((q, idx) => (
+                        <QuizQuestionBlock key={q.questionNumber} q={q} idx={idx} />
+                    ))}
+                </View>
+            ))}
+        </View>
+    )
+}
+
 // ─── Document ────────────────────────────────────────────────────────────────
 
 interface Props {
     qaTree: QANode[]
+    pageQuizzes: PageQuizEntry[]
     filename: string
     exportDate: string
     totalQuestions: number
     title: string
 }
 
-export default function StudyNotePDF({ qaTree, filename, exportDate, totalQuestions, title }: Props) {
+export default function StudyNotePDF({ qaTree, pageQuizzes, filename, exportDate, totalQuestions, title }: Props) {
     return (
         <Document
             title="StudyCanvas Study Notes"
@@ -683,6 +855,11 @@ export default function StudyNotePDF({ qaTree, filename, exportDate, totalQuesti
                         <Text style={s.coverTag}>
                             {qaTree.reduce((n, r) => n + Math.floor(r.chatHistory.length / 2), 0)} Follow-ups
                         </Text>
+                        {pageQuizzes.length > 0 && (
+                            <Text style={s.coverTag}>
+                                {pageQuizzes.reduce((n, p) => n + p.questions.length, 0)} Quiz Questions
+                            </Text>
+                        )}
                     </View>
                 </View>
 
@@ -690,6 +867,9 @@ export default function StudyNotePDF({ qaTree, filename, exportDate, totalQuesti
                 {qaTree.map((node, idx) => (
                     <RootQABlock key={node.id} node={node} index={idx} />
                 ))}
+
+                {/* Page Quizzes section */}
+                <QuizSection pageQuizzes={pageQuizzes} />
             </Page>
         </Document>
     )

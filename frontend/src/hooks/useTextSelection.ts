@@ -4,6 +4,7 @@ interface SelectionResult {
     selectedText: string
     sourceNodeId: string
     rect: DOMRect
+    containerRect: DOMRect | null
 }
 
 type SetterFn = (result: SelectionResult | null) => void
@@ -20,7 +21,7 @@ export function useTextSelection(onSelection: SetterFn) {
             }
 
             const range = selection!.getRangeAt(0)
-            let nodeEl = null
+            let nodeEl: Element | null = null
 
             // Prefer finding the node from the selection's actual DOM nodes instead of where the mouse was released
             if (range.commonAncestorContainer) {
@@ -28,7 +29,7 @@ export function useTextSelection(onSelection: SetterFn) {
                 const element = container.nodeType === Node.ELEMENT_NODE
                     ? (container as Element)
                     : container.parentElement
-                nodeEl = element?.closest('[data-nodeid]')
+                nodeEl = element?.closest('[data-nodeid]') ?? null
             }
 
             if (!nodeEl) {
@@ -44,8 +45,11 @@ export function useTextSelection(onSelection: SetterFn) {
 
             // Get bounding rect of the selection in viewport coordinates
             const rect = range.getBoundingClientRect()
+            // Capture the container's bounding rect right here while we have the element reference,
+            // so the popup can anchor itself to the PDF panel's edges rather than the selection.
+            const containerRect = nodeEl.getBoundingClientRect()
 
-            onSelection({ selectedText: text, sourceNodeId, rect })
+            onSelection({ selectedText: text, sourceNodeId, rect, containerRect })
         }
 
         document.addEventListener('mouseup', handleMouseUp)

@@ -217,6 +217,26 @@ export default function AnswerNode({ id, data }: AnswerNodeProps) {
                             </svg>
                         )}
                     </button>
+
+                    {/* Pin button — pin this node to appear on ALL pages */}
+                    <button
+                        title={data.isPinned ? "Unpin from all pages" : "Pin to all pages"}
+                        onClick={() => {
+                            updateNodeData(id, { isPinned: !data.isPinned })
+                            persistToLocalStorage()
+                        }}
+                        className={`p-1 rounded-md transition-colors ${
+                            data.isPinned
+                                ? 'text-indigo-600 bg-indigo-50 hover:bg-indigo-100'
+                                : 'text-gray-400 hover:text-indigo-500 hover:bg-indigo-50'
+                        }`}
+                    >
+                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill={data.isPinned ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M15 4.5l-4 4L7 10l-1.5 1.5 7 7 1.5-1.5 1.5-4 4-4L15 4.5z" />
+                            <path d="M9 15l-4.5 4.5" />
+                            <path d="M14.5 9l1 1" />
+                        </svg>
+                    </button>
                 </div>
             </div>
 

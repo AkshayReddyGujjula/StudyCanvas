@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import {
     ReactFlow,
     Background,
@@ -12,15 +12,16 @@ import '@xyflow/react/dist/style.css'
 
 import ContentNode from './ContentNode'
 import AnswerNode from './AnswerNode'
+import QuizQuestionNode from './QuizQuestionNode'
 import AskGeminiPopup from './AskGeminiPopup'
 import QuestionModal from './QuestionModal'
 import RevisionModal from './RevisionModal'
 import ToolsModal from './ToolsModal'
 import { useTextSelection } from '../hooks/useTextSelection'
 import { useCanvasStore } from '../store/canvasStore'
-import { streamQuery, generateTitle } from '../api/studyApi'
-import { getNewNodePosition, recalculateSiblingPositions, resolveOverlaps, isOverlapping, rerouteEdgeHandles } from '../utils/positioning'
-import type { AnswerNodeData } from '../types'
+import { streamQuery, generateTitle, generatePageQuiz, gradeAnswer } from '../api/studyApi'
+import { getNewNodePosition, recalculateSiblingPositions, resolveOverlaps, isOverlapping, rerouteEdgeHandles, getQuizNodePositions } from '../utils/positioning'
+import type { AnswerNodeData, QuizQuestionNodeData } from '../types'
 import { pdf } from '@react-pdf/renderer'
 import { buildQATree } from '../utils/buildQATree'
 import StudyNotePDF from './StudyNotePDF'
@@ -28,6 +29,7 @@ import StudyNotePDF from './StudyNotePDF'
 const NODE_TYPES = {
     contentNode: ContentNode,
     answerNode: AnswerNode,
+    quizQuestionNode: QuizQuestionNode,
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -74,10 +76,194 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
     const updateNodeData = useCanvasStore((s) => s.updateNodeData)
     const setActiveAbortController = useCanvasStore((s) => s.setActiveAbortController)
     const persistToLocalStorage = useCanvasStore((s) => s.persistToLocalStorage)
+    const currentPage = useCanvasStore((s) => s.currentPage)
+    const pageMarkdowns = useCanvasStore((s) => s.pageMarkdowns)
+    const setCurrentPage = useCanvasStore((s) => s.setCurrentPage)
+    const updateQuizNodeData = useCanvasStore((s) => s.updateQuizNodeData)
+    const getQuizNodesForPage = useCanvasStore((s) => s.getQuizNodesForPage)
 
     // Find the contentNode id
     const contentNode = nodes.find((n) => n.type === 'contentNode')
     const contentNodeId = contentNode?.id ?? ''
+
+    // ── Quiz callbacks (defined before visibleNodes so they can be injected) ───
+    const handleGradeAnswer = useCallback(async (nodeId: string, question: string, answer: string) => {
+        const targetNode = nodes.find((n) => n.id === nodeId)
+        const nodePageIndex = targetNode
+            ? ((targetNode.data as Record<string, unknown>).pageIndex as number ?? currentPage)
+            : currentPage
+        const pageContent = pageMarkdowns[nodePageIndex - 1] ?? ''
+        try {
+            const result = await gradeAnswer(question, answer, pageContent, userDetails)
+            updateQuizNodeData(nodeId, { isGrading: false, feedback: result.feedback })
+        } catch (err) {
+            console.error('Grade answer error:', err)
+            updateQuizNodeData(nodeId, { isGrading: false, feedback: 'Unable to grade your answer at this time. Please try again.' })
+        }
+        persistToLocalStorage()
+    }, [nodes, currentPage, pageMarkdowns, userDetails, updateQuizNodeData, persistToLocalStorage])
+
+    const handleTestMePage = useCallback(async () => {
+        if (!fileData) return
+        const existingQuizNodes = getQuizNodesForPage(currentPage)
+        if (existingQuizNodes.length > 0) {
+            const confirmed = window.confirm(
+                `This page already has ${existingQuizNodes.length} quiz question${existingQuizNodes.length !== 1 ? 's' : ''}. Replace with a fresh quiz?`
+            )
+            if (!confirmed) return
+            const existingIds = new Set(existingQuizNodes.map((n) => n.id))
+            setNodes((prev) => prev.filter((n) => !existingIds.has(n.id)))
+            setEdges((prev) => prev.filter((e) => !existingIds.has(e.source) && !existingIds.has(e.target)))
+        }
+        // Show inline toast
+        setToast('Generating quiz questions for this page…')
+        if (toastTimeout) clearTimeout(toastTimeout)
+        toastTimeout = setTimeout(() => setToast(null), 3500)
+
+        let questions: string[]
+        try {
+            const result = await generatePageQuiz(pageMarkdowns[currentPage - 1] ?? '')
+            questions = result.questions
+        } catch (err) {
+            console.error('Page quiz generation error:', err)
+            setToast('Failed to generate quiz. Please try again.')
+            if (toastTimeout) clearTimeout(toastTimeout)
+            toastTimeout = setTimeout(() => setToast(null), 3000)
+            return
+        }
+        if (!questions.length) {
+            setToast('No questions were generated — try again.')
+            if (toastTimeout) clearTimeout(toastTimeout)
+            toastTimeout = setTimeout(() => setToast(null), 3000)
+            return
+        }
+
+        const cNode = nodes.find((n) => n.type === 'contentNode')
+        if (!cNode) return
+        const cHeight = cNode.measured?.height ?? 600
+        const cWidth = typeof cNode.style?.width === 'number' ? cNode.style.width : 700
+        const positions = getQuizNodePositions(
+            cNode.position.x, cNode.position.y, cHeight, cWidth as number, questions.length,
+            nodes
+        )
+
+        const quizNodes: Node[] = questions.map((question, i) => ({
+            id: `quiz-${currentPage}-${i + 1}`,
+            type: 'quizQuestionNode',
+            position: positions[i],
+            data: {
+                pageIndex: currentPage,
+                questionNumber: i + 1,
+                question,
+                isGrading: false,
+                chatHistory: [],
+            } as unknown as Record<string, unknown>,
+            style: { width: 360 },
+        }))
+
+        const quizEdges = quizNodes.map((qNode, i) => {
+            if (i === 0) {
+                return {
+                    id: `edge-quiz-content-${currentPage}-1`,
+                    source: contentNodeId,
+                    target: qNode.id,
+                    sourceHandle: 'right-9',
+                    targetHandle: 'top',
+                    type: 'smoothstep',
+                    animated: false,
+                    style: { stroke: '#7c3aed', strokeWidth: 2 },
+                }
+            }
+            return {
+                id: `edge-quiz-${currentPage}-${i}-${i + 1}`,
+                source: quizNodes[i - 1].id,
+                target: qNode.id,
+                sourceHandle: 'right',
+                targetHandle: 'left',
+                type: 'smoothstep',
+                animated: false,
+                style: { stroke: '#7c3aed', strokeWidth: 2 },
+            }
+        })
+
+        setNodes((prev) => [...prev, ...quizNodes])
+        setEdges((prev) => [...prev, ...quizEdges])
+
+        if (positions.length > 0) {
+            const midIdx = Math.floor(positions.length / 2)
+            setCenter(positions[midIdx].x + 180, positions[0].y + 120, { zoom: getZoom(), duration: 700 })
+        }
+        persistToLocalStorage()
+        setToast(`✅ ${questions.length} quiz questions generated!`)
+        if (toastTimeout) clearTimeout(toastTimeout)
+        toastTimeout = setTimeout(() => setToast(null), 3000)
+    }, [
+        fileData, currentPage, pageMarkdowns, nodes, contentNodeId,
+        getQuizNodesForPage, setNodes, setEdges, setCenter, getZoom,
+        updateQuizNodeData, persistToLocalStorage,
+    ])
+
+    // ── Page-scoped visibility ──────────────────────────────────────────────────
+    // Only show nodes for the current page (or pinned nodes which appear everywhere).
+    // The master `nodes` / `edges` arrays still hold all pages — we just filter here.
+    const visibleNodes = useMemo(() => {
+        return nodes
+            .filter((n) => {
+                if (n.type === 'contentNode') return true
+                if (n.type === 'quizQuestionNode') {
+                    const d = n.data as unknown as QuizQuestionNodeData
+                    return d.isPinned === true || d.pageIndex === currentPage
+                }
+                const d = n.data as unknown as AnswerNodeData
+                return d.isPinned === true || d.pageIndex === currentPage
+            })
+            .map((n) => {
+                if (n.type === 'contentNode') {
+                    return {
+                        ...n,
+                        data: { ...n.data, onTestMePage: handleTestMePage } as unknown as Record<string, unknown>,
+                    }
+                }
+                if (n.type === 'quizQuestionNode') {
+                    const d = n.data as unknown as QuizQuestionNodeData
+                    const pageContent = pageMarkdowns[(d.pageIndex ?? currentPage) - 1] ?? ''
+                    return {
+                        ...n,
+                        data: {
+                            ...n.data,
+                            onGradeAnswer: handleGradeAnswer,
+                            pageMarkdown: pageContent,
+                        } as unknown as Record<string, unknown>,
+                    }
+                }
+                return n
+            })
+    }, [nodes, currentPage, pageMarkdowns, handleTestMePage, handleGradeAnswer])
+
+    const visibleNodeIds = useMemo(
+        () => new Set(visibleNodes.map((n) => n.id)),
+        [visibleNodes]
+    )
+
+    const visibleEdges = useMemo(() => {
+        return edges.filter(
+            (e) => visibleNodeIds.has(e.source) && visibleNodeIds.has(e.target)
+        )
+    }, [edges, visibleNodeIds])
+
+    // Navigate to a given page: update the contentNode display and set currentPage.
+    const goToPage = useCallback(
+        (page: number) => {
+            if (!pageMarkdowns.length) return
+            const md = pageMarkdowns[page - 1]
+            if (md && contentNodeId) {
+                updateNodeData(contentNodeId, { markdown_content: md })
+            }
+            setCurrentPage(page)
+            persistToLocalStorage()
+        },
+        [pageMarkdowns, contentNodeId, updateNodeData, setCurrentPage, persistToLocalStorage]
+    )
 
     // MiniMap node color function
     const nodeColor = useCallback((node: Node) => {
@@ -89,16 +275,12 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
     // Text selection hook
     const handleSelection = useCallback((result: SelectionState | null) => {
         if (result) {
-            // Capture the bounding rect of the content node for zone computation
-            const containerEl = contentNodeId
-                ? document.querySelector(`[data-nodeid="${contentNodeId}"]`)
-                : null
-            const containerRect = containerEl ? containerEl.getBoundingClientRect() : null
-            setSelection({ ...result, containerRect })
+            // containerRect is already computed inside the hook from the real nodeEl reference
+            setSelection(result)
         } else {
             setSelection(null)
         }
-    }, [contentNodeId])
+    }, [])
     useTextSelection(handleSelection)
 
     // Dismiss popup on mousedown outside
@@ -156,10 +338,11 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
             const highlightId = crypto.randomUUID()
             addHighlight({ id: highlightId, text: selectedText, nodeId: preGeneratedNodeId })
 
-            // Calculate new node position
+            // Calculate new node position — only consider visible nodes to
+            // avoid stacking on top of answer nodes from other pages.
             const { x, y, sourceHandle: side, targetHandle } = getNewNodePosition(
                 sourceNodeId,
-                nodes,
+                visibleNodes,
                 contentNodeId
             )
 
@@ -176,7 +359,8 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
                 }
             }
 
-            // Create the Answer Node
+            // Create the Answer Node — tagged with the current page so it only
+            // appears when the user is on this page (unless pinned later).
             const newNode: Node = {
                 id: preGeneratedNodeId,
                 type: 'answerNode',
@@ -189,6 +373,7 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
                     isStreaming: true,
                     status: 'loading',
                     parentResponseText: undefined,
+                    pageIndex: currentPage,
                 } satisfies AnswerNodeData as unknown as Record<string, unknown>,
                 style: { width: 360 },
             }
@@ -292,6 +477,8 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
             fileData,
             userDetails,
             nodes,
+            visibleNodes,
+            currentPage,
             contentNodeId,
             addHighlight,
             setNodes,
@@ -304,9 +491,55 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
         ]
     )
 
+    // When the ContentNode grows (PDF expanded), push overlapping nodes down.
+    const prevContentHeightRef = useRef<number>(0)
+    useEffect(() => {
+        if (!contentNode || !contentNodeId) return
+        const newHeight = contentNode.measured?.height ?? 0
+        const prevHeight = prevContentHeightRef.current
+        prevContentHeightRef.current = newHeight
+
+        // Only act when the content node has grown
+        if (newHeight <= prevHeight || newHeight === 0) return
+
+        const cLeft = contentNode.position.x
+        const cRight = cLeft + 700 // ContentNode width is fixed at 700
+        const cTop = contentNode.position.y
+        const cBottom = cTop + newHeight
+
+        // Find visible non-content nodes whose bounding box overlaps the content node
+        const overlapping = visibleNodes.filter((n) => {
+            if (n.type === 'contentNode') return false
+            const nLeft = n.position.x
+            const nWidth = typeof n.style?.width === 'number' ? n.style.width : (n.measured?.width ?? 360)
+            const nRight = nLeft + (nWidth as number)
+            const nTop = n.position.y
+            const nBottom = nTop + (n.measured?.height ?? 200)
+            const overlapX = nLeft < cRight && nRight > cLeft
+            const overlapY = nTop < cBottom && nBottom > cTop
+            return overlapX && overlapY
+        })
+
+        if (overlapping.length === 0) return
+
+        // Push each overlapping node down to clear the content node, then cascade
+        const withPushed = visibleNodes.map((n) => {
+            if (!overlapping.find((o) => o.id === n.id)) return n
+            return { ...n, position: { ...n.position, y: cBottom + 1 } }
+        })
+        const resolved = resolveOverlaps(withPushed)
+
+        setNodes((prev) =>
+            prev.map((n) => {
+                const r = resolved.find((rn) => rn.id === n.id)
+                return r && r.position.y !== n.position.y ? { ...n, position: r.position } : n
+            })
+        )
+    }, [contentNode?.measured?.height]) // eslint-disable-line react-hooks/exhaustive-deps
+
     // Post-stream correction: re-run Y-position calc after streaming completes
     useEffect(() => {
-        const streamingNode = nodes.find((n) => {
+        const streamingNode = visibleNodes.find((n) => {
             const d = n.data as unknown as AnswerNodeData
             return d?.isStreaming === false && streamingNodesRef.current.has(n.id)
         })
@@ -314,9 +547,17 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
 
         const side =
             streamingNode.position.x > (contentNode?.position.x ?? 0) ? 'right' : 'left'
-        const corrected = recalculateSiblingPositions(nodes, streamingNode.id, side, contentNodeId)
-        setNodes(corrected)
-    }, [nodes, contentNodeId, contentNode, setNodes])
+        // Run positional correction only over visible nodes so per-page siblings
+        // don't interfere with each other, then merge the deltas back into the
+        // master nodes array.
+        const corrected = recalculateSiblingPositions(visibleNodes, streamingNode.id, side, contentNodeId)
+        setNodes((prev) =>
+            prev.map((n) => {
+                const c = corrected.find((cn) => cn.id === n.id)
+                return c ? { ...n, position: c.position, measured: c.measured } : n
+            })
+        )
+    }, [nodes, contentNodeId, contentNode, visibleNodes, setNodes])
 
     // Re-route connected edge handles after a drag so arrows take the shortest path
     const handleNodeDragStop = useCallback(
@@ -354,8 +595,8 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
     // Download Q&A as a PDF
     const handleDownloadPDF = useCallback(async () => {
         setShowMenu(false)
-        const qaTree = buildQATree(nodes, edges)
-        if (qaTree.length === 0) {
+        const { qaTree, pageQuizzes } = buildQATree(nodes, edges)
+        if (qaTree.length === 0 && pageQuizzes.length === 0) {
             showToast('No questions yet — ask Gemini something first!')
             return
         }
@@ -393,6 +634,7 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
             const blob = await pdf(
                 <StudyNotePDF
                     qaTree={qaTree}
+                    pageQuizzes={pageQuizzes}
                     filename={fileData?.filename ?? 'Document'}
                     exportDate={exportDate}
                     totalQuestions={qaTree.length}
@@ -420,20 +662,27 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
     return (
         <div style={{ width: '100vw', height: '100vh' }}>
             <ReactFlow
-                nodes={nodes}
-                edges={edges}
+                nodes={visibleNodes}
+                edges={visibleEdges}
                 nodeTypes={NODE_TYPES}
                 onNodesChange={(changes) => {
                     // Apply position/selection changes without overriding our state
                     setNodes((prev) => {
                         let next = [...prev]
                         let dimensionsChanged = false
+                        // Only check overlap against nodes that are currently visible
+                        // (same page or pinned) to avoid false positives from other pages.
+                        const currentlyVisible = prev.filter((n) => {
+                            if (n.type === 'contentNode') return true
+                            const d = n.data as unknown as AnswerNodeData
+                            return d.isPinned === true || d.pageIndex === currentPage
+                        })
                         for (const change of changes) {
                             if (change.type === 'position' && change.position) {
                                 const idx = next.findIndex((n) => n.id === change.id)
                                 if (idx !== -1) {
-                                    // Check if the proposed position overlaps with any existing nodes
-                                    if (!isOverlapping(change.id, change.position, prev)) {
+                                    // Check if the proposed position overlaps with any visible nodes
+                                    if (!isOverlapping(change.id, change.position, currentlyVisible)) {
                                         next[idx] = { ...next[idx], position: change.position }
                                     }
                                 }
@@ -547,7 +796,7 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
                         <div style={{ height: 1, backgroundColor: '#e5e7eb', margin: '4px 6px' }} />
                         <button
                             onClick={handleDownloadPDF}
-                            disabled={!nodes.some((n) => n.type === 'answerNode') || isGeneratingPDF}
+                            disabled={!nodes.some((n) => n.type === 'answerNode' || n.type === 'quizQuestionNode') || isGeneratingPDF}
                             className="text-left px-3 py-2 hover:bg-indigo-50 rounded-md text-sm text-indigo-700 font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                             {isGeneratingPDF ? '⏳ Generating...' : '💾 Save Notes (PDF)'}
@@ -564,6 +813,29 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
                     </svg>
                     Generating PDF title with Gemini…
+                </div>
+            )}
+
+            {/* Page navigation bar — only shown when the PDF has multiple pages */}
+            {pageMarkdowns.length > 1 && (
+                <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-4 py-2 bg-white border border-gray-200 shadow-md rounded-xl select-none">
+                    <button
+                        disabled={currentPage === 1}
+                        onClick={() => goToPage(currentPage - 1)}
+                        className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    >
+                        ← Back
+                    </button>
+                    <span className="text-sm text-gray-600 font-medium min-w-[90px] text-center">
+                        Page {currentPage} / {pageMarkdowns.length}
+                    </span>
+                    <button
+                        disabled={currentPage === pageMarkdowns.length}
+                        onClick={() => goToPage(currentPage + 1)}
+                        className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    >
+                        Forward →
+                    </button>
                 </div>
             )}
 

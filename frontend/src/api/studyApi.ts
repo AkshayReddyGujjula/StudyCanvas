@@ -53,6 +53,32 @@ export const generateTitle = async (raw_text: string): Promise<string> => {
 }
 
 /**
+ * Generate 3-5 short-answer quiz questions for a single page's content.
+ */
+export const generatePageQuiz = async (page_content: string): Promise<{ questions: string[] }> => {
+    const response = await api.post<{ questions: string[] }>('/api/page-quiz', { page_content })
+    return response.data
+}
+
+/**
+ * Grade a student's answer to a page-quiz question and return direct feedback.
+ */
+export const gradeAnswer = async (
+    question: string,
+    student_answer: string,
+    page_content: string,
+    user_details?: { name: string; age: string; status: string; educationLevel: string }
+): Promise<{ feedback: string }> => {
+    const response = await api.post<{ feedback: string }>('/api/grade-answer', {
+        question,
+        student_answer,
+        page_content,
+        user_details,
+    })
+    return response.data
+}
+
+/**
  * Stream a query response using native fetch + ReadableStream + AbortController.
  * Axios cannot stream in the browser. Returns the Response object for the caller
  * to read the stream via response.body.getReader().
