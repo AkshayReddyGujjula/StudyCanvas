@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import type { Node } from '@xyflow/react'
 import { generateQuiz, validateAnswer } from '../api/studyApi'
 import type { AnswerNodeData, QuizQuestion, ValidateAnswerResponse } from '../types'
@@ -9,24 +9,39 @@ interface RevisionModalProps {
     onClose: () => void
 }
 
+interface QuestionState {
+    answerText: string
+    selectedOption: number | null
+    validationResult: ValidateAnswerResponse | null
+}
+
+const emptyQuestionState = (): QuestionState => ({
+    answerText: '',
+    selectedOption: null,
+    validationResult: null,
+})
+
 export default function RevisionModal({ nodes, rawText, onClose }: RevisionModalProps) {
     const [questions, setQuestions] = useState<QuizQuestion[] | null>(null)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
     const [currentIndex, setCurrentIndex] = useState(0)
 
-    // Short-answer state
-    const [answerText, setAnswerText] = useState('')
+    // Per-question answer state — indexed by question index
+    const [questionStates, setQuestionStates] = useState<QuestionState[]>([])
+
+    // Transient "validating" indicator (not stored per-question as it's ephemeral)
     const [validating, setValidating] = useState(false)
-    const [validationResult, setValidationResult] = useState<ValidateAnswerResponse | null>(null)
 
-    // MCQ state
-    const [selectedOption, setSelectedOption] = useState<number | null>(null)
-
-    const [score, setScore] = useState(0)
     const [showScore, setShowScore] = useState(false)
 
+    // Guard: only generate the quiz once on mount, never re-fetch if canvas updates.
+    const hasFetchedRef = useRef(false)
+
     useEffect(() => {
+        if (hasFetchedRef.current) return
+        hasFetchedRef.current = true
+
         const strugglingNodes = nodes.filter(
             (n) => n.type === 'answerNode' && (n.data as unknown as AnswerNodeData).status === 'struggling'
         )
@@ -42,6 +57,7 @@ export default function RevisionModal({ nodes, rawText, onClose }: RevisionModal
         generateQuiz(input, rawText)
             .then((qs) => {
                 setQuestions(qs)
+                setQuestionStates(qs.map(() => emptyQuestionState()))
                 setLoading(false)
             })
             .catch((err) => {
@@ -49,23 +65,43 @@ export default function RevisionModal({ nodes, rawText, onClose }: RevisionModal
                 setLoading(false)
                 console.error(err)
             })
-    }, [nodes, rawText])
+    }, []) // eslint-disable-line react-hooks/exhaustive-deps — intentionally run once on mount
 
     const current = questions?.[currentIndex]
+
+    // Derived current-question state
+    const currentState: QuestionState = questionStates[currentIndex] ?? emptyQuestionState()
+    const { answerText, selectedOption, validationResult } = currentState
+
+    const updateCurrentState = useCallback((update: Partial<QuestionState>) => {
+        setQuestionStates((prev) => {
+            const next = [...prev]
+            next[currentIndex] = { ...(next[currentIndex] ?? emptyQuestionState()), ...update }
+            return next
+        })
+    }, [currentIndex])
+
+    // Score derived from all answered questions (no double counting when navigating)
+    const score = questionStates.reduce((sum, s) => {
+        if (!s.validationResult) return sum
+        if (s.validationResult.status === 'correct') return sum + 1
+        if (s.validationResult.status === 'partial') return sum + 0.5
+        return sum
+    }, 0)
 
     // ── MCQ: select an option immediately validates ──────────────────────
     const handleOptionSelect = async (optionIndex: number) => {
         if (selectedOption !== null || !current) return  // already answered
-        setSelectedOption(optionIndex)
+        updateCurrentState({ selectedOption: optionIndex })
 
         const isCorrect = optionIndex === current.correct_option
-        setValidationResult({
+        const result: ValidateAnswerResponse = {
             status: isCorrect ? 'correct' : 'incorrect',
             explanation: isCorrect
                 ? "That's exactly right!"
                 : `Not quite. The correct answer was choice ${String.fromCharCode(65 + (current.correct_option ?? 0))}: "${current.options?.[current.correct_option ?? 0]}".`,
-        })
-        if (isCorrect) setScore((s) => s + 1)
+        }
+        updateCurrentState({ selectedOption: optionIndex, validationResult: result })
     }
 
     // ── Short answer: submit via API ─────────────────────────────────────
@@ -81,9 +117,7 @@ export default function RevisionModal({ nodes, rawText, onClose }: RevisionModal
                 rawText,
                 'short_answer',
             )
-            setValidationResult(res)
-            if (res.status === 'correct') setScore((s) => s + 1)
-            else if (res.status === 'partial') setScore((s) => s + 0.5)
+            updateCurrentState({ validationResult: res })
         } catch (err) {
             console.error(err)
         } finally {
@@ -97,9 +131,12 @@ export default function RevisionModal({ nodes, rawText, onClose }: RevisionModal
             setShowScore(true)
         } else {
             setCurrentIndex((i) => i + 1)
-            setAnswerText('')
-            setValidationResult(null)
-            setSelectedOption(null)
+        }
+    }
+
+    const handleBack = () => {
+        if (currentIndex > 0) {
+            setCurrentIndex((i) => i - 1)
         }
     }
 
@@ -191,12 +228,21 @@ export default function RevisionModal({ nodes, rawText, onClose }: RevisionModal
                                     </span>
                                 )}
                                 <div className="flex gap-1">
-                                    {questions?.map((_, i) => (
-                                        <div
-                                            key={i}
-                                            className={`w-2 h-2 rounded-full ${i < currentIndex ? 'bg-indigo-400' : i === currentIndex ? 'bg-indigo-600' : 'bg-gray-200'}`}
-                                        />
-                                    ))}
+                                    {questions?.map((_, i) => {
+                                        const answered = !!questionStates[i]?.validationResult
+                                        return (
+                                            <div
+                                                key={i}
+                                                className={`w-2 h-2 rounded-full ${
+                                                    i === currentIndex
+                                                        ? 'bg-indigo-600'
+                                                        : answered
+                                                            ? 'bg-indigo-400'
+                                                            : 'bg-gray-200'
+                                                }`}
+                                            />
+                                        )
+                                    })}
                                 </div>
                             </div>
                         </div>
@@ -232,7 +278,7 @@ export default function RevisionModal({ nodes, rawText, onClose }: RevisionModal
                                 <textarea
                                     autoFocus
                                     value={answerText}
-                                    onChange={(e) => setAnswerText(e.target.value)}
+                                    onChange={(e) => updateCurrentState({ answerText: e.target.value })}
                                     disabled={validationResult !== null || validating}
                                     placeholder="Type your explanation here..."
                                     className="w-full p-4 rounded-xl border-2 border-gray-100 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-50 outline-none resize-none transition-all disabled:bg-gray-50 disabled:text-gray-500 bg-white"
@@ -280,17 +326,30 @@ export default function RevisionModal({ nodes, rawText, onClose }: RevisionModal
                             </div>
                         )}
 
-                        {/* ── Next / See Score ── */}
-                        {validationResult !== null && (
-                            <div className="flex justify-end">
+                        {/* ── Back / Next navigation ── */}
+                        <div className="flex items-center justify-between mt-2">
+                            {/* Back button — always visible but disabled on first question */}
+                            <button
+                                onClick={handleBack}
+                                disabled={currentIndex === 0}
+                                className="px-5 py-2 rounded-lg font-medium text-sm border border-gray-200 text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                            >
+                                ← Back
+                            </button>
+
+                            {/* Next / See Score — only shown once the question is answered */}
+                            {validationResult !== null ? (
                                 <button
                                     onClick={handleNext}
                                     className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors"
                                 >
                                     {currentIndex >= (questions?.length ?? 0) - 1 ? 'See Score' : 'Next →'}
                                 </button>
-                            </div>
-                        )}
+                            ) : (
+                                /* Placeholder so Back stays left-aligned */
+                                <div />
+                            )}
+                        </div>
                     </div>
                 )}
             </div>

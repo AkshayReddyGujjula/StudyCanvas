@@ -386,10 +386,46 @@ const s = StyleSheet.create({
         paddingVertical: 5,
         borderRadius: 3,
     },
+    quizFeedbackBlockCorrect: {
+        marginLeft: 22,
+        marginBottom: 4,
+        backgroundColor: '#f0fdf4',
+        borderLeftWidth: 3,
+        borderLeftColor: '#22c55e',
+        paddingHorizontal: 8,
+        paddingVertical: 5,
+        borderRadius: 3,
+    },
+    quizFeedbackBlockIncorrect: {
+        marginLeft: 22,
+        marginBottom: 4,
+        backgroundColor: '#fef2f2',
+        borderLeftWidth: 3,
+        borderLeftColor: '#ef4444',
+        paddingHorizontal: 8,
+        paddingVertical: 5,
+        borderRadius: 3,
+    },
     quizFeedbackLabel: {
         fontSize: 7.5,
         fontFamily: 'Helvetica-Bold',
         color: '#d97706',
+        letterSpacing: 0.5,
+        textTransform: 'uppercase' as const,
+        marginBottom: 3,
+    },
+    quizFeedbackLabelCorrect: {
+        fontSize: 7.5,
+        fontFamily: 'Helvetica-Bold',
+        color: '#16a34a',
+        letterSpacing: 0.5,
+        textTransform: 'uppercase' as const,
+        marginBottom: 3,
+    },
+    quizFeedbackLabelIncorrect: {
+        fontSize: 7.5,
+        fontFamily: 'Helvetica-Bold',
+        color: '#dc2626',
         letterSpacing: 0.5,
         textTransform: 'uppercase' as const,
         marginBottom: 3,
@@ -738,6 +774,33 @@ function QuizQuestionBlock({ q, idx }: { q: QuizQuestionNodeData; idx: number })
         }
     }
 
+    // Derive verdict from feedback text (same logic as in QuizQuestionNode)
+    const verdict: 'correct' | 'partial' | 'incorrect' | null = q.feedback
+        ? (() => {
+            const lower = q.feedback.toLowerCase()
+            if (/\bpartially correct\b/.test(lower)) return 'partial'
+            if (/\bincorrect\b|\bwrong\b|\bnot correct\b/.test(lower)) return 'incorrect'
+            if (/\bcorrect\b/.test(lower)) return 'correct'
+            return null
+        })()
+        : null
+
+    const feedbackBlockStyle =
+        verdict === 'correct' ? s.quizFeedbackBlockCorrect
+        : verdict === 'incorrect' ? s.quizFeedbackBlockIncorrect
+        : s.quizFeedbackBlock
+
+    const feedbackLabelStyle =
+        verdict === 'correct' ? s.quizFeedbackLabelCorrect
+        : verdict === 'incorrect' ? s.quizFeedbackLabelIncorrect
+        : s.quizFeedbackLabel
+
+    const feedbackLabelText =
+        verdict === 'correct' ? 'Correct'
+        : verdict === 'incorrect' ? 'Incorrect'
+        : verdict === 'partial' ? 'Partially Correct'
+        : 'Gemini Feedback'
+
     return (
         <View style={s.quizBlock}>
             <View style={s.quizQRow}>
@@ -755,8 +818,8 @@ function QuizQuestionBlock({ q, idx }: { q: QuizQuestionNodeData; idx: number })
             )}
 
             {q.feedback ? (
-                <View style={s.quizFeedbackBlock}>
-                    <Text style={s.quizFeedbackLabel}>Gemini Feedback</Text>
+                <View style={feedbackBlockStyle}>
+                    <Text style={feedbackLabelStyle}>{feedbackLabelText}</Text>
                     <Text style={s.quizFeedbackText}>{q.feedback}</Text>
                 </View>
             ) : null}
@@ -788,7 +851,7 @@ function QuizSection({ pageQuizzes }: { pageQuizzes: PageQuizEntry[] }) {
     if (!pageQuizzes || pageQuizzes.length === 0) return null
     return (
         <View>
-            <Text style={s.quizSectionHeader}>📝 Page Quizzes</Text>
+            <Text style={s.quizSectionHeader}>Page Quizzes</Text>
             {pageQuizzes.map((entry) => (
                 <View key={entry.pageIndex}>
                     <Text style={s.quizPageHeader}>Page {entry.pageIndex} Quiz</Text>

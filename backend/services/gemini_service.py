@@ -413,7 +413,7 @@ async def grade_answer(
     response = await asyncio.to_thread(
         lambda: model.generate_content(
             prompt,
-            generation_config=genai.GenerationConfig(max_output_tokens=600, temperature=0.4),
+            generation_config=genai.GenerationConfig(max_output_tokens=8192, temperature=0.4),
         )
     )
     try:

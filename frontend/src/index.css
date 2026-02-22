@@ -35,3 +35,200 @@ body,
 .react-flow__node .nodrag {
   cursor: text !important;
 }
+
+/* ────────────────────────────────────────────────
+   DARK MODE  –  white ↔ black only, colours kept
+   ──────────────────────────────────────────────── */
+
+/* Root canvas area */
+.dark-mode,
+.dark-mode .react-flow__pane,
+.dark-mode .react-flow__renderer,
+.dark-mode .react-flow__viewport,
+.dark-mode .react-flow__container {
+  background-color: #0a0a0a !important;
+}
+
+/* Background dot pattern */
+.dark-mode .react-flow__background {
+  background-color: #0a0a0a !important;
+}
+.dark-mode .react-flow__background pattern circle,
+.dark-mode .react-flow__background pattern rect {
+  fill: #1e1e1e;
+}
+
+/* ReactFlow built-in controls panel */
+.dark-mode .react-flow__controls {
+  background-color: #1e1e1e;
+  border-color: #3a3a3a;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.6);
+}
+.dark-mode .react-flow__controls-button {
+  background-color: #1e1e1e;
+  border-color: #3a3a3a;
+  color: #d4d4d4;
+}
+.dark-mode .react-flow__controls-button:hover {
+  background-color: #2d2d2d;
+}
+.dark-mode .react-flow__controls-button svg {
+  fill: #d4d4d4;
+}
+
+/* MiniMap */
+.dark-mode .react-flow__minimap {
+  background-color: #1e1e1e !important;
+  border-color: #3a3a3a;
+}
+.dark-mode .react-flow__minimap-mask {
+  fill: rgba(0,0,0,0.6);
+}
+
+/* ReactFlow edge labels */
+.dark-mode .react-flow__edge-textbg {
+  fill: #1e1e1e;
+}
+.dark-mode .react-flow__edge-text {
+  fill: #d4d4d4;
+}
+
+/* ── Tailwind white / gray backgrounds → dark ── */
+/* bg-white: raised clearly above the #0a0a0a canvas so panels/cards are visible */
+.dark-mode .bg-white {
+  background-color: #2a2a2a !important;
+}
+.dark-mode .bg-gray-50 {
+  background-color: #232323 !important;
+}
+.dark-mode .bg-gray-100 {
+  background-color: #2d2d2d !important;
+}
+
+/* Tailwind opacity-modified variants e.g. bg-gray-50/50 */
+.dark-mode [class*="bg-gray-50"] {
+  background-color: #232323 !important;
+}
+
+/* ── React-flow node wrappers – ensure the node bg shows through ── */
+.dark-mode .react-flow__node {
+  background: transparent !important;
+}
+
+/* ── Hover states ── */
+.dark-mode .hover\:bg-gray-50:hover,
+.dark-mode .hover\:bg-gray-100:hover {
+  background-color: #2d2d2d !important;
+}
+
+/* ── Text: dark grays → light ── */
+.dark-mode .text-gray-900,
+.dark-mode .text-gray-800,
+.dark-mode .text-gray-700,
+.dark-mode .text-gray-600,
+.dark-mode .text-black {
+  color: #d4d4d4 !important;
+}
+.dark-mode .text-gray-500 {
+  color: #aaaaaa !important;
+}
+.dark-mode .text-gray-400 {
+  color: #888888 !important;
+}
+
+/* ── Borders ── */
+.dark-mode .border-gray-100,
+.dark-mode .border-gray-200,
+.dark-mode .border-gray-300 {
+  border-color: #3a3a3a !important;
+}
+
+/* ── Shadows ── */
+.dark-mode .shadow-md,
+.dark-mode .shadow-lg,
+.dark-mode .shadow-xl,
+.dark-mode .shadow-sm {
+  box-shadow: 0 4px 20px rgba(0,0,0,0.7) !important;
+}
+
+/* ── Form inputs ── */
+.dark-mode input[type="text"],
+.dark-mode textarea {
+  background-color: #232323 !important;
+  color: #d4d4d4 !important;
+  border-color: #3a3a3a !important;
+}
+.dark-mode input[type="text"]::placeholder,
+.dark-mode textarea::placeholder {
+  color: #666666;
+}
+
+/* ── Prose / ReactMarkdown ── */
+.dark-mode .prose {
+  color: #d4d4d4;
+}
+.dark-mode .prose h1,
+.dark-mode .prose h2,
+.dark-mode .prose h3,
+.dark-mode .prose h4,
+.dark-mode .prose strong {
+  color: #f0f0f0;
+}
+.dark-mode .prose a {
+  color: #60a5fa;
+}
+.dark-mode .prose code {
+  background-color: #2d2d2d;
+  color: #d4d4d4;
+}
+.dark-mode .prose pre {
+  background-color: #232323;
+}
+.dark-mode .prose blockquote {
+  border-color: #3a3a3a;
+  color: #aaa;
+}
+.dark-mode .prose hr {
+  border-color: #3a3a3a;
+}
+.dark-mode .prose thead {
+  border-color: #3a3a3a;
+}
+.dark-mode .prose tbody tr {
+  border-color: #3a3a3a;
+}
+.dark-mode .prose thead th {
+  color: #f0f0f0;
+}
+
+/* ── Yellow highlight block – soften for dark bg ── */
+.dark-mode .bg-yellow-50 {
+  background-color: #2a2500 !important;
+}
+
+/* ── Loading skeletons ── */
+.dark-mode .animate-pulse {
+  background-color: #2d2d2d !important;
+}
+
+/* ── Fixed top-corner UI buttons (Menu / Revision) ──
+   These float over the canvas so they need clear contrast */
+.dark-mode .fixed button.bg-white,
+.dark-mode .fixed > button {
+  background-color: #2a2a2a !important;
+  color: #d4d4d4 !important;
+  border-color: #444 !important;
+}
+
+/* Dropdown menus inside fixed panels */
+.dark-mode .fixed .absolute.bg-white,
+.dark-mode .fixed .absolute[class*="bg-white"] {
+  background-color: #2a2a2a !important;
+  border-color: #3a3a3a !important;
+}
+.dark-mode .fixed .absolute button {
+  color: #d4d4d4 !important;
+}
+.dark-mode .fixed .absolute button:hover {
+  background-color: #2d2d2d !important;
+}

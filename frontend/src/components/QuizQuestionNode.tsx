@@ -136,10 +136,10 @@ export default function QuizQuestionNode({ id, data }: QuizQuestionNodeProps) {
         <div
             data-nodeid={id}
             className="bg-white rounded-xl shadow-lg border-t-4 border-violet-500 border border-gray-200 flex flex-col"
-            style={{ width: 360, minHeight: 200 }}
+            style={{ width: 360, height: 420 }}
         >
-            {/* Header */}
-            <div className="px-3 py-2 bg-violet-50 border-b border-violet-100 flex items-center justify-between rounded-t-xl">
+            {/* Header — fixed */}
+            <div className="flex-shrink-0 px-3 py-2 bg-violet-50 border-b border-violet-100 flex items-center justify-between rounded-t-xl">
                 <div className="flex items-center gap-2">
                     <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-violet-600 text-white text-[10px] font-bold flex-shrink-0">
                         {data.questionNumber}
@@ -181,123 +181,126 @@ export default function QuizQuestionNode({ id, data }: QuizQuestionNodeProps) {
                 )}
             </div>
 
-            {/* Question */}
-            <div className="px-3 pt-3 pb-2 nodrag nopan" style={{ userSelect: 'text', cursor: 'text' }}>
-                <p className="text-sm font-semibold text-gray-800 leading-snug">{data.question}</p>
+            {/* Scrollable body */}
+            <div className="flex-1 overflow-y-auto nodrag nopan" onWheelCapture={(e) => e.stopPropagation()}>
+                {/* Question */}
+                <div className="px-3 pt-3 pb-2" style={{ userSelect: 'text', cursor: 'text' }}>
+                    <p className="text-sm font-semibold text-gray-800 leading-snug">{data.question}</p>
+                </div>
+
+                {/* Answer area */}
+                {!submitted ? (
+                    <form onSubmit={handleSubmitAnswer} className="px-3 pb-3 flex flex-col gap-2">
+                        <textarea
+                            value={draftAnswer}
+                            onChange={(e) => setDraftAnswer(e.target.value)}
+                            placeholder="Write your answer here..."
+                            rows={3}
+                            disabled={data.isGrading}
+                            className="nodrag nopan w-full border border-gray-200 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-violet-400 focus:border-violet-400 outline-none resize-none transition-all disabled:opacity-50"
+                            onWheelCapture={(e) => e.stopPropagation()}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                                    e.preventDefault()
+                                    handleSubmitAnswer(e as unknown as React.FormEvent)
+                                }
+                            }}
+                        />
+                        <button
+                            type="submit"
+                            disabled={!draftAnswer.trim() || data.isGrading}
+                            className="w-full py-1.5 bg-violet-600 text-white text-xs font-semibold rounded-lg hover:bg-violet-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+                        >
+                            {data.isGrading ? (
+                                <>
+                                    <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                    Grading…
+                                </>
+                            ) : (
+                                'Submit Answer'
+                            )}
+                        </button>
+                    </form>
+                ) : (
+                    <div className="px-3 pb-3 flex flex-col gap-3">
+                        {/* Submitted answer */}
+                        <div className="pl-3 border-l-4 border-violet-300 bg-violet-50 rounded-r-lg py-2 pr-2">
+                            <p className="text-[10px] font-bold text-violet-600 uppercase tracking-wider mb-1">Your Answer</p>
+                            <p className="text-xs text-gray-700 leading-relaxed" style={{ userSelect: 'text', cursor: 'text' }}>
+                                {data.userAnswer}
+                            </p>
+                        </div>
+
+                        {/* Gemini feedback */}
+                        {data.isGrading ? (
+                            <div className="space-y-1.5">
+                                <div className="h-2.5 bg-gray-100 rounded animate-pulse w-full" />
+                                <div className="h-2.5 bg-gray-100 rounded animate-pulse w-4/5" />
+                                <div className="h-2.5 bg-gray-100 rounded animate-pulse w-3/5" />
+                            </div>
+                        ) : data.feedback ? (
+                            <div className={`${fs.box} rounded-lg px-3 py-2`}>
+                                <p className={`text-[10px] font-bold ${fs.label} uppercase tracking-wider mb-1.5`}>{fs.title}</p>
+                                <p className="text-xs text-gray-800 leading-relaxed" style={{ userSelect: 'text', cursor: 'text' }}>
+                                    {data.feedback}
+                                </p>
+                            </div>
+                        ) : null}
+
+                        {/* Follow-up chat history */}
+                        {data.chatHistory && data.chatHistory.length > 0 && (
+                            <div className="space-y-2 nodrag nopan">
+                                {data.chatHistory.map((msg, idx) => (
+                                    <div key={idx} className={`${msg.role === 'user' ? 'bg-blue-50/60 border-y border-blue-100 -mx-3 px-3 py-2' : ''}`}>
+                                        {msg.role === 'user' && (
+                                            <p className="text-[10px] font-bold text-blue-600 uppercase tracking-wider mb-0.5">Follow-up</p>
+                                        )}
+                                        <div className={`text-xs ${msg.role === 'user' ? 'text-blue-900 font-medium' : 'text-gray-700 prose prose-xs max-w-none'}`} style={{ userSelect: 'text', cursor: 'text' }}>
+                                            {msg.role === 'user' ? msg.content : (
+                                                <ReactMarkdown
+                                                    remarkPlugins={[remarkGfm]}
+                                                    rehypePlugins={[rehypeRaw, [rehypeSanitize, customSchema] as [typeof rehypeSanitize, SanitizeOptions]]}
+                                                >
+                                                    {msg.content}
+                                                </ReactMarkdown>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                )}
             </div>
 
-            {/* Answer area */}
-            {!submitted ? (
-                <form onSubmit={handleSubmitAnswer} className="px-3 pb-3 flex flex-col gap-2">
-                    <textarea
-                        value={draftAnswer}
-                        onChange={(e) => setDraftAnswer(e.target.value)}
-                        placeholder="Write your answer here..."
-                        rows={3}
-                        disabled={data.isGrading}
-                        className="nodrag nopan w-full border border-gray-200 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-violet-400 focus:border-violet-400 outline-none resize-none transition-all disabled:opacity-50"
-                        onWheelCapture={(e) => e.stopPropagation()}
-                        onKeyDown={(e) => {
-                            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                                e.preventDefault()
-                                handleSubmitAnswer(e as unknown as React.FormEvent)
-                            }
-                        }}
+            {/* Follow-up input — fixed at bottom, only after feedback */}
+            {submitted && data.feedback && !data.isGrading && (
+                <form
+                    onSubmit={handleFollowUpSubmit}
+                    className="flex-shrink-0 flex gap-2 items-center px-3 py-2 border-t border-gray-100 bg-white rounded-b-xl"
+                >
+                    <input
+                        type="text"
+                        value={followUp}
+                        onChange={(e) => setFollowUp(e.target.value)}
+                        placeholder="Ask a follow-up..."
+                        disabled={isFollowUpLoading}
+                        className="nodrag nopan flex-1 bg-white border border-gray-200 rounded-md px-2 py-1.5 text-xs focus:ring-1 focus:ring-violet-400 focus:border-violet-400 outline-none transition-all disabled:opacity-50"
                     />
                     <button
                         type="submit"
-                        disabled={!draftAnswer.trim() || data.isGrading}
-                        className="w-full py-1.5 bg-violet-600 text-white text-xs font-semibold rounded-lg hover:bg-violet-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+                        disabled={!followUp.trim() || isFollowUpLoading}
+                        className="p-1.5 bg-violet-600 text-white rounded-md hover:bg-violet-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
                     >
-                        {data.isGrading ? (
-                            <>
-                                <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                Grading…
-                            </>
+                        {isFollowUpLoading ? (
+                            <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                         ) : (
-                            'Submit Answer'
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            </svg>
                         )}
                     </button>
                 </form>
-            ) : (
-                <div className="px-3 pb-3 flex flex-col gap-3">
-                    {/* Submitted answer */}
-                    <div className="pl-3 border-l-4 border-violet-300 bg-violet-50 rounded-r-lg py-2 pr-2">
-                        <p className="text-[10px] font-bold text-violet-600 uppercase tracking-wider mb-1">Your Answer</p>
-                        <p className="text-xs text-gray-700 leading-relaxed" style={{ userSelect: 'text', cursor: 'text' }}>
-                            {data.userAnswer}
-                        </p>
-                    </div>
-
-                    {/* Gemini feedback */}
-                    {data.isGrading ? (
-                        <div className="space-y-1.5">
-                            <div className="h-2.5 bg-gray-100 rounded animate-pulse w-full" />
-                            <div className="h-2.5 bg-gray-100 rounded animate-pulse w-4/5" />
-                            <div className="h-2.5 bg-gray-100 rounded animate-pulse w-3/5" />
-                        </div>
-                    ) : data.feedback ? (
-                        <div className={`${fs.box} rounded-lg px-3 py-2`}>
-                            <p className={`text-[10px] font-bold ${fs.label} uppercase tracking-wider mb-1.5`}>{fs.title}</p>
-                            <p className="text-xs text-gray-800 leading-relaxed" style={{ userSelect: 'text', cursor: 'text' }}>
-                                {data.feedback}
-                            </p>
-                        </div>
-                    ) : null}
-
-                    {/* Follow-up chat history */}
-                    {data.chatHistory && data.chatHistory.length > 0 && (
-                        <div className="space-y-2 nodrag nopan">
-                            {data.chatHistory.map((msg, idx) => (
-                                <div key={idx} className={`${msg.role === 'user' ? 'bg-blue-50/60 border-y border-blue-100 -mx-3 px-3 py-2' : ''}`}>
-                                    {msg.role === 'user' && (
-                                        <p className="text-[10px] font-bold text-blue-600 uppercase tracking-wider mb-0.5">Follow-up</p>
-                                    )}
-                                    <div className={`text-xs ${msg.role === 'user' ? 'text-blue-900 font-medium' : 'text-gray-700 prose prose-xs max-w-none'}`} style={{ userSelect: 'text', cursor: 'text' }}>
-                                        {msg.role === 'user' ? msg.content : (
-                                            <ReactMarkdown
-                                                remarkPlugins={[remarkGfm]}
-                                                rehypePlugins={[rehypeRaw, [rehypeSanitize, customSchema] as [typeof rehypeSanitize, SanitizeOptions]]}
-                                            >
-                                                {msg.content}
-                                            </ReactMarkdown>
-                                        )}
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-
-                    {/* Follow-up input — only show after feedback is available */}
-                    {data.feedback && !data.isGrading && (
-                        <form
-                            onSubmit={handleFollowUpSubmit}
-                            className="flex gap-2 items-center pt-1 border-t border-gray-100"
-                        >
-                            <input
-                                type="text"
-                                value={followUp}
-                                onChange={(e) => setFollowUp(e.target.value)}
-                                placeholder="Ask a follow-up..."
-                                disabled={isFollowUpLoading}
-                                className="nodrag nopan flex-1 bg-white border border-gray-200 rounded-md px-2 py-1.5 text-xs focus:ring-1 focus:ring-violet-400 focus:border-violet-400 outline-none transition-all disabled:opacity-50"
-                            />
-                            <button
-                                type="submit"
-                                disabled={!followUp.trim() || isFollowUpLoading}
-                                className="p-1.5 bg-violet-600 text-white rounded-md hover:bg-violet-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-                            >
-                                {isFollowUpLoading ? (
-                                    <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                ) : (
-                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                    </svg>
-                                )}
-                            </button>
-                        </form>
-                    )}
-                </div>
             )}
 
             {/* Handles */}
