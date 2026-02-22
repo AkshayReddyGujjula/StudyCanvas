@@ -7,7 +7,13 @@ import {
     MiniMap,
     BackgroundVariant,
     useReactFlow,
+    addEdge,
+    applyEdgeChanges,
+    ConnectionMode,
+    ConnectionLineType,
     type Node,
+    type Connection,
+    type EdgeChange,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 
@@ -82,6 +88,19 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
     const updateNodeData = useCanvasStore((s) => s.updateNodeData)
     const setActiveAbortController = useCanvasStore((s) => s.setActiveAbortController)
     const persistToLocalStorage = useCanvasStore((s) => s.persistToLocalStorage)
+
+    const onConnect = useCallback((connection: Connection) => {
+        const newEdge = {
+            ...connection,
+            id: `user-edge-${Date.now()}`,
+            type: 'smoothstep',
+            animated: false,
+            style: { stroke: '#6366f1', strokeWidth: 2 },
+        }
+        setEdges((prev) => addEdge(newEdge, prev))
+        persistToLocalStorage()
+    }, [setEdges, persistToLocalStorage])
+
     const currentPage = useCanvasStore((s) => s.currentPage)
     const pageMarkdowns = useCanvasStore((s) => s.pageMarkdowns)
     const setCurrentPage = useCanvasStore((s) => s.setCurrentPage)
@@ -839,14 +858,24 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
                         return next
                     })
                 }}
-                onEdgesChange={() => {
-                    // Edges are not user-deletable in MVP — no-op
+                onEdgesChange={(changes: EdgeChange[]) => {
+                    // Only allow removal of user-created edges (prefixed with 'user-edge-')
+                    const filtered = changes.filter((c) =>
+                        c.type !== 'remove' || (c.id ?? '').startsWith('user-edge-')
+                    )
+                    if (filtered.length > 0) {
+                        setEdges((prev) => applyEdgeChanges(filtered, prev))
+                    }
                 }}
+                onConnect={onConnect}
+                connectionMode={ConnectionMode.Loose}
+                connectionLineType={ConnectionLineType.SmoothStep}
+                connectionLineStyle={{ stroke: '#6366f1', strokeWidth: 2 }}
                 fitView={false}
                 nodesDraggable
-                nodesConnectable={false}
-                edgesFocusable={false}
-                deleteKeyCode={null}
+                nodesConnectable
+                edgesFocusable
+                deleteKeyCode="Backspace"
                 onNodeDragStop={handleNodeDragStop}
             >
                 <Background variant={BackgroundVariant.Dots} />

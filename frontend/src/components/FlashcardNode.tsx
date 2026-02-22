@@ -255,11 +255,10 @@ export default function FlashcardNode({ id, data }: FlashcardNodeProps) {
                 )}
 
                 {/* ── Handles ──────────────────────────────────────────── */}
-                <Handle type="source" position={Position.Right} id="right" style={{ background: '#0d9488' }} />
-                <Handle type="target" position={Position.Left} id="left" style={{ background: '#0d9488' }} />
-                <Handle type="source" position={Position.Top} id="top" style={{ background: '#0d9488' }} />
-                <Handle type="source" position={Position.Bottom} id="bottom" style={{ background: '#0d9488' }} />
-                <Handle type="target" position={Position.Right} id="right-target" style={{ background: '#0d9488' }} />
+                <Handle type="source" position={Position.Top} id="top" className="!w-3 !h-3 !bg-teal-500 !border-2 !border-white hover:!scale-125 !transition-transform" />
+                <Handle type="source" position={Position.Bottom} id="bottom" className="!w-3 !h-3 !bg-teal-500 !border-2 !border-white hover:!scale-125 !transition-transform" />
+                <Handle type="source" position={Position.Left} id="left" className="!w-3 !h-3 !bg-teal-500 !border-2 !border-white hover:!scale-125 !transition-transform" />
+                <Handle type="source" position={Position.Right} id="right" className="!w-3 !h-3 !bg-teal-500 !border-2 !border-white hover:!scale-125 !transition-transform" />
             </div>
         </>
     )
