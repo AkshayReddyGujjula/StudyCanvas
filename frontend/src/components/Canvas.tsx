@@ -146,7 +146,12 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
 
         const cNode = nodes.find((n) => n.type === 'contentNode')
         if (!cNode) return
-        const cHeight = cNode.measured?.height ?? 600
+        // Read the actual DOM height at click-time so that a collapsed/minimised
+        // ContentNode (which uses maxHeight: 80vh internally) is measured correctly.
+        // cNode.measured?.height can be stale because isExpanded is local to ContentNode
+        // and React Flow's ResizeObserver may not have propagated yet.
+        const domEl = document.querySelector(`[data-nodeid="${cNode.id}"]`) as HTMLElement | null
+        const cHeight = domEl ? domEl.offsetHeight : (cNode.measured?.height ?? 600)
         const cWidth = typeof cNode.style?.width === 'number' ? cNode.style.width : 700
         const positions = getQuizNodePositions(
             cNode.position.x, cNode.position.y, cHeight, cWidth as number, questions.length,
