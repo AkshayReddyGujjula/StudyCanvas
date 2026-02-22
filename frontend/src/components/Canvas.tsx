@@ -52,7 +52,7 @@ interface SelectionState {
     selectedText: string
     sourceNodeId: string
     rect: DOMRect
-    containerRect: DOMRect | null
+    mousePos: { x: number; y: number }
 }
 
 interface ModalState {
@@ -224,7 +224,7 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
             setCenter(positions[midIdx].x + 180, positions[0].y + 120, { zoom: getZoom(), duration: 700 })
         }
         persistToLocalStorage()
-        setToast(`✅ ${questions.length} quiz questions generated!`)
+        setToast(`${questions.length} quiz questions generated!`)
         if (toastTimeout) clearTimeout(toastTimeout)
         toastTimeout = setTimeout(() => setToast(null), 3000)
     }, [
@@ -309,7 +309,6 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
     // Text selection hook
     const handleSelection = useCallback((result: SelectionState | null) => {
         if (result) {
-            // containerRect is already computed inside the hook from the real nodeEl reference
             setSelection(result)
         } else {
             setSelection(null)
@@ -640,7 +639,7 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
         }
 
         setIsGeneratingFlashcards(true)
-        showToast('✨ Generating flashcards from your struggling topics…')
+        showToast('Generating flashcards from your struggling topics…')
 
         const payload = strugglingNodes.map((n) => {
             const d = n.data as unknown as AnswerNodeData
@@ -728,7 +727,7 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
             const mid = flashcardNodes[Math.floor(flashcardNodes.length / 2)]
             setCenter(mid.position.x + cardWidth / 2, mid.position.y + 100, { zoom: getZoom(), duration: 700 })
         }
-        showToast(`🃏 ${cards.length} flashcards created!`)
+        showToast(`${cards.length} flashcards created!`)
     }, [nodes, fileData, currentPage, setNodes, setEdges, persistToLocalStorage, setCenter, getZoom, showToast])
 
     // Download Q&A as a PDF
@@ -900,7 +899,7 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
 
             {/* Ask Gemini popup */}
             {selection && (
-                <AskGeminiPopup rect={selection.rect} containerRect={selection.containerRect} onAsk={handleAsk} />
+                <AskGeminiPopup rect={selection.rect} nodeId={selection.sourceNodeId} mousePos={selection.mousePos} onAsk={handleAsk} />
             )}
 
             {/* Question modal */}
@@ -934,7 +933,12 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
                     onClick={() => { setShowMenu(!showMenu); setShowRevisionMenu(false) }}
                     className="flex items-center gap-2 px-4 py-2 bg-white text-gray-700 text-sm font-medium rounded-lg shadow-md border border-gray-200 hover:bg-gray-50 transition-colors"
                 >
-                    ☰ Menu
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="3" y1="6" x2="21" y2="6" />
+                        <line x1="3" y1="12" x2="21" y2="12" />
+                        <line x1="3" y1="18" x2="21" y2="18" />
+                    </svg>
+                    Menu
                 </button>
                 {showMenu && (
                     <div className="absolute top-full left-0 mt-2 flex flex-col gap-1 w-48 bg-white border border-gray-200 shadow-lg rounded-lg p-2">
@@ -950,7 +954,13 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
                             onClick={() => { setShowMenu(false); setShowTools(true); }}
                             className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors"
                         >
-                            ⚙️ Tools (Context)
+                            <span className="flex items-center gap-1.5">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <circle cx="12" cy="12" r="3" />
+                                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                                </svg>
+                                Tools (Context)
+                            </span>
                         </button>
                     </div>
                 )}
@@ -962,7 +972,12 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
                     onClick={() => { setShowRevisionMenu(!showRevisionMenu); setShowMenu(false) }}
                     className="flex items-center gap-2 px-4 py-2 bg-white text-gray-700 text-sm font-medium rounded-lg shadow-md border border-gray-200 hover:bg-gray-50 transition-colors"
                 >
-                    🔄 Revision
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="23 4 23 10 17 10" />
+                        <polyline points="1 20 1 14 7 14" />
+                        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                    </svg>
+                    Revision
                 </button>
                 {showRevisionMenu && (
                     <div className="absolute top-full right-0 mt-2 flex flex-col gap-1 w-56 bg-white border border-gray-200 shadow-lg rounded-lg p-2">
@@ -970,14 +985,36 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
                             onClick={() => handleRevisionMode()}
                             className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors"
                         >
-                            📝 Revision Mode (Quiz)
+                            <span className="flex items-center gap-1.5">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                                </svg>
+                                Revision Mode (Quiz)
+                            </span>
                         </button>
                         <button
                             onClick={handleCreateFlashCards}
                             disabled={isGeneratingFlashcards}
                             className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                         >
-                            {isGeneratingFlashcards ? '⏳ Generating flashcards…' : '🃏 Create Flash Cards'}
+                            {isGeneratingFlashcards ? (
+                                <span className="flex items-center gap-1.5">
+                                    <svg className="animate-spin h-3.5 w-3.5 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                                    </svg>
+                                    Generating flashcards…
+                                </span>
+                            ) : (
+                                <span className="flex items-center gap-1.5">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <rect x="2" y="5" width="20" height="14" rx="2" />
+                                        <line x1="2" y1="10" x2="22" y2="10" />
+                                    </svg>
+                                    Create Flash Cards
+                                </span>
+                            )}
                         </button>
                         <div style={{ height: 1, backgroundColor: '#e5e7eb', margin: '4px 6px' }} />
                         <button
@@ -985,7 +1022,24 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
                             disabled={!nodes.some((n) => n.type === 'answerNode' || n.type === 'quizQuestionNode') || isGeneratingPDF}
                             className="text-left px-3 py-2 hover:bg-indigo-50 rounded-md text-sm text-indigo-700 font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                         >
-                            {isGeneratingPDF ? '⏳ Generating...' : '💾 Save Notes (PDF)'}
+                            {isGeneratingPDF ? (
+                                <span className="flex items-center gap-1.5">
+                                    <svg className="animate-spin h-3.5 w-3.5 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                                    </svg>
+                                    Generating…
+                                </span>
+                            ) : (
+                                <span className="flex items-center gap-1.5">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                        <polyline points="7 10 12 15 17 10" />
+                                        <line x1="12" y1="15" x2="12" y2="3" />
+                                    </svg>
+                                    Save Notes (PDF)
+                                </span>
+                            )}
                         </button>
                     </div>
                 )}

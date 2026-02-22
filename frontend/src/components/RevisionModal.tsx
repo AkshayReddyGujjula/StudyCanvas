@@ -189,13 +189,19 @@ export default function RevisionModal({ nodes, rawText, onClose }: RevisionModal
                 {/* ── Score screen ── */}
                 {!loading && !error && showScore && (
                     <div className="text-center py-12">
-                        <div className="text-6xl mb-4">🎯</div>
+                        <div className="mb-4 flex justify-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-16 w-16 text-indigo-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                                <circle cx="12" cy="12" r="10" />
+                                <circle cx="12" cy="12" r="6" />
+                                <circle cx="12" cy="12" r="2" />
+                            </svg>
+                        </div>
                         <h2 className="text-2xl font-bold text-gray-800 mb-2">
                             You scored {score}/{questions?.length ?? 0}
                         </h2>
                         <p className="text-gray-600 mb-6">
                             {score === questions?.length
-                                ? "Perfect score! You've got this! 🎉"
+                                ? "Perfect score! You've got this!"
                                 : score >= Math.floor((questions?.length ?? 0) / 2)
                                     ? 'Good effort! Keep reviewing the topics you missed.'
                                     : "Keep studying — you'll get there!"}
@@ -315,11 +321,20 @@ export default function RevisionModal({ nodes, rawText, onClose }: RevisionModal
                             >
                                 <div className="flex items-center gap-2 mb-1.5 font-bold text-base">
                                     {validationResult.status === 'correct' ? (
-                                        <>✅ Correct</>
+                                        <span className="flex items-center gap-1.5">
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-green-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                                            Correct
+                                        </span>
                                     ) : validationResult.status === 'partial' ? (
-                                        <>🌗 Partially Correct</>
+                                        <span className="flex items-center gap-1.5">
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-orange-600 shrink-0" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 1 0 0 20A10 10 0 0 0 12 2zm0 18V4a8 8 0 0 1 0 16z" /></svg>
+                                            Partially Correct
+                                        </span>
                                     ) : (
-                                        <>❌ Incorrect</>
+                                        <span className="flex items-center gap-1.5">
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-red-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                                            Incorrect
+                                        </span>
                                     )}
                                 </div>
                                 <strong className="opacity-75">Explanation:</strong> {validationResult.explanation}

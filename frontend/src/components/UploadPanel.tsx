@@ -109,7 +109,13 @@ export default function UploadPanel({ onUploaded }: UploadPanelProps) {
             <div className="bg-white rounded-2xl shadow-xl p-10 max-w-lg w-full mx-4">
                 {/* Logo/Title */}
                 <div className="text-center mb-8">
-                    <div className="text-4xl mb-2">🗺️</div>
+                    <div className="mb-2 flex justify-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-indigo-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                            <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6" />
+                            <line x1="8" y1="2" x2="8" y2="18" />
+                            <line x1="16" y1="6" x2="16" y2="22" />
+                        </svg>
+                    </div>
                     <h1 className="text-2xl font-bold text-gray-900">StudyCanvas</h1>
                     <p className="text-sm text-gray-500 mt-1">
                         Every other AI gives you a conversation. We give you a map of your understanding.
@@ -128,7 +134,14 @@ export default function UploadPanel({ onUploaded }: UploadPanelProps) {
                             : 'border-gray-200 hover:border-indigo-400 hover:bg-gray-50'
                         }`}
                 >
-                    <div className="text-3xl mb-3">📄</div>
+                    <div className="mb-3 flex justify-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                            <polyline points="14 2 14 8 20 8" />
+                            <line x1="16" y1="13" x2="8" y2="13" />
+                            <line x1="16" y1="17" x2="8" y2="17" />
+                        </svg>
+                    </div>
                     <p className="text-sm font-medium text-gray-700">
                         Drag & drop your PDF here
                     </p>

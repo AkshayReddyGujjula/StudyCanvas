@@ -1,10 +1,10 @@
 import { useEffect } from 'react'
 
-interface SelectionResult {
+export interface SelectionResult {
     selectedText: string
     sourceNodeId: string
     rect: DOMRect
-    containerRect: DOMRect | null
+    mousePos: { x: number; y: number }
 }
 
 type SetterFn = (result: SelectionResult | null) => void
@@ -23,7 +23,6 @@ export function useTextSelection(onSelection: SetterFn) {
             const range = selection!.getRangeAt(0)
             let nodeEl: Element | null = null
 
-            // Prefer finding the node from the selection's actual DOM nodes instead of where the mouse was released
             if (range.commonAncestorContainer) {
                 const container = range.commonAncestorContainer
                 const element = container.nodeType === Node.ELEMENT_NODE
@@ -43,13 +42,12 @@ export function useTextSelection(onSelection: SetterFn) {
                 return
             }
 
-            // Get bounding rect of the selection in viewport coordinates
             const rect = range.getBoundingClientRect()
-            // Capture the container's bounding rect right here while we have the element reference,
-            // so the popup can anchor itself to the PDF panel's edges rather than the selection.
-            const containerRect = nodeEl.getBoundingClientRect()
+            // Mouse release position is the most reliable anchor — it is always
+            // in viewport coordinates and unaffected by ReactFlow transforms.
+            const mousePos = { x: event.clientX, y: event.clientY }
 
-            onSelection({ selectedText: text, sourceNodeId, rect, containerRect })
+            onSelection({ selectedText: text, sourceNodeId, rect, mousePos })
         }
 
         document.addEventListener('mouseup', handleMouseUp)

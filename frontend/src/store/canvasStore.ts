@@ -40,6 +40,7 @@ interface CanvasActions {
     setEdges: (edges: Edge[] | ((prev: Edge[]) => Edge[])) => void
     setFileData: (data: FileData) => void
     addHighlight: (entry: HighlightEntry) => void
+    removeHighlight: (nodeId: string) => void
     updateNodeData: (nodeId: string, data: Partial<Record<string, unknown>>) => void
     setActiveAbortController: (controller: AbortController | null) => void
     resetCanvas: () => void
@@ -84,6 +85,9 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
 
     addHighlight: (entry) =>
         set((state) => ({ highlights: [...state.highlights, entry] })),
+
+    removeHighlight: (nodeId) =>
+        set((state) => ({ highlights: state.highlights.filter((h) => h.nodeId !== nodeId) })),
 
     updateNodeData: (nodeId, data) =>
         set((state) => ({

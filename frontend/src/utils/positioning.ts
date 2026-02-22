@@ -61,7 +61,7 @@ export function getNewNodePosition(
                     x: contentX - 360 - 80,
                     y: contentY,
                     sourceHandle: 'left',
-                    targetHandle: 'right-target',
+                    targetHandle: 'right',
                 }
             }
             const sortedLeft = [...leftSideNodes].sort((a, b) => a.position.y - b.position.y)
@@ -71,7 +71,7 @@ export function getNewNodePosition(
                 x: contentX - 360 - 80,
                 y: last.position.y + lastHeight + 1,
                 sourceHandle: 'left',
-                targetHandle: 'right-target',
+                targetHandle: 'right',
             }
         }
     } else {
@@ -215,7 +215,7 @@ export function resolveOverlaps(nodes: Node[]): Node[] {
  * shortest path between source and target based on their current positions.
  *
  * ContentNode has 10 handles per side (right-0..right-9 / left-0..left-9).
- * AnswerNode has single handles: right, left, right-target, top, bottom.
+ * AnswerNode has single handles: right, left, top, bottom.
  */
 export function rerouteEdgeHandles(
     draggedNodeId: string,
@@ -257,7 +257,7 @@ export function rerouteEdgeHandles(
                 targetHandle = 'left'
             } else {
                 sourceHandle = `left-${bucketIdx}`
-                targetHandle = 'right-target'
+                targetHandle = 'right'
             }
         } else {
             // AnswerNode → AnswerNode
@@ -266,7 +266,7 @@ export function rerouteEdgeHandles(
                 targetHandle = 'left'
             } else {
                 sourceHandle = 'left'
-                targetHandle = 'right-target'
+                targetHandle = 'right'
             }
         }
 

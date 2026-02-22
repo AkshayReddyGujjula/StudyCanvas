@@ -21,7 +21,10 @@ export default function ToolsModal({ onClose }: { onClose: () => void }) {
                 <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
                     <h3 className="text-lg font-semibold text-gray-800">User Context Tools</h3>
                     <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors">
-                        ✕
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18" />
+                            <line x1="6" y1="6" x2="18" y2="18" />
+                        </svg>
                     </button>
                 </div>
                 <div className="p-6 flex flex-col gap-4">

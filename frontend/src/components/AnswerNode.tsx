@@ -32,6 +32,7 @@ export default function AnswerNode({ id, data }: AnswerNodeProps) {
     const persistToLocalStorage = useCanvasStore((s) => s.persistToLocalStorage)
     const setNodes = useCanvasStore((s) => s.setNodes)
     const setEdges = useCanvasStore((s) => s.setEdges)
+    const removeHighlight = useCanvasStore((s) => s.removeHighlight)
     const fileData = useCanvasStore((s) => s.fileData)
     const userDetails = useCanvasStore((s) => s.userDetails)
     const [followUp, setFollowUp] = useState('')
@@ -43,11 +44,12 @@ export default function AnswerNode({ id, data }: AnswerNodeProps) {
             setConfirmDelete(true)
             return
         }
-        // Confirmed — remove node and its edges
+        // Confirmed — remove node, its edges, and any associated highlight
         setNodes((prev) => prev.filter((n) => n.id !== id))
         setEdges((prev) => prev.filter((e) => e.source !== id && e.target !== id))
+        removeHighlight(id)
         persistToLocalStorage()
-    }, [confirmDelete, id, setNodes, setEdges, persistToLocalStorage])
+    }, [confirmDelete, id, setNodes, setEdges, removeHighlight, persistToLocalStorage])
 
     const borderClass = STATUS_BORDER_CLASSES[data.status] || 'border-blue-500'
 

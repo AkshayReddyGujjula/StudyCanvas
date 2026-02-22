@@ -56,7 +56,9 @@ function replaceOutsideCodeBlocks(
     return content.replace(regex, (match, offset) => {
         const inProtectedRange = ranges.some((r) => offset >= r.start && offset < r.end)
         if (inProtectedRange) return match
-        return `<mark class="bg-yellow-200 cursor-pointer" data-highlight-id="${highlight.id}">${highlight.text}</mark>`
+        // Use `match` (the actual text from the markdown source) so any soft
+        // newlines inside the matched span are preserved in the output.
+        return `<mark class="bg-yellow-200 cursor-pointer" data-highlight-id="${highlight.id}">${match}</mark>`
     })
 }
 
@@ -87,7 +89,12 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
             }
             const protectedRanges = [...codeBlockRanges, ...markTagRanges]
 
-            const escaped = highlight.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+            // Escape regex special chars, then replace spaces with a flexible
+            // whitespace pattern so that a space in the selected text can match
+            // a newline (soft wrap) in the raw markdown source.
+            const escaped = highlight.text
+                .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+                .replace(/ +/g, '[ \\t\\r\\n]+')
             const regex = new RegExp(escaped, 'g')
             content = replaceOutsideCodeBlocks(content, regex, highlight, protectedRanges)
         }

@@ -24,7 +24,15 @@ export default function App() {
       try {
         const state = JSON.parse(saved)
         if (state.nodes) setNodes(state.nodes)
-        if (state.edges) setEdges(state.edges)
+        if (state.edges) {
+          // Migrate old edges that used the non-existent 'right-target' handle id.
+          // That handle was never defined on AnswerNode — the correct id is 'right'.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const migratedEdges = (state.edges as any[]).map((e: any) =>
+            e.targetHandle === 'right-target' ? { ...e, targetHandle: 'right' } : e
+          )
+          setEdges(migratedEdges)
+        }
         // setFileData resets currentPage to 1 and recalculates pageMarkdowns —
         // we override currentPage afterwards with the persisted value.
         if (state.fileData) setFileData(state.fileData)
