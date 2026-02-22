@@ -7,11 +7,11 @@ import {
     MiniMap,
     BackgroundVariant,
     useReactFlow,
-    addEdge,
     applyEdgeChanges,
     ConnectionMode,
     ConnectionLineType,
     type Node,
+    type Edge,
     type Connection,
     type EdgeChange,
 } from '@xyflow/react'
@@ -65,7 +65,7 @@ interface ModalState {
 let toastTimeout: ReturnType<typeof setTimeout> | null = null
 
 export default function Canvas({ onReset }: { onReset?: () => void }) {
-    const { setCenter, getZoom, fitView } = useReactFlow()
+    const { setCenter, getZoom, fitView, setViewport, getViewport } = useReactFlow()
     const [selection, setSelection] = useState<SelectionState | null>(null)
     const [modal, setModal] = useState<ModalState | null>(null)
     const [showRevision, setShowRevision] = useState(false)
@@ -77,6 +77,7 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
     const [isGeneratingPDF, setIsGeneratingPDF] = useState(false)
     const [isDarkMode, setIsDarkMode] = useState(false)
     const streamingNodesRef = useRef<Set<string>>(new Set())
+    const containerRef = useRef<HTMLDivElement>(null)
 
     const nodes = useCanvasStore((s) => s.nodes)
     const edges = useCanvasStore((s) => s.edges)
@@ -90,14 +91,16 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
     const persistToLocalStorage = useCanvasStore((s) => s.persistToLocalStorage)
 
     const onConnect = useCallback((connection: Connection) => {
-        const newEdge = {
+        const newEdge: Edge = {
             ...connection,
             id: `user-edge-${Date.now()}`,
+            source: connection.source ?? '',
+            target: connection.target ?? '',
             type: 'smoothstep',
             animated: false,
             style: { stroke: '#6366f1', strokeWidth: 2 },
         }
-        setEdges((prev) => addEdge(newEdge, prev))
+        setEdges((prev) => [...prev.filter((e) => e.id !== newEdge.id), newEdge])
         persistToLocalStorage()
     }, [setEdges, persistToLocalStorage])
 
@@ -348,6 +351,60 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
         document.addEventListener('mouseup', cleanup)
         return () => document.removeEventListener('mouseup', cleanup)
     }, [])
+
+    // Boost 2-finger trackpad zoom sensitivity.
+    // We bypass D3-zoom entirely for pinch gestures (ctrlKey:true wheel events) and
+    // drive zoom directly through ReactFlow's setViewport API so the multiplier is
+    // guaranteed to be applied.  2-finger pan (ctrlKey:false) is also boosted.
+    const MIN_ZOOM = 0.1
+    const MAX_ZOOM = 4
+    const ZOOM_SPEED = 0.015   // per deltaY unit — raise to taste
+    const PAN_SPEED  = 3       // multiplier for 2-finger pan
+    useEffect(() => {
+        const el = containerRef.current
+        if (!el) return
+
+        const handleWheel = (e: WheelEvent) => {
+            // Only intercept trackpad-style wheel events (not plain mouse scroll on content).
+            // Panning inside a node's scrollable area should not move the canvas, so ignore
+            // events that originate inside a .nodrag container.
+            if ((e.target as Element).closest('.nodrag')) return
+
+            e.preventDefault()
+            e.stopImmediatePropagation()
+
+            const vp = getViewport()
+
+            if (e.ctrlKey) {
+                // ── Pinch-to-zoom ─────────────────────────────────────────────
+                const delta = -e.deltaY * ZOOM_SPEED
+                const newZoom = Math.min(Math.max(vp.zoom * Math.exp(delta), MIN_ZOOM), MAX_ZOOM)
+                const ratio  = newZoom / vp.zoom
+
+                // Zoom toward the cursor position
+                const rect   = el.getBoundingClientRect()
+                const mouseX = e.clientX - rect.left
+                const mouseY = e.clientY - rect.top
+
+                setViewport({
+                    zoom: newZoom,
+                    x: mouseX - (mouseX - vp.x) * ratio,
+                    y: mouseY - (mouseY - vp.y) * ratio,
+                })
+            } else {
+                // ── 2-finger pan ──────────────────────────────────────────────
+                setViewport({
+                    zoom: vp.zoom,
+                    x: vp.x - e.deltaX * PAN_SPEED,
+                    y: vp.y - e.deltaY * PAN_SPEED,
+                })
+            }
+        }
+
+        el.addEventListener('wheel', handleWheel, { passive: false, capture: true })
+        return () => el.removeEventListener('wheel', handleWheel, { capture: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [setViewport, getViewport])
 
     // Show toast helper
     const showToast = useCallback((msg: string) => {
@@ -808,7 +865,7 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
     }, [nodes, edges, fileData, showToast])
 
     return (
-        <div style={{ width: '100vw', height: '100vh' }} className={isDarkMode ? 'dark-mode' : ''}>
+        <div ref={containerRef} style={{ width: '100vw', height: '100vh' }} className={isDarkMode ? 'dark-mode' : ''}>
             <ReactFlow
                 nodes={visibleNodes}
                 edges={visibleEdges}
@@ -882,6 +939,8 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
                 connectionLineType={ConnectionLineType.SmoothStep}
                 connectionLineStyle={{ stroke: '#6366f1', strokeWidth: 2 }}
                 fitView={false}
+                zoomOnScroll={false}
+                panOnScroll={false}
                 nodesDraggable
                 nodesConnectable
                 edgesFocusable
