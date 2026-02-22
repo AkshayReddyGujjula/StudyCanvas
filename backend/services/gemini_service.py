@@ -58,28 +58,6 @@ async def generate_title(raw_text: str) -> str:
     return title
 
 
-def convert_to_markdown(raw_text: str) -> str:
-    """
-    Sends the raw extracted PDF text to Gemini and returns structured Markdown.
-    Preserves all content; inserts ## Page X headers at --- separators.
-    """
-    model = genai.GenerativeModel("gemini-2.5-flash")
-    prompt = (
-        "You are a document formatting assistant. Convert the following raw text extracted from a PDF "
-        "into well-structured Markdown.\n\n"
-        "Rules:\n"
-        "- Preserve ALL content exactly — do not summarise, omit, or paraphrase anything.\n"
-        "- Restore proper headings using # for main titles and ## for sub-sections.\n"
-        "- Convert list items into proper Markdown bullet lists using -.\n"
-        "- Preserve bold/italic emphasis where it is clearly implied.\n"
-        "- At every occurrence of a line containing only '---', replace it with a ## Page X header "
-        "(where X increments starting from 1 for the first --- separator, meaning Page 2 comes after the first ---, etc.).\n"
-        "- Do not add any preamble or explanation — output only the Markdown.\n\n"
-        f"Raw text:\n\n{raw_text}"
-    )
-    response = model.generate_content(prompt)
-    return response.text
-
 
 def _needs_pdf_context(question: str, highlighted_text: str) -> bool:
     """

@@ -926,7 +926,7 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
             <div className="fixed top-4 right-4 z-40">
                 <button
                     onClick={() => { setShowRevisionMenu(!showRevisionMenu); setShowMenu(false) }}
-                    className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white text-sm font-medium rounded-lg shadow-md hover:bg-teal-700 transition-colors"
+                    className="flex items-center gap-2 px-4 py-2 bg-white text-gray-700 text-sm font-medium rounded-lg shadow-md border border-gray-200 hover:bg-gray-50 transition-colors"
                 >
                     🔄 Revision
                 </button>
@@ -941,7 +941,7 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
                         <button
                             onClick={handleCreateFlashCards}
                             disabled={isGeneratingFlashcards}
-                            className="text-left px-3 py-2 hover:bg-teal-50 rounded-md text-sm text-teal-700 font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                            className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                             {isGeneratingFlashcards ? '⏳ Generating flashcards…' : '🃏 Create Flash Cards'}
                         </button>

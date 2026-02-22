@@ -1,6 +1,6 @@
 fastapi
 uvicorn[standard]
-pymupdf
+pymupdf4llm
 google-generativeai
 python-multipart
 python-dotenv
