@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { ReactFlowProvider } from '@xyflow/react'
+import { Analytics } from '@vercel/analytics/react'
 import Canvas from './components/Canvas'
 import UploadPanel from './components/UploadPanel'
 import { useCanvasStore, STORAGE_KEY } from './store/canvasStore'
@@ -78,6 +79,7 @@ export default function App() {
       ) : (
         <UploadPanel onUploaded={handleUploaded} />
       )}
+      <Analytics />
     </>
   )
 }
