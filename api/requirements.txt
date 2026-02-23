@@ -1,0 +1,16 @@
+# Web framework & server
+fastapi
+uvicorn[standard]
+pydantic
+
+# PDF extraction
+pymupdf4llm        # also installs PyMuPDF (fitz)
+
+# AI / LLM
+google-generativeai
+
+# FastAPI file-upload support
+python-multipart
+
+# Environment variable loading
+python-dotenv
