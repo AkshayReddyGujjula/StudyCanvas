@@ -199,7 +199,9 @@ Student's question:
         yield f"\n\n[API Error: {str(e)}]"
 
 
-async def generate_quiz(struggling_nodes: list, raw_text: str) -> list[dict]:
+from services.pdf_service import get_page_image_base64
+
+async def generate_quiz(struggling_nodes: list, raw_text: str, pdf_id: str | None = None) -> list[dict]:
     """
     Generates between 3 and 15 mixed-format (MCQ + short-answer) questions.
     Primary source is the Gemini answers the student already struggled with;
@@ -256,11 +258,22 @@ async def generate_quiz(struggling_nodes: list, raw_text: str) -> list[dict]:
         "correct_option (0-based integer for mcq, null for short_answer)."
     )
 
-    response = await asyncio.to_thread(model.generate_content, prompt)
+    contents = []
+    if len(raw_text.strip()) < 50 and pdf_id:
+        page_indexes = set(n.get("page_index") for n in struggling_nodes if n.get("page_index") is not None)
+        for p_idx in page_indexes:
+            img_b64 = get_page_image_base64(pdf_id, p_idx)
+            if img_b64:
+                contents.append({"mime_type": "image/jpeg", "data": img_b64})
+        if page_indexes:
+            prompt += "\n\n(Images of the relevant pages are provided since text was unavailable.)"
+
+    contents.append(prompt)
+    response = await asyncio.to_thread(lambda: model.generate_content(contents))
     return json.loads(response.text)
 
 
-async def generate_flashcards(struggling_nodes: list, raw_text: str) -> list[dict]:
+async def generate_flashcards(struggling_nodes: list, raw_text: str, pdf_id: str | None = None) -> list[dict]:
     """
     Generates one flashcard per struggling topic (plus a few overview cards).
     Each flashcard has a concise 'question' (front) and a complete 'answer' (back).
@@ -306,11 +319,22 @@ async def generate_flashcards(struggling_nodes: list, raw_text: str) -> list[dic
         "Each object must have exactly two keys: \"question\" (string) and \"answer\" (string)."
     )
 
-    response = await asyncio.to_thread(model.generate_content, prompt)
+    contents = []
+    if len(raw_text.strip()) < 50 and pdf_id:
+        page_indexes = set(n.get("page_index") for n in struggling_nodes if n.get("page_index") is not None)
+        for p_idx in page_indexes:
+            img_b64 = get_page_image_base64(pdf_id, p_idx)
+            if img_b64:
+                contents.append({"mime_type": "image/jpeg", "data": img_b64})
+        if page_indexes:
+            prompt += "\n\n(Images of the relevant pages are provided since text was unavailable.)"
+
+    contents.append(prompt)
+    response = await asyncio.to_thread(lambda: model.generate_content(contents))
     return json.loads(response.text)
 
 
-async def generate_page_quiz(page_content: str) -> list[str]:
+async def generate_page_quiz(page_content: str, pdf_id: str | None = None, page_index: int | None = None) -> list[str]:
     """
     Generates 3-5 short-answer questions based ONLY on the provided page content.
     No struggling nodes, no user context — pure page comprehension test.
@@ -337,7 +361,15 @@ async def generate_page_quiz(page_content: str) -> list[str]:
         f"Page content:\n\n{page_content}"
     )
 
-    response = await asyncio.to_thread(model.generate_content, prompt)
+    contents = []
+    if len(page_content.strip()) < 50 and pdf_id and page_index is not None:
+        img_b64 = get_page_image_base64(pdf_id, page_index)
+        if img_b64:
+            contents.append({"mime_type": "image/jpeg", "data": img_b64})
+            prompt += "\n\n(No readable text was found, so an image of the page is provided instead.)"
+
+    contents.append(prompt)
+    response = await asyncio.to_thread(lambda: model.generate_content(contents))
     data = json.loads(response.text)
     # Ensure we always return a flat list of strings
     if isinstance(data, list):
@@ -350,6 +382,8 @@ async def grade_answer(
     student_answer: str,
     page_content: str,
     user_details: dict | None = None,
+    pdf_id: str | None = None,
+    page_index: int | None = None,
 ) -> str:
     """
     Grades a student's answer to a page-quiz question and returns direct, personalised
@@ -388,9 +422,18 @@ async def grade_answer(
         "Write your feedback now (plain text, no markdown, no JSON):"
     )
 
+    contents = []
+    if len(page_content.strip()) < 50 and pdf_id and page_index is not None:
+        img_b64 = get_page_image_base64(pdf_id, page_index)
+        if img_b64:
+            contents.append({"mime_type": "image/jpeg", "data": img_b64})
+            prompt += "\n\n(No readable text was found, so an image of the page is provided instead.)"
+
+    contents.append(prompt)
+
     response = await asyncio.to_thread(
         lambda: model.generate_content(
-            prompt,
+            contents,
             generation_config=genai.GenerationConfig(max_output_tokens=8192, temperature=0.4),
         )
     )

@@ -123,7 +123,14 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
             : currentPage
         const pageContent = pageMarkdowns[nodePageIndex - 1] ?? ''
         try {
-            const result = await gradeAnswer(question, answer, pageContent, userDetails)
+            const result = await gradeAnswer(
+                question,
+                answer,
+                pageContent,
+                userDetails,
+                fileData?.pdf_id,
+                nodePageIndex - 1
+            )
             updateQuizNodeData(nodeId, { isGrading: false, feedback: result.feedback })
         } catch (err) {
             console.error('Grade answer error:', err)
@@ -151,7 +158,7 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
 
         let questions: string[]
         try {
-            const result = await generatePageQuiz(pageMarkdowns[currentPage - 1] ?? '')
+            const result = await generatePageQuiz(pageMarkdowns[currentPage - 1] ?? '', fileData.pdf_id, currentPage - 1)
             questions = result.questions
         } catch (err) {
             console.error('Page quiz generation error:', err)
@@ -725,12 +732,17 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
 
         const payload = strugglingNodes.map((n) => {
             const d = n.data as unknown as AnswerNodeData
-            return { highlighted_text: d.highlighted_text, question: d.question, answer: d.answer }
+            return {
+                highlighted_text: d.highlighted_text,
+                question: d.question,
+                answer: d.answer,
+                pageIndex: d.pageIndex ? d.pageIndex - 1 : undefined
+            }
         })
 
         let cards: { question: string; answer: string }[]
         try {
-            cards = await generateFlashcards(payload, fileData.raw_text)
+            cards = await generateFlashcards(payload, fileData.raw_text, fileData.pdf_id)
         } catch (err) {
             console.error('Flashcard generation error:', err)
             showToast('Failed to generate flashcards. Please try again.')
@@ -1004,6 +1016,7 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
                 <RevisionModal
                     nodes={nodes}
                     rawText={fileData.raw_text}
+                    pdfId={fileData.pdf_id}
                     onClose={() => setShowRevision(false)}
                 />
             )}

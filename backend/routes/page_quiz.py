@@ -7,6 +7,8 @@ router = APIRouter()
 
 class PageQuizRequest(BaseModel):
     page_content: str
+    pdf_id: str | None = None
+    page_index: int | None = None
 
 
 class PageQuizResponse(BaseModel):
@@ -18,6 +20,8 @@ class GradeAnswerRequest(BaseModel):
     student_answer: str
     page_content: str
     user_details: dict | None = None
+    pdf_id: str | None = None
+    page_index: int | None = None
 
 
 class GradeAnswerResponse(BaseModel):
@@ -27,7 +31,9 @@ class GradeAnswerResponse(BaseModel):
 @router.post("/page-quiz", response_model=PageQuizResponse)
 async def generate_page_quiz(request: PageQuizRequest):
     """Generate 3-5 short-answer questions based solely on a single page's content."""
-    questions = await gemini_service.generate_page_quiz(request.page_content)
+    questions = await gemini_service.generate_page_quiz(
+        request.page_content, pdf_id=request.pdf_id, page_index=request.page_index
+    )
     return PageQuizResponse(questions=questions)
 
 
@@ -39,5 +45,7 @@ async def grade_answer(request: GradeAnswerRequest):
         student_answer=request.student_answer,
         page_content=request.page_content,
         user_details=request.user_details,
+        pdf_id=request.pdf_id,
+        page_index=request.page_index,
     )
     return GradeAnswerResponse(feedback=feedback)

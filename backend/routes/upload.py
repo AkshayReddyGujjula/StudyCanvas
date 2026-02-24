@@ -46,11 +46,6 @@ async def upload_pdf(file: UploadFile):
                 file_service.delete_file(new_pdf_path)
                 
         except ValueError as e:
-            if str(e) == "empty_text":
-                raise HTTPException(
-                    status_code=400,
-                    detail="This PDF appears to be scanned or image-based and our OCR engine could not read it. Please upload a clearer text-based PDF.",
-                )
             raise
     finally:
         file_service.delete_file(tmp_path)

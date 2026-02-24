@@ -39,11 +39,13 @@ class QuizNode(BaseModel):
     highlighted_text: str
     question: str
     answer: str
+    page_index: Optional[int] = None
 
 
 class QuizRequest(BaseModel):
     struggling_nodes: list[QuizNode]
     raw_text: str
+    pdf_id: Optional[str] = None
 
 
 class QuizQuestion(BaseModel):
@@ -69,6 +71,7 @@ class ValidateAnswerResponse(BaseModel):
 class FlashcardsRequest(BaseModel):
     struggling_nodes: list[QuizNode]
     raw_text: str
+    pdf_id: Optional[str] = None
 
 
 class Flashcard(BaseModel):

@@ -16,14 +16,14 @@ async def generate_quiz(request: QuizRequest):
     struggling_nodes = [n.model_dump() for n in request.struggling_nodes]
 
     try:
-        result = await gemini_service.generate_quiz(struggling_nodes, request.raw_text)
+        result = await gemini_service.generate_quiz(struggling_nodes, request.raw_text, pdf_id=request.pdf_id)
         _validate_quiz(result)
         return result
     except Exception as e:
         logger.warning("Quiz generation attempt 1 failed: %s — retrying...", e)
 
     try:
-        result = await gemini_service.generate_quiz(struggling_nodes, request.raw_text)
+        result = await gemini_service.generate_quiz(struggling_nodes, request.raw_text, pdf_id=request.pdf_id)
         _validate_quiz(result)
         return result
     except Exception as e:

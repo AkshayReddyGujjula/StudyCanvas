@@ -14,6 +14,7 @@ interface FileData {
     filename: string
     page_count: number
     pdf_url?: string
+    pdf_id?: string
 }
 
 export interface UserDetails {

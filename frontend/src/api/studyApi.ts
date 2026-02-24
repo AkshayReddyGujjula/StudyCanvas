@@ -20,11 +20,13 @@ export const uploadPdf = async (file: File): Promise<UploadResponse> => {
 
 export const generateQuiz = async (
     struggling_nodes: QuizNodeInput[],
-    raw_text: string
+    raw_text: string,
+    pdf_id?: string
 ): Promise<QuizQuestion[]> => {
     const response = await api.post<QuizQuestion[]>('/api/quiz', {
         struggling_nodes,
         raw_text,
+        pdf_id,
     })
     return response.data
 }
@@ -57,8 +59,8 @@ export const generateTitle = async (raw_text: string): Promise<string> => {
 /**
  * Generate 3-5 short-answer quiz questions for a single page's content.
  */
-export const generatePageQuiz = async (page_content: string): Promise<{ questions: string[] }> => {
-    const response = await api.post<{ questions: string[] }>('/api/page-quiz', { page_content })
+export const generatePageQuiz = async (page_content: string, pdf_id?: string, page_index?: number): Promise<{ questions: string[] }> => {
+    const response = await api.post<{ questions: string[] }>('/api/page-quiz', { page_content, pdf_id, page_index })
     return response.data
 }
 
@@ -69,13 +71,17 @@ export const gradeAnswer = async (
     question: string,
     student_answer: string,
     page_content: string,
-    user_details?: { name: string; age: string; status: string; educationLevel: string }
+    user_details?: { name: string; age: string; status: string; educationLevel: string },
+    pdf_id?: string,
+    page_index?: number
 ): Promise<{ feedback: string }> => {
     const response = await api.post<{ feedback: string }>('/api/grade-answer', {
         question,
         student_answer,
         page_content,
         user_details,
+        pdf_id,
+        page_index,
     })
     return response.data
 }
@@ -85,11 +91,13 @@ export const gradeAnswer = async (
  */
 export const generateFlashcards = async (
     struggling_nodes: QuizNodeInput[],
-    raw_text: string
+    raw_text: string,
+    pdf_id?: string
 ): Promise<{ question: string; answer: string }[]> => {
     const response = await api.post<{ question: string; answer: string }[]>('/api/flashcards', {
         struggling_nodes,
         raw_text,
+        pdf_id,
     })
     return response.data
 }

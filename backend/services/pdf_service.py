@@ -2,6 +2,8 @@ import re
 import unicodedata
 import fitz  # PyMuPDF (pulled in by pymupdf4llm)
 import pymupdf4llm
+import base64
+from services import file_service
 
 # Extraction flags: dehyphenate split words across lines and preserve whitespace.
 _EXTRACT_FLAGS = fitz.TEXT_PRESERVE_WHITESPACE | fitz.TEXT_DEHYPHENATE
@@ -152,7 +154,30 @@ def extract_text_and_markdown(file_path: str) -> tuple[str, str, int, str|None]:
         # released before the caller tries to delete the temp file.
         doc.close()
 
-    if not raw_text.strip():
-        raise ValueError("empty_text")
-
     return raw_text, markdown_content, page_count, new_pdf_path
+
+def get_page_image_base64(pdf_id: str, page_index: int) -> str | None:
+    """
+    Extracts the image of a specific PDF page given the stored pdf_id.
+    page_index is 0-based.
+    Returns the base64-encoded JPEG image string, or None if extraction fails.
+    """
+    pdf_path = file_service.get_pdf_path(pdf_id)
+    if not pdf_path:
+        return None
+    
+    try:
+        doc = fitz.open(pdf_path)
+        if page_index < 0 or page_index >= len(doc):
+            return None
+            
+        page = doc[page_index]
+        pix = page.get_pixmap(dpi=150)
+        img_bytes = pix.tobytes("jpeg")
+        return base64.b64encode(img_bytes).decode("utf-8")
+    except Exception as e:
+        print(f"Error extracting image for page {page_index}: {e}")
+        return None
+    finally:
+        if 'doc' in locals():
+            doc.close()

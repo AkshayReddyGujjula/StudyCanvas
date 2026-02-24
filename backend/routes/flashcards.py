@@ -19,12 +19,13 @@ async def create_flashcards(request: FlashcardsRequest):
             "highlighted_text": n.highlighted_text,
             "question": n.question,
             "answer": n.answer,
+            "page_index": n.page_index,
         }
         for n in request.struggling_nodes
     ]
 
     try:
-        cards = await generate_flashcards(nodes_payload, request.raw_text)
+        cards = await generate_flashcards(nodes_payload, request.raw_text, pdf_id=request.pdf_id)
         return cards
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Flash card generation failed: {str(e)}")

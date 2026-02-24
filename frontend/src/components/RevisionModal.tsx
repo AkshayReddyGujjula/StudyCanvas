@@ -6,6 +6,7 @@ import type { AnswerNodeData, QuizQuestion, ValidateAnswerResponse } from '../ty
 interface RevisionModalProps {
     nodes: Node[]
     rawText: string
+    pdfId?: string
     onClose: () => void
 }
 
@@ -21,7 +22,7 @@ const emptyQuestionState = (): QuestionState => ({
     validationResult: null,
 })
 
-export default function RevisionModal({ nodes, rawText, onClose }: RevisionModalProps) {
+export default function RevisionModal({ nodes, rawText, pdfId, onClose }: RevisionModalProps) {
     const [questions, setQuestions] = useState<QuizQuestion[] | null>(null)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
@@ -51,10 +52,11 @@ export default function RevisionModal({ nodes, rawText, onClose }: RevisionModal
                 highlighted_text: d.highlighted_text,
                 question: d.question,
                 answer: d.answer,
+                pageIndex: d.pageIndex ? d.pageIndex - 1 : undefined,
             }
         })
 
-        generateQuiz(input, rawText)
+        generateQuiz(input, rawText, pdfId)
             .then((qs) => {
                 setQuestions(qs)
                 setQuestionStates(qs.map(() => emptyQuestionState()))
@@ -239,13 +241,12 @@ export default function RevisionModal({ nodes, rawText, onClose }: RevisionModal
                                         return (
                                             <div
                                                 key={i}
-                                                className={`w-2 h-2 rounded-full ${
-                                                    i === currentIndex
+                                                className={`w-2 h-2 rounded-full ${i === currentIndex
                                                         ? 'bg-indigo-600'
                                                         : answered
                                                             ? 'bg-indigo-400'
                                                             : 'bg-gray-200'
-                                                }`}
+                                                    }`}
                                             />
                                         )
                                     })}
