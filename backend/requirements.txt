@@ -14,3 +14,4 @@ python-multipart
 
 # Environment variable loading
 python-dotenv
+slowapi

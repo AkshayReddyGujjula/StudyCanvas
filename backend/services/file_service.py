@@ -1,6 +1,7 @@
 import os
 import tempfile
 import uuid
+import re
 from fastapi import UploadFile
 from pathlib import Path
 
@@ -65,6 +66,10 @@ def get_pdf_path(file_id: str) -> Path | None:
     Returns the path to a stored PDF file by its ID.
     Returns None if the file doesn't exist.
     """
+    # Sanitize file_id to prevent path traversal
+    if not re.match(r"^[a-zA-Z0-9_-]+$", file_id):
+        return None
+
     # Try common extensions
     for ext in [".pdf", ""]:
         path = PDF_STORAGE_DIR / f"{file_id}{ext}"

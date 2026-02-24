@@ -1,17 +1,19 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from models.schemas import FlashcardsRequest, Flashcard
+from rate_limiter import limiter
 from services.gemini_service import generate_flashcards
 
 router = APIRouter()
 
 
 @router.post("/flashcards", response_model=list[Flashcard])
-async def create_flashcards(request: FlashcardsRequest):
+@limiter.limit("10/minute; 100/hour; 500/day")
+async def create_flashcards(request: Request, payload: FlashcardsRequest):
     """
     Generate flash cards from the student's struggling nodes.
     Returns a list of { question, answer } objects — one card per struggling topic.
     """
-    if not request.struggling_nodes:
+    if not payload.struggling_nodes:
         raise HTTPException(status_code=400, detail="No struggling nodes provided.")
 
     nodes_payload = [
@@ -21,11 +23,13 @@ async def create_flashcards(request: FlashcardsRequest):
             "answer": n.answer,
             "page_index": n.page_index,
         }
-        for n in request.struggling_nodes
+        for n in payload.struggling_nodes
     ]
 
     try:
-        cards = await generate_flashcards(nodes_payload, request.raw_text, pdf_id=request.pdf_id)
+        cards = await generate_flashcards(nodes_payload, payload.raw_text, pdf_id=payload.pdf_id)
         return cards
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Flash card generation failed: {str(e)}")
+        import logging
+        logging.error(f"Flash card generation failed: {e}")
+        raise HTTPException(status_code=500, detail="Flash card generation failed due to an internal error.")

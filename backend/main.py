@@ -3,11 +3,18 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from rate_limiter import limiter
+
 load_dotenv()
 
 from routes import upload, query, quiz, page_quiz, flashcards, ocr
 
 app = FastAPI(title="StudyCanvas API")
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Allow localhost in dev and any Vercel deployment in production.
 # Set ALLOWED_ORIGINS env var to a comma-separated list to restrict origins.
@@ -17,8 +24,8 @@ ALLOWED_ORIGINS = [o.strip() for o in _raw_origins.split(",")]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    # Also allow any *.vercel.app preview URL and the custom domain
-    allow_origin_regex=r"https://(.*\.vercel\.app|studycanvas\.app|www\.studycanvas\.app)",
+    # Restrict to strictly alphanumeric preview subdomains and standard custom domains
+    allow_origin_regex=r"^https://([a-zA-Z0-9-]+\.vercel\.app|studycanvas\.app|www\.studycanvas\.app)$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

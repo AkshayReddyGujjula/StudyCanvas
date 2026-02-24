@@ -1,7 +1,8 @@
 import asyncio
 import logging
-from fastapi import APIRouter, UploadFile, HTTPException
+from fastapi import APIRouter, UploadFile, HTTPException, Request
 from fastapi.responses import FileResponse
+from rate_limiter import limiter
 from services import pdf_service, file_service
 from models.schemas import UploadResponse
 
@@ -10,7 +11,8 @@ router = APIRouter()
 
 
 @router.post("/upload", response_model=UploadResponse)
-async def upload_pdf(file: UploadFile):
+@limiter.limit("5/minute; 50/hour; 200/day")
+async def upload_pdf(request: Request, file: UploadFile):
     """
     Accepts a PDF upload. Text and Markdown are extracted locally with
     pymupdf4llm — no Gemini call needed, giving sub-second turnaround for
@@ -18,6 +20,15 @@ async def upload_pdf(file: UploadFile):
     """
     if file.content_type != "application/pdf":
         raise HTTPException(status_code=400, detail="Only PDF files are accepted.")
+
+    if file.size and file.size > 50 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File too large. Maximum size is 50MB.")
+
+    # Validate file signature (magic number)
+    header = await file.read(5)
+    if header != b"%PDF-":
+        raise HTTPException(status_code=400, detail="Invalid PDF file format.")
+    await file.seek(0)
 
     # Save PDF to persistent storage initially
     pdf_id = await file_service.save_pdf_file(file)
@@ -60,7 +71,8 @@ async def upload_pdf(file: UploadFile):
 
 
 @router.get("/pdf/{pdf_id}")
-async def get_pdf(pdf_id: str):
+@limiter.limit("50/minute; 500/hour")
+async def get_pdf(request: Request, pdf_id: str):
     """
     Retrieves a stored PDF file by its ID.
     """

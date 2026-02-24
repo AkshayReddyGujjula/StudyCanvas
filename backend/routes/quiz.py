@@ -1,6 +1,7 @@
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from models.schemas import QuizRequest, QuizQuestion, ValidateAnswerRequest, ValidateAnswerResponse
+from rate_limiter import limiter
 from services import gemini_service
 
 logger = logging.getLogger(__name__)
@@ -8,27 +9,28 @@ router = APIRouter()
 
 
 @router.post("/quiz")
-async def generate_quiz(request: QuizRequest):
+@limiter.limit("10/minute; 100/hour; 500/day")
+async def generate_quiz(request: Request, payload: QuizRequest):
     """
     Generates short-answer quiz questions using Gemini with JSON schema enforcement.
     Validates response; retries once if invalid.
     """
-    struggling_nodes = [n.model_dump() for n in request.struggling_nodes]
+    struggling_nodes = [n.model_dump() for n in payload.struggling_nodes]
 
     try:
-        result = await gemini_service.generate_quiz(struggling_nodes, request.raw_text, pdf_id=request.pdf_id)
+        result = await gemini_service.generate_quiz(struggling_nodes, payload.raw_text, pdf_id=payload.pdf_id)
         _validate_quiz(result)
         return result
     except Exception as e:
         logger.warning("Quiz generation attempt 1 failed: %s — retrying...", e)
 
     try:
-        result = await gemini_service.generate_quiz(struggling_nodes, request.raw_text, pdf_id=request.pdf_id)
+        result = await gemini_service.generate_quiz(struggling_nodes, payload.raw_text, pdf_id=payload.pdf_id)
         _validate_quiz(result)
         return result
     except Exception as e:
         logger.error("Quiz generation attempt 2 failed: %s", e)
-        raise HTTPException(status_code=500, detail="Quiz generation failed after retry.")
+        raise HTTPException(status_code=500, detail="Quiz generation failed after retry due to an internal error.")
 
 
 def _validate_quiz(result: list) -> None:
@@ -45,17 +47,18 @@ def _validate_quiz(result: list) -> None:
 
 
 @router.post("/validate")
-async def validate_answer(request: ValidateAnswerRequest):
+@limiter.limit("30/minute; 200/hour; 1000/day")
+async def validate_answer(request: Request, payload: ValidateAnswerRequest):
     """
     Validates the user's answer (short-answer via Gemini, MCQ via index comparison).
     """
     try:
         result = await gemini_service.validate_answer(
-            request.question,
-            request.student_answer,
-            request.raw_text,
-            question_type=request.question_type or "short_answer",
-            correct_option=request.correct_option,
+            payload.question,
+            payload.student_answer,
+            payload.raw_text,
+            question_type=payload.question_type or "short_answer",
+            correct_option=payload.correct_option,
         )
         return result
     except Exception as e:

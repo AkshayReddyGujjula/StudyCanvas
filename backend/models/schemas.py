@@ -1,5 +1,5 @@
 from typing import Optional, Literal, List
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class UploadResponse(BaseModel):
@@ -23,28 +23,28 @@ class ChatMessage(BaseModel):
 
 
 class GenerateTitleRequest(BaseModel):
-    raw_text: str
+    raw_text: str = Field(..., max_length=500000, description="The raw document text")
 
 
 class QueryRequest(BaseModel):
-    question: str
-    highlighted_text: str
-    raw_text: str
+    question: str = Field(..., max_length=2000, description="The student's question")
+    highlighted_text: str = Field(..., max_length=10000, description="The text selected by the student")
+    raw_text: str = Field(..., max_length=500000, description="The raw document text")
     parent_response: Optional[str] = None
     user_details: Optional[UserDetails] = None
     chat_history: Optional[list[ChatMessage]] = None
 
 
 class QuizNode(BaseModel):
-    highlighted_text: str
-    question: str
-    answer: str
+    highlighted_text: str = Field(..., max_length=10000)
+    question: str = Field(..., max_length=2000)
+    answer: str = Field(..., max_length=10000)
     page_index: Optional[int] = None
 
 
 class QuizRequest(BaseModel):
-    struggling_nodes: list[QuizNode]
-    raw_text: str
+    struggling_nodes: list[QuizNode] = Field(..., max_length=50) # Limit number of nodes
+    raw_text: str = Field(..., max_length=500000)
     pdf_id: Optional[str] = None
 
 
@@ -56,9 +56,9 @@ class QuizQuestion(BaseModel):
 
 
 class ValidateAnswerRequest(BaseModel):
-    question: str
-    student_answer: str
-    raw_text: str
+    question: str = Field(..., max_length=2000)
+    student_answer: str = Field(..., max_length=5000)
+    raw_text: str = Field(..., max_length=500000)
     question_type: Optional[Literal["short_answer", "mcq"]] = "short_answer"
     correct_option: Optional[int] = None   # supplied for MCQ so backend can short-circuit
 
@@ -69,8 +69,8 @@ class ValidateAnswerResponse(BaseModel):
 
 
 class FlashcardsRequest(BaseModel):
-    struggling_nodes: list[QuizNode]
-    raw_text: str
+    struggling_nodes: list[QuizNode] = Field(..., max_length=50)
+    raw_text: str = Field(..., max_length=500000)
     pdf_id: Optional[str] = None
 
 
