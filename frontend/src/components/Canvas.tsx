@@ -53,6 +53,7 @@ interface SelectionState {
     sourceNodeId: string
     rect: DOMRect
     mousePos: { x: number; y: number }
+    autoAsk?: boolean
 }
 
 interface ModalState {
@@ -239,7 +240,18 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
     // Text selection hook
     const handleSelection = useCallback((result: SelectionState | null) => {
         if (result) {
-            setSelection(result)
+            if (result.autoAsk) {
+                const preGeneratedNodeId = crypto.randomUUID()
+                setModal({
+                    selectedText: result.selectedText,
+                    sourceNodeId: result.sourceNodeId,
+                    preGeneratedNodeId,
+                    selectionRect: result.rect,
+                })
+                setSelection(null)
+            } else {
+                setSelection(result)
+            }
         } else {
             setSelection(null)
         }

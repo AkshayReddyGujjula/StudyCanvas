@@ -9,7 +9,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs'
 
 export interface PDFViewerProps {
     pdfData: ArrayBuffer
-    onTextSelection?: (text: string, rect?: DOMRect, mousePos?: { x: number; y: number }) => void
+    onTextSelection?: (text: string, rect?: DOMRect, mousePos?: { x: number; y: number }, autoAsk?: boolean) => void
     onLoad?: (dimensions: { width: number; height: number }) => void
     /** Called whenever the auto fit-height changes (use as min for manual resize). */
     onFitHeightChange?: (h: number) => void
@@ -22,6 +22,9 @@ export interface PDFViewerProps {
     containerWidth?: number
     /** Optional override: ContentNode-controlled viewer height (px). */
     viewerHeight?: number
+    autoAsk?: boolean
+    /** Rendered in the middle of the toolbar */
+    customToolbarMiddle?: React.ReactNode
 }
 
 export default function PDFViewer({
@@ -34,6 +37,7 @@ export default function PDFViewer({
     className = '',
     containerWidth: initialContainerWidth,
     viewerHeight: viewerHeightProp,
+    customToolbarMiddle,
 }: PDFViewerProps) {
     const outerRef = useRef<HTMLDivElement>(null)       // scroll container
     const pageContainerRef = useRef<HTMLDivElement>(null) // white page card
@@ -176,6 +180,7 @@ export default function PDFViewer({
                 textLayerDiv!.innerHTML = ''
                 textLayerDiv!.style.width = `${viewport.width}px`
                 textLayerDiv!.style.height = `${viewport.height}px`
+                textLayerDiv!.style.setProperty('--scale-factor', viewport.scale.toString())
 
                 const textLayer = new TextLayer({
                     textContentSource: await page.getTextContent(),
@@ -192,6 +197,7 @@ export default function PDFViewer({
                     el.style.pointerEvents = 'auto'
                     el.style.cursor = 'text'
                     el.style.userSelect = 'text'
+                    el.style.color = 'transparent'
                 })
             } catch (err: unknown) {
                 if ((err as Error)?.name !== 'RenderingCancelledException' && !cancelled) {
@@ -399,7 +405,7 @@ export default function PDFViewer({
                     height
                 )
 
-                onTextSelection?.(data.text.trim(), domRect, { x: clientX, y: clientY })
+                onTextSelection?.(data.text.trim(), domRect, { x: clientX, y: clientY }, true)
             }
         } catch (err) {
             console.error('[PDFViewer] Vision extract error:', err)
@@ -435,9 +441,9 @@ export default function PDFViewer({
     return (
         <div className={`flex flex-col ${className}`}>
             {/* ── Toolbar ── */}
-            <div className="flex items-center justify-between px-3 py-2 bg-gray-50 border-b border-gray-200 flex-shrink-0 gap-2">
+            <div className="flex items-center justify-between px-3 py-2 bg-gray-50 border-b border-gray-200 flex-shrink-0 gap-2 relative">
                 {/* Zoom */}
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 flex-1">
                     <span className="text-xs text-gray-500">Zoom:</span>
                     <input
                         type="range"
@@ -467,8 +473,15 @@ export default function PDFViewer({
                     >↺</button>
                 </div>
 
+                {/* Custom Toolbar Middle */}
+                {customToolbarMiddle && (
+                    <div className="flex-shrink-0 flex justify-center">
+                        {customToolbarMiddle}
+                    </div>
+                )}
+
                 {/* Page navigation */}
-                <div className="flex items-center gap-1">
+                <div className="flex items-center justify-end gap-1 flex-1">
                     <button
                         onClick={() => goToPage(currentPage - 1)}
                         disabled={currentPage <= 1}
@@ -559,7 +572,7 @@ export default function PDFViewer({
                                 pointerEvents: isSnippingMode ? 'none' : 'auto',
                                 userSelect: isSnippingMode ? 'none' : 'text',
                                 zIndex: 10,
-                                lineHeight: 1,
+                                opacity: 1,
                             }}
                         />
 

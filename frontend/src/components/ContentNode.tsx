@@ -8,7 +8,6 @@ import rehypeSanitize, { defaultSchema, type Options as SanitizeOptions } from '
 import type { ContentNodeData } from '../types'
 import { useCanvasStore } from '../store/canvasStore'
 import PDFViewer from './PDFViewer'
-import type { PDFViewerProps } from './PDFViewer/PDFViewer'
 
 // Custom schema: extends defaultSchema to allow <mark> elements with className and data-highlight-id
 // rehype-sanitize must come AFTER rehype-raw in the plugin array (spec rule 5)
@@ -24,7 +23,7 @@ const customSchema: SanitizeOptions = {
 // Extend ContentNodeData with optional callback and PDF ID
 interface ExtendedContentNodeData extends ContentNodeData {
     onTestMePage?: () => void
-    onManualSelection?: (result: { selectedText: string, sourceNodeId: string, rect: DOMRect, mousePos: { x: number; y: number } } | null) => void
+    onManualSelection?: (result: { selectedText: string, sourceNodeId: string, rect: DOMRect, mousePos: { x: number; y: number }, autoAsk?: boolean } | null) => void
     pdf_id?: string
 }
 
@@ -96,6 +95,13 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
     const [pdfData, setPdfData] = useState<ArrayBuffer | null>(null)
     const [isLoadingPdf, setIsLoadingPdf] = useState(false)
     const [pdfError, setPdfError] = useState<string | null>(null)
+
+    const isMac = useMemo(() => {
+        if (typeof window !== 'undefined') {
+            return navigator.platform.toUpperCase().indexOf('MAC') >= 0 || navigator.userAgent.toUpperCase().indexOf('MAC') >= 0
+        }
+        return false
+    }, [])
 
     // Load PDF data when pdf_id changes or when viewMode changes to 'pdf'
     useEffect(() => {
@@ -183,13 +189,14 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
     }, [data.markdown_content, highlights])
 
     // Handle text selection from PDF viewer - triggers Ask Gemini popup
-    const handlePdfTextSelection = useCallback((text: string, rect?: DOMRect, mousePos?: { x: number; y: number }) => {
+    const handlePdfTextSelection = useCallback((text: string, rect?: DOMRect, mousePos?: { x: number; y: number }, autoAsk?: boolean) => {
         if (data.onManualSelection && text && rect && mousePos) {
             data.onManualSelection({
                 selectedText: text,
                 sourceNodeId: id,
                 rect,
                 mousePos,
+                autoAsk,
             })
         }
     }, [data.onManualSelection, id])
@@ -324,6 +331,29 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
     // Bottom offset for resize handles when footer is present
     const bottomOffset = hasFooter ? 44 : 0
 
+    const renderViewModeButtons = () => (
+        <div className="flex gap-1">
+            <button
+                onClick={(e) => { e.stopPropagation(); handleViewModeChange('pdf') }}
+                className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${viewMode === 'pdf'
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                    }`}
+            >
+                PDF View
+            </button>
+            <button
+                onClick={(e) => { e.stopPropagation(); handleViewModeChange('markdown') }}
+                className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${viewMode === 'markdown'
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                    }`}
+            >
+                Text View
+            </button>
+        </div>
+    )
+
     return (
         <div
             data-nodeid={id}
@@ -338,6 +368,11 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
                 <span className="text-white font-medium text-sm truncate flex-1">
                     {data.filename} — {data.page_count} page{data.page_count !== 1 ? 's' : ''}
                 </span>
+
+                <span className="text-indigo-100 font-medium text-xs hidden sm:inline-block px-3 py-1 bg-white/10 rounded-full border border-white/20 mr-1 flex-shrink-0" title="Use the snipping tool to ask Gemini about a specific area">
+                    Press {isMac ? 'Cmd' : 'Ctrl'} + Shift + S to ask Gemini
+                </span>
+
                 <button
                     title={isExpanded ? 'Compact view (scrollable)' : 'Full-page view'}
                     onClick={(e) => { e.stopPropagation(); setIsExpanded((v) => !v) }}
@@ -357,29 +392,10 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
                 </button>
             </div>
 
-            {/* View mode toggle - only show when PDF is available */}
-            {(data.pdf_id || pdfData) && (
+            {/* View mode toggle - standalone only when in markdown mode */}
+            {(data.pdf_id || pdfData) && viewMode === 'markdown' && (
                 <div className="nodrag px-4 py-2 border-b border-gray-100 flex justify-center bg-gray-50">
-                    <div className="flex gap-1">
-                        <button
-                            onClick={(e) => { e.stopPropagation(); handleViewModeChange('pdf') }}
-                            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${viewMode === 'pdf'
-                                ? 'bg-indigo-600 text-white'
-                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                                }`}
-                        >
-                            PDF View
-                        </button>
-                        <button
-                            onClick={(e) => { e.stopPropagation(); handleViewModeChange('markdown') }}
-                            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${viewMode === 'markdown'
-                                ? 'bg-indigo-600 text-white'
-                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                                }`}
-                        >
-                            Text View
-                        </button>
-                    </div>
+                    {renderViewModeButtons()}
                 </div>
             )}
 
@@ -412,6 +428,7 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
                             }}
                             containerWidth={nodeWidth}
                             viewerHeight={pdfViewerHeight ?? undefined}
+                            customToolbarMiddle={renderViewModeButtons()}
                         />
                     </div>
                 ) : (
