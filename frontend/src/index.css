@@ -25,28 +25,7 @@ body,
   }
 }
 
-/* ── PDF text layer (Chrome-style text selection) ────────────────────────── */
-/* Spans are transparent so the canvas shows through; the ::selection
-   pseudo-element gives them a blue highlight on selection — same as Chrome. */
-.pdf-text-layer span {
-  color: transparent;
-  position: absolute;
-  white-space: pre;
-  cursor: text;
-  transform-origin: 0% 0%;
-  user-select: text;
-  -webkit-user-select: text;
-}
 
-.pdf-text-layer ::selection {
-  background-color: rgba(0, 120, 215, 0.25);
-  color: transparent;
-}
-
-.pdf-text-layer ::-moz-selection {
-  background-color: rgba(0, 120, 215, 0.25);
-  color: transparent;
-}
 
 /* Override React Flow's global user-select: none and grab cursor inside node text areas */
 .react-flow__node .nodrag,
@@ -86,6 +65,7 @@ body.rf-connecting .react-flow__node .nodrag * {
 .dark-mode .react-flow__background {
   background-color: #0a0a0a !important;
 }
+
 .dark-mode .react-flow__background pattern circle,
 .dark-mode .react-flow__background pattern rect {
   fill: #1e1e1e;
@@ -95,16 +75,19 @@ body.rf-connecting .react-flow__node .nodrag * {
 .dark-mode .react-flow__controls {
   background-color: #1e1e1e;
   border-color: #3a3a3a;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.6);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
 }
+
 .dark-mode .react-flow__controls-button {
   background-color: #1e1e1e;
   border-color: #3a3a3a;
   color: #d4d4d4;
 }
+
 .dark-mode .react-flow__controls-button:hover {
   background-color: #2d2d2d;
 }
+
 .dark-mode .react-flow__controls-button svg {
   fill: #d4d4d4;
 }
@@ -114,14 +97,16 @@ body.rf-connecting .react-flow__node .nodrag * {
   background-color: #1e1e1e !important;
   border-color: #3a3a3a;
 }
+
 .dark-mode .react-flow__minimap-mask {
-  fill: rgba(0,0,0,0.6);
+  fill: rgba(0, 0, 0, 0.6);
 }
 
 /* ReactFlow edge labels */
 .dark-mode .react-flow__edge-textbg {
   fill: #1e1e1e;
 }
+
 .dark-mode .react-flow__edge-text {
   fill: #d4d4d4;
 }
@@ -131,9 +116,11 @@ body.rf-connecting .react-flow__node .nodrag * {
 .dark-mode .bg-white {
   background-color: #2a2a2a !important;
 }
+
 .dark-mode .bg-gray-50 {
   background-color: #232323 !important;
 }
+
 .dark-mode .bg-gray-100 {
   background-color: #2d2d2d !important;
 }
@@ -162,9 +149,11 @@ body.rf-connecting .react-flow__node .nodrag * {
 .dark-mode .text-black {
   color: #d4d4d4 !important;
 }
+
 .dark-mode .text-gray-500 {
   color: #aaaaaa !important;
 }
+
 .dark-mode .text-gray-400 {
   color: #888888 !important;
 }
@@ -181,7 +170,7 @@ body.rf-connecting .react-flow__node .nodrag * {
 .dark-mode .shadow-lg,
 .dark-mode .shadow-xl,
 .dark-mode .shadow-sm {
-  box-shadow: 0 4px 20px rgba(0,0,0,0.7) !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.7) !important;
 }
 
 /* ── Form inputs ── */
@@ -191,6 +180,7 @@ body.rf-connecting .react-flow__node .nodrag * {
   color: #d4d4d4 !important;
   border-color: #3a3a3a !important;
 }
+
 .dark-mode input[type="text"]::placeholder,
 .dark-mode textarea::placeholder {
   color: #666666;
@@ -200,6 +190,7 @@ body.rf-connecting .react-flow__node .nodrag * {
 .dark-mode .prose {
   color: #d4d4d4;
 }
+
 .dark-mode .prose h1,
 .dark-mode .prose h2,
 .dark-mode .prose h3,
@@ -207,29 +198,37 @@ body.rf-connecting .react-flow__node .nodrag * {
 .dark-mode .prose strong {
   color: #f0f0f0;
 }
+
 .dark-mode .prose a {
   color: #60a5fa;
 }
+
 .dark-mode .prose code {
   background-color: #2d2d2d;
   color: #d4d4d4;
 }
+
 .dark-mode .prose pre {
   background-color: #232323;
 }
+
 .dark-mode .prose blockquote {
   border-color: #3a3a3a;
   color: #aaa;
 }
+
 .dark-mode .prose hr {
   border-color: #3a3a3a;
 }
+
 .dark-mode .prose thead {
   border-color: #3a3a3a;
 }
+
 .dark-mode .prose tbody tr {
   border-color: #3a3a3a;
 }
+
 .dark-mode .prose thead th {
   color: #f0f0f0;
 }
@@ -247,7 +246,7 @@ body.rf-connecting .react-flow__node .nodrag * {
 /* ── Fixed top-corner UI buttons (Menu / Revision) ──
    These float over the canvas so they need clear contrast */
 .dark-mode .fixed button.bg-white,
-.dark-mode .fixed > button {
+.dark-mode .fixed>button {
   background-color: #2a2a2a !important;
   color: #d4d4d4 !important;
   border-color: #444 !important;
@@ -259,9 +258,11 @@ body.rf-connecting .react-flow__node .nodrag * {
   background-color: #2a2a2a !important;
   border-color: #3a3a3a !important;
 }
+
 .dark-mode .fixed .absolute button {
   color: #d4d4d4 !important;
 }
+
 .dark-mode .fixed .absolute button:hover {
   background-color: #2d2d2d !important;
 }

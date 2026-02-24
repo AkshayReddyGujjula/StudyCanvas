@@ -19,7 +19,7 @@ async def upload_pdf(file: UploadFile):
     if file.content_type != "application/pdf":
         raise HTTPException(status_code=400, detail="Only PDF files are accepted.")
 
-    # Save PDF to persistent storage
+    # Save PDF to persistent storage initially
     pdf_id = await file_service.save_pdf_file(file)
     
     # Reset file position for reading
@@ -32,14 +32,24 @@ async def upload_pdf(file: UploadFile):
         # Run CPU-bound extraction in a thread pool so the event loop stays
         # free to handle other requests while processing.
         try:
-            raw_text, markdown_content, page_count = await asyncio.to_thread(
+            raw_text, markdown_content, page_count, new_pdf_path = await asyncio.to_thread(
                 pdf_service.extract_text_and_markdown, tmp_path
             )
+            
+            # If the PDF was enhanced with OCR text layers, overwrite the saved file
+            if new_pdf_path:
+                import shutil
+                persistent_path = file_service.get_pdf_path(pdf_id)
+                if persistent_path:
+                    shutil.copy2(new_pdf_path, persistent_path)
+                # Cleanup the temp OCR file
+                file_service.delete_file(new_pdf_path)
+                
         except ValueError as e:
             if str(e) == "empty_text":
                 raise HTTPException(
                     status_code=400,
-                    detail="This PDF appears to be scanned or image-based. Please upload a text-based PDF.",
+                    detail="This PDF appears to be scanned or image-based and our OCR engine could not read it. Please upload a clearer text-based PDF.",
                 )
             raise
     finally:

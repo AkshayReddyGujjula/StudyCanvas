@@ -24,6 +24,7 @@ const customSchema: SanitizeOptions = {
 // Extend ContentNodeData with optional callback and PDF ID
 interface ExtendedContentNodeData extends ContentNodeData {
     onTestMePage?: () => void
+    onManualSelection?: (result: { selectedText: string, sourceNodeId: string, rect: DOMRect, mousePos: { x: number; y: number } } | null) => void
     pdf_id?: string
 }
 
@@ -82,9 +83,9 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
     //                  number = user-overridden height
     const [pdfViewerHeight, setPdfViewerHeight] = useState<number | null>(null)
     // Tracked via onFitHeightChange so we always know the auto height
-    const [autoFitHeight, setAutoFitHeight]     = useState<number>(600)
+    const [autoFitHeight, setAutoFitHeight] = useState<number>(600)
     // Hard minimums set on PDF load
-    const minNodeWidthRef   = useRef(550)
+    const minNodeWidthRef = useRef(550)
     const minViewerHeightRef = useRef(200)
     // true = full-page (no scroll), false = compact scrollable view
     const [isExpanded, setIsExpanded] = useState(true)
@@ -95,30 +96,30 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
     const [pdfData, setPdfData] = useState<ArrayBuffer | null>(null)
     const [isLoadingPdf, setIsLoadingPdf] = useState(false)
     const [pdfError, setPdfError] = useState<string | null>(null)
-    
+
     // Load PDF data when pdf_id changes or when viewMode changes to 'pdf'
     useEffect(() => {
         console.log('[ContentNode] PDF effect triggered:', { pdf_id: data.pdf_id, viewMode, hasPdfData: !!pdfData })
-        
+
         // Don't load if we're not in PDF view mode
         if (viewMode !== 'pdf') {
             console.log('[ContentNode] Not in PDF view mode, skipping')
             return
         }
-        
+
         if (!data.pdf_id) {
             console.log('[ContentNode] No PDF ID available')
             setPdfData(null)
             setViewMode('markdown')
             return
         }
-        
+
         // Don't reload if we already have the PDF data
         if (pdfData) {
             console.log('[ContentNode] PDF data already loaded, skipping')
             return
         }
-        
+
         const loadPdf = async () => {
             console.log('[ContentNode] Starting PDF load...')
             setIsLoadingPdf(true)
@@ -128,7 +129,7 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
                 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
                 const url = `${API_BASE}/api/pdf/${data.pdf_id}`
                 console.log('[ContentNode] Loading PDF from:', url)
-                
+
                 const response = await fetch(url)
                 if (!response.ok) {
                     throw new Error(`Failed to load PDF: ${response.status} ${response.statusText}`)
@@ -146,7 +147,7 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
                 console.log('[ContentNode] PDF loading complete')
             }
         }
-        
+
         loadPdf()
     }, [data.pdf_id, viewMode])
 
@@ -182,12 +183,17 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
     }, [data.markdown_content, highlights])
 
     // Handle text selection from PDF viewer - triggers Ask Gemini popup
-    const handlePdfTextSelection = useCallback((text: string) => {
-        console.log('[ContentNode] PDF text selected:', text.substring(0, 50) + '...')
-        // The global useTextSelection hook in Canvas should handle this
-        // But we can also manually trigger if needed
-    }, [])
-    
+    const handlePdfTextSelection = useCallback((text: string, rect?: DOMRect, mousePos?: { x: number; y: number }) => {
+        if (data.onManualSelection && text && rect && mousePos) {
+            data.onManualSelection({
+                selectedText: text,
+                sourceNodeId: id,
+                rect,
+                mousePos,
+            })
+        }
+    }, [data.onManualSelection, id])
+
     // Handle PDF load - set natural dims, auto-size node to fit PDF perfectly
     const handlePdfLoad = useCallback((dimensions: { width: number; height: number }) => {
         // Use natural PDF dimensions with minimal padding (16px each side = 32px total)
@@ -195,7 +201,7 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
         const newW = Math.min(Math.max(dimensions.width + padding, 400), 1500)
         // fitH = natural page height at the fit scale that just fills newW
         const fitH = Math.round(dimensions.height * (newW - padding) / dimensions.width + padding)
-        minNodeWidthRef.current    = newW
+        minNodeWidthRef.current = newW
         minViewerHeightRef.current = fitH
         setNodeWidth(newW)
         setAutoFitHeight(fitH)
@@ -226,14 +232,14 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
         e.preventDefault()
         e.stopPropagation()
 
-        const startX  = e.clientX
-        const startY  = e.clientY
+        const startX = e.clientX
+        const startY = e.clientY
         // Capture current values synchronously at drag start
-        const startW  = nodeWidth
+        const startW = nodeWidth
         // Use current pdfViewerHeight if explicitly set, otherwise the latest autoFitHeight
-        const startH  = pdfViewerHeight ?? autoFitHeight
-        const minW    = minNodeWidthRef.current
-        const minH    = minViewerHeightRef.current
+        const startH = pdfViewerHeight ?? autoFitHeight
+        const minW = minNodeWidthRef.current
+        const minH = minViewerHeightRef.current
 
         // In text mode, only allow width resizing
         const isPdfMode = viewMode === 'pdf' && pdfData
@@ -272,11 +278,11 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
         const onUp = () => {
             overlay.parentNode && document.body.removeChild(overlay)
             document.removeEventListener('mousemove', onMove)
-            document.removeEventListener('mouseup',   onUp)
+            document.removeEventListener('mouseup', onUp)
         }
 
         document.addEventListener('mousemove', onMove)
-        document.addEventListener('mouseup',   onUp)
+        document.addEventListener('mouseup', onUp)
     }, [nodeWidth, pdfViewerHeight, autoFitHeight, viewMode, pdfData])
 
     const handleMarkdownClick = useCallback(
@@ -314,7 +320,7 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
     const effectiveHeight = (isPdfMode && pdfViewerHeight)
         ? headerHeight + toolbarHeight + pdfViewerHeight + footerHeight
         : undefined
-    
+
     // Bottom offset for resize handles when footer is present
     const bottomOffset = hasFooter ? 44 : 0
 
@@ -357,21 +363,19 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
                     <div className="flex gap-1">
                         <button
                             onClick={(e) => { e.stopPropagation(); handleViewModeChange('pdf') }}
-                            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-                                viewMode === 'pdf'
-                                    ? 'bg-indigo-600 text-white'
-                                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                            }`}
+                            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${viewMode === 'pdf'
+                                ? 'bg-indigo-600 text-white'
+                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                }`}
                         >
                             PDF View
                         </button>
                         <button
                             onClick={(e) => { e.stopPropagation(); handleViewModeChange('markdown') }}
-                            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-                                viewMode === 'markdown'
-                                    ? 'bg-indigo-600 text-white'
-                                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                            }`}
+                            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${viewMode === 'markdown'
+                                ? 'bg-indigo-600 text-white'
+                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                }`}
                         >
                             Text View
                         </button>
@@ -525,7 +529,7 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
                     left: 0,
                     cursor: 'nwse-resize',
                     borderTop: '3px solid #6366f1',
-                    borderLeft:  '3px solid #6366f1',
+                    borderLeft: '3px solid #6366f1',
                     borderTopLeftRadius: 4,
                 }}
                 onMouseDown={(e) => startResize(e, 'wh', 'tl')}
@@ -540,7 +544,7 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
                     right: 0,
                     cursor: 'nesw-resize',
                     borderTop: '3px solid #6366f1',
-                    borderRight:  '3px solid #6366f1',
+                    borderRight: '3px solid #6366f1',
                     borderTopRightRadius: 4,
                 }}
                 onMouseDown={(e) => startResize(e, 'wh', 'tr')}
@@ -555,7 +559,7 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
                     left: 0,
                     cursor: 'nesw-resize',
                     borderBottom: '3px solid #6366f1',
-                    borderLeft:  '3px solid #6366f1',
+                    borderLeft: '3px solid #6366f1',
                     borderBottomLeftRadius: 4,
                 }}
                 onMouseDown={(e) => startResize(e, 'wh', 'bl')}
@@ -570,7 +574,7 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
                     right: 0,
                     cursor: 'nwse-resize',
                     borderBottom: '3px solid #6366f1',
-                    borderRight:  '3px solid #6366f1',
+                    borderRight: '3px solid #6366f1',
                     borderBottomRightRadius: 4,
                 }}
                 onMouseDown={(e) => startResize(e, 'wh', 'br')}

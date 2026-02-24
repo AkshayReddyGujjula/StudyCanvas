@@ -81,7 +81,7 @@ def _clean(text: str) -> str:
     return text
 
 
-def extract_text_and_markdown(file_path: str) -> tuple[str, str, int]:
+def extract_text_and_markdown(file_path: str) -> tuple[str, str, int, str|None]:
     """
     Opens a PDF with PyMuPDF and extracts both:
       - raw_text         : cleaned plain text per page, for downstream Gemini
@@ -90,10 +90,16 @@ def extract_text_and_markdown(file_path: str) -> tuple[str, str, int]:
                            artifacts cleaned, and '## Page N' headers prepended
                            so the frontend splitMarkdownByPage() regex works.
 
-    Raises ValueError("empty_text") if the PDF has no extractable text.
-    Returns (raw_text, markdown_content, page_count).
+    If a page has very little text (e.g., scanned/handwritten), it attempts
+    to use Tesseract OCR to extract text from the image layer and re-saves the PDF.
+
+    Raises ValueError("empty_text") if the PDF has no extractable text even after OCR.
+    Returns (raw_text, markdown_content, page_count, new_pdf_path).
     """
     doc = fitz.open(file_path)
+    # Track if we modified the PDF (added OCR text layers)
+    pdf_was_modified = False
+    
     try:
         page_count = len(doc)
 
@@ -101,19 +107,46 @@ def extract_text_and_markdown(file_path: str) -> tuple[str, str, int]:
         md_pages: list[str] = []
 
         for i, page in enumerate(doc):
-            # Plain text — use dehyphenate + preserve-whitespace flags, then
-            # run the encoding cleaner so artifacts like '3'/'$'/'=' are fixed.
-            raw_pages.append(_clean(page.get_text(flags=_EXTRACT_FLAGS)))
+            # Extract standard text
+            raw_page_text = _clean(page.get_text(flags=_EXTRACT_FLAGS))
+            
+            # If the page has almost no text (likely an image/scan), try OCR
+            if len(raw_page_text.strip()) < 50:
+                try:
+                    # 'full' OCR mode: attempts to parse all images on the page
+                    ocr_doc = fitz.open("pdf", page.get_textpage_ocr(flags=_EXTRACT_FLAGS, dpi=300, full=True).pdf_file)
+                    ocr_page = ocr_doc[0]
+                    # Get the extracted OCR text
+                    raw_page_text = _clean(ocr_page.get_text(flags=_EXTRACT_FLAGS))
+                    
+                    if len(raw_page_text.strip()) > 50:
+                        # Success! The OCR found text. Let's replace the original image-only 
+                        # page with this new page that contains the hidden text layer so the 
+                        # frontend user can actually highlight it.
+                        doc.delete_page(i)
+                        doc.insert_pdf(ocr_doc, from_page=0, to_page=0, start_at=i)
+                        pdf_was_modified = True
+                except Exception as e:
+                    # Tesseract might not be installed or failed on this specific page
+                    print(f"OCR failed for page {i+1}: {e}")
 
-            # Structured Markdown via pymupdf4llm, then apply the same cleaner
-            # so the displayed content is also free of encoding artifacts.
+            raw_pages.append(raw_page_text)
+
+        # After potentially replacing pages with OCR'd versions, generate the markdown
+        for i in range(page_count):
             page_md = _clean(pymupdf4llm.to_markdown(doc, pages=[i]))
-
-            # Prepend the ## Page N header the frontend relies on.
             md_pages.append(f"## Page {i + 1}\n\n{page_md.strip()}")
 
         raw_text = "\n\n".join(raw_pages)
         markdown_content = "\n\n".join(md_pages)
+        
+        new_pdf_path = None
+        if pdf_was_modified:
+            # Save the modified document with the new OCR text layers to a temporary file
+            # that upload.py can use to overwrite the original.
+            new_pdf_path = file_path + ".ocr.pdf"
+            doc.save(new_pdf_path)
+            
     finally:
         # Always close so the OS file handle (and Windows exclusive lock) is
         # released before the caller tries to delete the temp file.
@@ -122,4 +155,4 @@ def extract_text_and_markdown(file_path: str) -> tuple[str, str, int]:
     if not raw_text.strip():
         raise ValueError("empty_text")
 
-    return raw_text, markdown_content, page_count
+    return raw_text, markdown_content, page_count, new_pdf_path

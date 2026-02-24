@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from routes import upload, query, quiz, page_quiz, flashcards
+from routes import upload, query, quiz, page_quiz, flashcards, ocr
 
 app = FastAPI(title="StudyCanvas API")
 
@@ -29,6 +29,7 @@ app.include_router(query.router, prefix="/api")
 app.include_router(quiz.router, prefix="/api")
 app.include_router(page_quiz.router, prefix="/api")
 app.include_router(flashcards.router, prefix="/api")
+app.include_router(ocr.router, prefix="/api")
 
 
 @app.get("/api/health")

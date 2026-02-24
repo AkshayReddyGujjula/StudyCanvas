@@ -463,3 +463,41 @@ async def validate_answer(
 
     response = await asyncio.to_thread(model.generate_content, prompt)
     return json.loads(response.text)
+
+
+async def image_to_text(base64_image: str) -> str:
+    """
+    Takes a base64 encoded image string (e.g., from a user's bounding box snip),
+    sends it to Gemini Vision, and extracts the text exactly as it appears.
+    """
+    # Remove data URI prefix if present
+    if "base64," in base64_image:
+        base64_image = base64_image.split("base64,")[1]
+        
+    model = genai.GenerativeModel("gemini-2.5-flash")
+    
+    prompt = (
+        "You are an expert Optical Character Recognition (OCR) assistant.\n"
+        "Please extract all the text exactly as it appears in the provided image.\n"
+        "Rules:\n"
+        "1. Output ONLY the extracted text.\n"
+        "2. Preserve the original formatting, line breaks, and punctuation as best as possible.\n"
+        "3. Do not add any conversational filler, markdown fencing, or explanations."
+    )
+    
+    response = await asyncio.to_thread(
+        lambda: model.generate_content(
+            [
+                {"mime_type": "image/jpeg", "data": base64_image},
+                prompt
+            ],
+            generation_config=genai.GenerationConfig(temperature=0.1),
+        )
+    )
+    try:
+        return response.text.strip()
+    except ValueError:
+        try:
+            return response.candidates[0].content.parts[0].text.strip()
+        except Exception:
+            return ""

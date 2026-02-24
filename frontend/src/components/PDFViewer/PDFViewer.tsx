@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
 import { TextLayer } from 'pdfjs-dist'
+import 'pdfjs-dist/web/pdf_viewer.css'
+import { useCanvasStore } from '../../store/canvasStore'
 
 // Configure PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs'
 
 export interface PDFViewerProps {
     pdfData: ArrayBuffer
-    onTextSelection?: (text: string) => void
+    onTextSelection?: (text: string, rect?: DOMRect, mousePos?: { x: number; y: number }) => void
     onLoad?: (dimensions: { width: number; height: number }) => void
     /** Called whenever the auto fit-height changes (use as min for manual resize). */
     onFitHeightChange?: (h: number) => void
@@ -53,7 +55,7 @@ export default function PDFViewer({
     // resizes the panel. viewerHeightProp overrides this when ContentNode controls height.
     const [fitViewerHeight, setFitViewerHeight] = useState<number>(600)
     // Natural (unscaled) PDF page dimensions — needed for accurate zoom-to-center math.
-    const pdfNaturalWidthRef  = useRef<number>(0)
+    const pdfNaturalWidthRef = useRef<number>(0)
     const pdfNaturalHeightRef = useRef<number>(0)
     const [containerWidth, setContainerWidth] = useState<number | undefined>(initialContainerWidth)
 
@@ -102,7 +104,7 @@ export default function PDFViewer({
                 const w = initialContainerWidthRef.current ?? 500
                 const fit = (w - 32) / vp.width
                 fitScaleRef.current = fit
-                pdfNaturalWidthRef.current  = vp.width
+                pdfNaturalWidthRef.current = vp.width
                 pdfNaturalHeightRef.current = vp.height
                 const fh = vp.height * fit + 32  // page h at fit scale + p-4 top+bottom
                 setFitViewerHeight(fh)
@@ -117,7 +119,7 @@ export default function PDFViewer({
         }
         if (pdfData) load()
         return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [pdfData])  // ← intentionally omit initialContainerWidth & onLoad; use refs instead
 
     // ── Sync page from outside (e.g. store navigation) without reloading PDF ─
@@ -213,6 +215,29 @@ export default function PDFViewer({
         fitScaleRef.current = fit
     }, [containerWidth])
 
+    const isSnippingMode = useCanvasStore((s) => s.isSnippingMode)
+    const setIsSnippingMode = useCanvasStore((s) => s.setIsSnippingMode)
+
+    // Snipping State
+    const [snipStart, setSnipStart] = useState<{ x: number, y: number } | null>(null)
+    const [snipCurrent, setSnipCurrent] = useState<{ x: number, y: number } | null>(null)
+    const [isExtracting, setIsExtracting] = useState(false)
+
+    // Handle Ctrl+Shift+S / Cmd+Shift+S for Snipping Tool
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 's') {
+                e.preventDefault()
+                setIsSnippingMode(!isSnippingMode)
+            }
+            if (e.key === 'Escape' && isSnippingMode) {
+                setIsSnippingMode(false)
+            }
+        }
+        window.addEventListener('keydown', handleKeyDown)
+        return () => window.removeEventListener('keydown', handleKeyDown)
+    }, [isSnippingMode, setIsSnippingMode])
+
     // ── Zoom helper — call before setScale to schedule scroll correction ─────
     // Returns a function that applies the scroll correction in a rAF.
     // This keeps correctoin synchronous with the scale change (no separate effect).
@@ -231,23 +256,24 @@ export default function PDFViewer({
         //   - overflow: cardLeft = 16 (wrapper padding)
         //   - no overflow: cardLeft = (outer.clientWidth - pageCW) / 2
         const cardLeft = Math.max(16, (outer.clientWidth - pageCW) / 2)
-        const cardTop  = 16  // always 16 px (wrapper padding-top)
+        const cardTop = 16  // always 16 px (wrapper padding-top)
 
         // Center of visible viewport in page-local coordinates
-        const viewCxInPage = outer.scrollLeft + outer.clientWidth  / 2 - cardLeft
-        const viewCyInPage = outer.scrollTop  + outer.clientHeight / 2 - cardTop
+        const viewCxInPage = outer.scrollLeft + outer.clientWidth / 2 - cardLeft
+        const viewCyInPage = outer.scrollTop + outer.clientHeight / 2 - cardTop
         // Fractional position on the page (safe even outside 0-1)
         const fracX = pageCW > 0 ? viewCxInPage / pageCW : 0.5
         const fracY = pageCH > 0 ? viewCyInPage / pageCH : 0.5
 
         requestAnimationFrame(() => {
-            const newPageCW   = nW * newScale
-            const newPageCH   = nH * newScale
+            const newPageCW = nW * newScale
+            const newPageCH = nH * newScale
             const newCardLeft = Math.max(16, (outer.clientWidth - newPageCW) / 2)
-            outer.scrollLeft  = fracX * newPageCW + newCardLeft - outer.clientWidth  / 2
-            outer.scrollTop   = fracY * newPageCH + cardTop     - outer.clientHeight / 2
+            outer.scrollLeft = fracX * newPageCW + newCardLeft - outer.clientWidth / 2
+            outer.scrollTop = fracY * newPageCH + cardTop - outer.clientHeight / 2
         })
     }, [])
+
 
     // ── Helpers ──────────────────────────────────────────────────────────────
     const goToPage = useCallback((p: number) => {
@@ -272,10 +298,115 @@ export default function PDFViewer({
         setIsEditingPage(false)
     }, [pageInputValue, numPages, onPageChange])
 
-    const handleMouseUp = useCallback(() => {
-        const text = window.getSelection()?.toString().trim() ?? ''
-        if (text.length >= 3) onTextSelection?.(text)
-    }, [onTextSelection])
+    const handleMouseUp = useCallback((e: React.MouseEvent) => {
+        if (isSnippingMode) return // Handled by Snipping overlay
+        const selection = window.getSelection()
+        const text = selection?.toString().trim() ?? ''
+        console.log('[PDFViewer handleMouseUp] Text length:', text.length, 'rangeCount:', selection?.rangeCount)
+        if (text.length >= 3 && selection && selection.rangeCount > 0) {
+            const range = selection.getRangeAt(0)
+            const rect = range.getBoundingClientRect()
+            console.log('[PDFViewer handleMouseUp] triggering onTextSelection with:', rect)
+            onTextSelection?.(text, rect, { x: e.clientX, y: e.clientY })
+        }
+    }, [onTextSelection, isSnippingMode])
+
+    // ── Snipping Tool Handlers ───────────────────────────────────────────────
+    const handleSnipMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+        const rect = pageContainerRef.current?.getBoundingClientRect()
+        if (!rect) return
+        setSnipStart({
+            x: e.clientX - rect.left,
+            y: e.clientY - rect.top
+        })
+        setSnipCurrent({
+            x: e.clientX - rect.left,
+            y: Math.max(0, e.clientY - rect.top) // constrain to page
+        })
+    }
+
+    const handleSnipMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+        if (!snipStart) return
+        const rect = pageContainerRef.current?.getBoundingClientRect()
+        if (!rect) return
+        setSnipCurrent({
+            x: e.clientX - rect.left,
+            y: Math.max(0, e.clientY - rect.top) // constrain to page
+        })
+    }
+
+    const handleSnipMouseUp = async (e: React.MouseEvent<HTMLDivElement>) => {
+        if (!snipStart || !snipCurrent || !canvasRef.current) {
+            setSnipStart(null)
+            setSnipCurrent(null)
+            return
+        }
+
+        const clientX = e.clientX
+        const clientY = e.clientY
+
+        const x = Math.min(snipStart.x, snipCurrent.x)
+        const y = Math.min(snipStart.y, snipCurrent.y)
+        const width = Math.max(10, Math.abs(snipStart.x - snipCurrent.x))
+        const height = Math.max(10, Math.abs(snipStart.y - snipCurrent.y))
+        const dpr = window.devicePixelRatio || 1
+
+        setSnipStart(null)
+        setSnipCurrent(null)
+
+        // Only process if it's a reasonably sized box (avoids accidental clicks)
+        if (width < 20 || height < 20) return
+
+        setIsExtracting(true)
+        try {
+            // Create a temporary canvas to crop the image
+            const tempCanvas = document.createElement('canvas')
+            tempCanvas.width = Math.floor(width * dpr)
+            tempCanvas.height = Math.floor(height * dpr)
+            const ctx = tempCanvas.getContext('2d')
+            if (!ctx) return
+
+            // Draw the cropped portion from the main PDF canvas
+            ctx.drawImage(
+                canvasRef.current,
+                x * dpr, y * dpr, width * dpr, height * dpr, // Source rect
+                0, 0, tempCanvas.width, tempCanvas.height  // Destination rect
+            )
+
+            // Convert to base64
+            const base64Image = tempCanvas.toDataURL('image/jpeg', 0.9)
+
+            // Send to backend OCR endpoint
+            const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
+            const response = await fetch(`${API_BASE}/api/vision`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image_base64: base64Image })
+            })
+
+            if (!response.ok) throw new Error('Failed to extract text from image')
+
+            const data = await response.json()
+            if (data.text && data.text.trim().length > 0) {
+                // Return to normal mode and trigger selection
+                setIsSnippingMode(false)
+
+                const pgRect = pageContainerRef.current?.getBoundingClientRect()
+                const domRect = new DOMRect(
+                    (pgRect?.left ?? 0) + x,
+                    (pgRect?.top ?? 0) + y,
+                    width,
+                    height
+                )
+
+                onTextSelection?.(data.text.trim(), domRect, { x: clientX, y: clientY })
+            }
+        } catch (err) {
+            console.error('[PDFViewer] Vision extract error:', err)
+        } finally {
+            setIsExtracting(false)
+        }
+    }
 
     if (isLoading) {
         return (
@@ -327,7 +458,7 @@ export default function PDFViewer({
                         onClick={() => {
                             if (outerRef.current) {
                                 outerRef.current.scrollLeft = 0
-                                outerRef.current.scrollTop  = 0
+                                outerRef.current.scrollTop = 0
                             }
                             setScale(fitScaleRef.current)
                         }}
@@ -422,15 +553,47 @@ export default function PDFViewer({
                         {/* Text layer: transparent positioned spans */}
                         <div
                             ref={textLayerRef}
-                            className="pdf-text-layer absolute top-0 left-0"
+                            className="textLayer absolute top-0 left-0"
                             style={{
                                 overflow: 'hidden',
-                                pointerEvents: 'auto',
-                                userSelect: 'text',
+                                pointerEvents: isSnippingMode ? 'none' : 'auto',
+                                userSelect: isSnippingMode ? 'none' : 'text',
                                 zIndex: 10,
                                 lineHeight: 1,
                             }}
                         />
+
+                        {/* Snipping Tool Overlay */}
+                        {isSnippingMode && (
+                            <div
+                                className={`absolute top-0 left-0 w-full h-full z-20 ${isExtracting ? 'cursor-wait' : 'cursor-crosshair'}`}
+                                style={{ backgroundColor: 'rgba(0,0,0,0.1)' }}
+                                onMouseDown={!isExtracting ? handleSnipMouseDown : undefined}
+                                onMouseMove={!isExtracting ? handleSnipMouseMove : undefined}
+                                onMouseUp={!isExtracting ? handleSnipMouseUp : undefined}
+                                onMouseLeave={!isExtracting ? handleSnipMouseUp : undefined}
+                            >
+                                {snipStart && snipCurrent && (
+                                    <div
+                                        className="absolute border-2 border-indigo-500 bg-indigo-500/20"
+                                        style={{
+                                            left: Math.min(snipStart.x, snipCurrent.x),
+                                            top: Math.min(snipStart.y, snipCurrent.y),
+                                            width: Math.abs(snipStart.x - snipCurrent.x),
+                                            height: Math.abs(snipStart.y - snipCurrent.y),
+                                        }}
+                                    />
+                                )}
+                                {isExtracting && (
+                                    <div className="absolute inset-0 flex items-center justify-center bg-white/50 backdrop-blur-sm z-30">
+                                        <div className="bg-white p-4 rounded-lg shadow-xl flex items-center gap-3">
+                                            <div className="w-5 h-5 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+                                            <span className="text-sm font-medium text-gray-700">Extracting text with Vision AI...</span>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>

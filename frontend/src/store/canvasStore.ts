@@ -38,6 +38,8 @@ interface CanvasState {
     zoomLevel: number
     /** Per-page scroll positions for PDF viewer */
     scrollPositions: Record<number, number>
+    /** Whether the user is currently in image snipping mode */
+    isSnippingMode: boolean
 }
 
 interface CanvasActions {
@@ -63,6 +65,8 @@ interface CanvasActions {
     addQuizChatMessage: (nodeId: string, message: { role: 'user' | 'model'; content: string }) => void
     /** Return all quiz question nodes for the given page */
     getQuizNodesForPage: (pageIndex: number) => Node[]
+    /** Toggle snipping mode */
+    setIsSnippingMode: (isSnipping: boolean) => void
 }
 
 const STORAGE_KEY = 'studycanvas_state'
@@ -78,6 +82,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
     pageMarkdowns: [],
     zoomLevel: 1.0,
     scrollPositions: {},
+    isSnippingMode: false,
 
     setNodes: (nodes) =>
         set((state) => ({
@@ -135,6 +140,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
             pageMarkdowns: [],
             zoomLevel: 1.0,
             scrollPositions: {},
+            isSnippingMode: false,
         })
         localStorage.removeItem(STORAGE_KEY)
     },
@@ -170,6 +176,8 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
             (n) => n.type === 'quizQuestionNode' && (n.data as Record<string, unknown>).pageIndex === pageIndex
         )
     },
+
+    setIsSnippingMode: (isSnipping) => set({ isSnippingMode: isSnipping }),
 }))
 
 export { STORAGE_KEY }

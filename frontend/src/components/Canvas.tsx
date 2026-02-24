@@ -236,6 +236,16 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
         updateQuizNodeData, persistToLocalStorage,
     ])
 
+    // Text selection hook
+    const handleSelection = useCallback((result: SelectionState | null) => {
+        if (result) {
+            setSelection(result)
+        } else {
+            setSelection(null)
+        }
+    }, [])
+    useTextSelection(handleSelection)
+
     // ── Page-scoped visibility ──────────────────────────────────────────────────
     // Only show nodes for the current page (or pinned nodes which appear everywhere).
     // The master `nodes` / `edges` arrays still hold all pages — we just filter here.
@@ -258,7 +268,11 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
                 if (n.type === 'contentNode') {
                     return {
                         ...n,
-                        data: { ...n.data, onTestMePage: handleTestMePage } as unknown as Record<string, unknown>,
+                        data: {
+                            ...n.data,
+                            onTestMePage: handleTestMePage,
+                            onManualSelection: handleSelection
+                        } as unknown as Record<string, unknown>,
                     }
                 }
                 if (n.type === 'quizQuestionNode') {
@@ -275,7 +289,7 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
                 }
                 return n
             })
-    }, [nodes, currentPage, pageMarkdowns, handleTestMePage, handleGradeAnswer])
+    }, [nodes, currentPage, pageMarkdowns, handleTestMePage, handleGradeAnswer, handleSelection])
 
     const visibleNodeIds = useMemo(
         () => new Set(visibleNodes.map((n) => n.id)),
@@ -308,16 +322,6 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
         const status = (node.data as unknown as AnswerNodeData)?.status
         return STATUS_COLORS[status] ?? '#3b82f6'
     }, [])
-
-    // Text selection hook
-    const handleSelection = useCallback((result: SelectionState | null) => {
-        if (result) {
-            setSelection(result)
-        } else {
-            setSelection(null)
-        }
-    }, [])
-    useTextSelection(handleSelection)
 
     // Dismiss popup on mousedown outside
     useEffect(() => {
@@ -359,7 +363,7 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
     const MIN_ZOOM = 0.1
     const MAX_ZOOM = 4
     const ZOOM_SPEED = 0.015   // per deltaY unit — raise to taste
-    const PAN_SPEED  = 3       // multiplier for 2-finger pan
+    const PAN_SPEED = 3       // multiplier for 2-finger pan
     useEffect(() => {
         const el = containerRef.current
         if (!el) return
@@ -379,10 +383,10 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
                 // ── Pinch-to-zoom ─────────────────────────────────────────────
                 const delta = -e.deltaY * ZOOM_SPEED
                 const newZoom = Math.min(Math.max(vp.zoom * Math.exp(delta), MIN_ZOOM), MAX_ZOOM)
-                const ratio  = newZoom / vp.zoom
+                const ratio = newZoom / vp.zoom
 
                 // Zoom toward the cursor position
-                const rect   = el.getBoundingClientRect()
+                const rect = el.getBoundingClientRect()
                 const mouseX = e.clientX - rect.left
                 const mouseY = e.clientY - rect.top
 
@@ -403,7 +407,7 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
 
         el.addEventListener('wheel', handleWheel, { passive: false, capture: true })
         return () => el.removeEventListener('wheel', handleWheel, { capture: true })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [setViewport, getViewport])
 
     // Show toast helper
