@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from fastapi import APIRouter, UploadFile, HTTPException
+from fastapi.responses import FileResponse
 from services import pdf_service, file_service
 from models.schemas import UploadResponse
 
@@ -18,6 +19,12 @@ async def upload_pdf(file: UploadFile):
     if file.content_type != "application/pdf":
         raise HTTPException(status_code=400, detail="Only PDF files are accepted.")
 
+    # Save PDF to persistent storage
+    pdf_id = await file_service.save_pdf_file(file)
+    
+    # Reset file position for reading
+    await file.seek(0)
+    
     # Async read — does not block the event loop even for large uploads.
     tmp_path = await file_service.save_temp_file(file)
 
@@ -43,4 +50,21 @@ async def upload_pdf(file: UploadFile):
         raw_text=raw_text,
         filename=file.filename or "upload.pdf",
         page_count=page_count,
+        pdf_id=pdf_id,
+    )
+
+
+@router.get("/pdf/{pdf_id}")
+async def get_pdf(pdf_id: str):
+    """
+    Retrieves a stored PDF file by its ID.
+    """
+    pdf_path = file_service.get_pdf_path(pdf_id)
+    if not pdf_path:
+        raise HTTPException(status_code=404, detail="PDF not found")
+    
+    return FileResponse(
+        pdf_path,
+        media_type="application/pdf",
+        filename=f"{pdf_id}.pdf"
     )

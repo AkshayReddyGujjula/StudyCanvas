@@ -10,6 +10,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@react-pdf-viewer/core": "^3.12.0",
+    "@react-pdf-viewer/default-layout": "^3.12.0",
+    "@react-pdf-viewer/thumbnail": "^3.12.0",
     "@react-pdf/renderer": "^4.3.2",
     "@tailwindcss/typography": "^0.5.19",
     "@vercel/analytics": "^1.6.1",
@@ -17,6 +20,7 @@
     "@xyflow/react": "^12.10.1",
     "autoprefixer": "^10.4.24",
     "axios": "^1.13.5",
+    "pdfjs-dist": "^4.9.155",
     "postcss": "^8.5.6",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

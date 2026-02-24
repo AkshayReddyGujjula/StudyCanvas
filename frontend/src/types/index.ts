@@ -10,6 +10,7 @@ export interface ContentNodeData {
     markdown_content: string
     filename: string
     page_count: number
+    pdf_id?: string
 }
 
 export interface ChatMessage {
@@ -39,6 +40,7 @@ export interface UploadResponse {
     raw_text: string
     filename: string
     page_count: number
+    pdf_id?: string
 }
 
 export interface QuizQuestion {

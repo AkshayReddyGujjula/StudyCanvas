@@ -13,6 +13,7 @@ interface FileData {
     raw_text: string
     filename: string
     page_count: number
+    pdf_url?: string
 }
 
 export interface UserDetails {
@@ -33,6 +34,10 @@ interface CanvasState {
     currentPage: number
     /** Full markdown split into one string per page */
     pageMarkdowns: string[]
+    /** Zoom level for PDF viewer (default 1.0) */
+    zoomLevel: number
+    /** Per-page scroll positions for PDF viewer */
+    scrollPositions: Record<number, number>
 }
 
 interface CanvasActions {
@@ -48,6 +53,10 @@ interface CanvasActions {
     setUserDetails: (details: UserDetails) => void
     setCurrentPage: (page: number) => void
     setPageMarkdowns: (markdowns: string[]) => void
+    /** Set zoom level for PDF viewer */
+    setZoomLevel: (zoom: number) => void
+    /** Update scroll position for a specific page */
+    updateScrollPosition: (page: number, position: number) => void
     /** Merge a partial data patch into a quiz question node */
     updateQuizNodeData: (nodeId: string, data: Partial<Record<string, unknown>>) => void
     /** Append a chat message to a quiz question node's chatHistory */
@@ -67,6 +76,8 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
     userDetails: { name: '', age: '', status: '', educationLevel: '' },
     currentPage: 1,
     pageMarkdowns: [],
+    zoomLevel: 1.0,
+    scrollPositions: {},
 
     setNodes: (nodes) =>
         set((state) => ({
@@ -80,7 +91,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
 
     setFileData: (data) => {
         const pages = splitMarkdownByPage(data.markdown_content)
-        set({ fileData: data, pageMarkdowns: pages, currentPage: 1 })
+        set({ fileData: data, pageMarkdowns: pages, currentPage: 1, zoomLevel: 1.0, scrollPositions: {} })
     },
 
     addHighlight: (entry) =>
@@ -103,6 +114,13 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
 
     setPageMarkdowns: (markdowns) => set({ pageMarkdowns: markdowns }),
 
+    setZoomLevel: (zoom) => set({ zoomLevel: zoom }),
+
+    updateScrollPosition: (page, position) =>
+        set((state) => ({
+            scrollPositions: { ...state.scrollPositions, [page]: position },
+        })),
+
     resetCanvas: () => {
         const { activeAbortController } = get()
         activeAbortController?.abort()
@@ -115,14 +133,16 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
             userDetails: { name: '', age: '', status: '', educationLevel: '' },
             currentPage: 1,
             pageMarkdowns: [],
+            zoomLevel: 1.0,
+            scrollPositions: {},
         })
         localStorage.removeItem(STORAGE_KEY)
     },
 
     persistToLocalStorage: () => {
-        const { nodes, edges, fileData, highlights, userDetails, currentPage, pageMarkdowns } = get()
+        const { nodes, edges, fileData, highlights, userDetails, currentPage, pageMarkdowns, zoomLevel, scrollPositions } = get()
         // Never persist activeAbortController — it is a transient runtime field
-        const state = { nodes, edges, fileData, highlights, userDetails, currentPage, pageMarkdowns }
+        const state = { nodes, edges, fileData, highlights, userDetails, currentPage, pageMarkdowns, zoomLevel, scrollPositions }
         localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
     },
 

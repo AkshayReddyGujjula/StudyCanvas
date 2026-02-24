@@ -25,6 +25,29 @@ body,
   }
 }
 
+/* ── PDF text layer (Chrome-style text selection) ────────────────────────── */
+/* Spans are transparent so the canvas shows through; the ::selection
+   pseudo-element gives them a blue highlight on selection — same as Chrome. */
+.pdf-text-layer span {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.pdf-text-layer ::selection {
+  background-color: rgba(0, 120, 215, 0.25);
+  color: transparent;
+}
+
+.pdf-text-layer ::-moz-selection {
+  background-color: rgba(0, 120, 215, 0.25);
+  color: transparent;
+}
+
 /* Override React Flow's global user-select: none and grab cursor inside node text areas */
 .react-flow__node .nodrag,
 .react-flow__node .nodrag * {

@@ -7,6 +7,7 @@ class UploadResponse(BaseModel):
     raw_text: str
     filename: str
     page_count: int
+    pdf_id: Optional[str] = None
 
 
 class UserDetails(BaseModel):
