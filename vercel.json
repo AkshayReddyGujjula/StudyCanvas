@@ -4,10 +4,7 @@
   "functions": {
     "api/index.py": {
       "maxDuration": 60,
-      "excludeFiles": [
-        "frontend/**",
-        "node_modules/**"
-      ]
+      "excludeFiles": "{frontend/**,node_modules/**}"
     }
   },
   "rewrites": [
