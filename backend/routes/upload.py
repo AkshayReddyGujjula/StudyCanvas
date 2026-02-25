@@ -15,7 +15,7 @@ router = APIRouter()
 async def upload_pdf(request: Request, file: UploadFile):
     """
     Accepts a PDF upload. Text and Markdown are extracted locally with
-    pymupdf4llm — no Gemini call needed, giving sub-second turnaround for
+    pypdf — no Gemini call needed, giving sub-second turnaround for
     typical documents. The temp file is always deleted in the finally block.
     """
     if file.content_type != "application/pdf":

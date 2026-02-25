@@ -1,16 +1,10 @@
 import re
 import unicodedata
-import fitz  # PyMuPDF (pulled in by pymupdf4llm)
-import pymupdf4llm
-import base64
-from services import file_service
-
-# Extraction flags: dehyphenate split words across lines and preserve whitespace.
-_EXTRACT_FLAGS = fitz.TEXT_PRESERVE_WHITESPACE | fitz.TEXT_DEHYPHENATE
+import pypdf
 
 # Explicit map for Unicode ligature characters that some PDF fonts emit instead
 # of their decomposed letter equivalents. Applied before NFKC normalisation so
-# any that survive PyMuPDF's extraction are caught regardless.
+# any that survive the PDF extraction are caught regardless.
 _LIGATURE_CHAR_MAP: dict[str, str] = {
     # Standard Unicode Alphabetic Presentation Forms (U+FB00–U+FB06)
     '\ufb00': 'ff',   # ﬀ  LATIN SMALL LIGATURE FF
@@ -34,7 +28,7 @@ _LIGATURE_CHAR_MAP: dict[str, str] = {
 
 def _clean(text: str) -> str:
     """
-    Fix font-encoding artifacts that pymupdf4llm inherits from the raw PDF.
+    Fix font-encoding artifacts that PDF text extraction produces from the raw PDF.
 
     Many PDFs with Type1/TrueType fonts have broken or non-standard encoding
     tables that map ligature glyphs to wrong Unicode code points.  The set of
@@ -85,99 +79,41 @@ def _clean(text: str) -> str:
 
 def extract_text_and_markdown(file_path: str) -> tuple[str, str, int, str|None]:
     """
-    Opens a PDF with PyMuPDF and extracts both:
+    Opens a PDF with pypdf and extracts both:
       - raw_text         : cleaned plain text per page, for downstream Gemini
                            endpoints (quiz / flashcards / query context).
-      - markdown_content : per-page Markdown from pymupdf4llm with encoding
-                           artifacts cleaned, and '## Page N' headers prepended
+      - markdown_content : per-page Markdown with '## Page N' headers prepended
                            so the frontend splitMarkdownByPage() regex works.
 
-    If a page has very little text (e.g., scanned/handwritten), it attempts
-    to use Tesseract OCR to extract text from the image layer and re-saves the PDF.
-
-    Raises ValueError("empty_text") if the PDF has no extractable text even after OCR.
+    Raises ValueError("empty_text") if the PDF has no extractable text at all.
     Returns (raw_text, markdown_content, page_count, new_pdf_path).
+    new_pdf_path is always None (server-side PDF modification not used on Vercel).
     """
-    doc = fitz.open(file_path)
-    # Track if we modified the PDF (added OCR text layers)
-    pdf_was_modified = False
-    
-    try:
-        page_count = len(doc)
+    reader = pypdf.PdfReader(file_path)
+    page_count = len(reader.pages)
 
-        raw_pages: list[str] = []
-        md_pages: list[str] = []
+    raw_pages: list[str] = []
+    md_pages: list[str] = []
 
-        for i, page in enumerate(doc):
-            # Extract standard text
-            raw_page_text = _clean(page.get_text(flags=_EXTRACT_FLAGS))
-            
-            # If the page has almost no text (likely an image/scan), try OCR
-            if len(raw_page_text.strip()) < 50:
-                try:
-                    # 'full' OCR mode: attempts to parse all images on the page
-                    ocr_doc = fitz.open("pdf", page.get_textpage_ocr(flags=_EXTRACT_FLAGS, dpi=300, full=True).pdf_file)
-                    ocr_page = ocr_doc[0]
-                    # Get the extracted OCR text
-                    raw_page_text = _clean(ocr_page.get_text(flags=_EXTRACT_FLAGS))
-                    
-                    if len(raw_page_text.strip()) > 50:
-                        # Success! The OCR found text. Let's replace the original image-only 
-                        # page with this new page that contains the hidden text layer so the 
-                        # frontend user can actually highlight it.
-                        doc.delete_page(i)
-                        doc.insert_pdf(ocr_doc, from_page=0, to_page=0, start_at=i)
-                        pdf_was_modified = True
-                except Exception as e:
-                    # Tesseract might not be installed or failed on this specific page
-                    print(f"OCR failed for page {i+1}: {e}")
+    for i, page in enumerate(reader.pages):
+        page_text = page.extract_text() or ""
+        cleaned = _clean(page_text)
+        raw_pages.append(cleaned)
+        md_pages.append(f"## Page {i + 1}\n\n{cleaned.strip()}")
 
-            raw_pages.append(raw_page_text)
+    raw_text = "\n\n".join(raw_pages)
+    markdown_content = "\n\n".join(md_pages)
 
-        # After potentially replacing pages with OCR'd versions, generate the markdown
-        for i in range(page_count):
-            page_md = _clean(pymupdf4llm.to_markdown(doc, pages=[i]))
-            md_pages.append(f"## Page {i + 1}\n\n{page_md.strip()}")
+    if not raw_text.strip():
+        raise ValueError("empty_text")
 
-        raw_text = "\n\n".join(raw_pages)
-        markdown_content = "\n\n".join(md_pages)
-        
-        new_pdf_path = None
-        if pdf_was_modified:
-            # Save the modified document with the new OCR text layers to a temporary file
-            # that upload.py can use to overwrite the original.
-            new_pdf_path = file_path + ".ocr.pdf"
-            doc.save(new_pdf_path)
-            
-    finally:
-        # Always close so the OS file handle (and Windows exclusive lock) is
-        # released before the caller tries to delete the temp file.
-        doc.close()
+    return raw_text, markdown_content, page_count, None
 
-    return raw_text, markdown_content, page_count, new_pdf_path
 
 def get_page_image_base64(pdf_id: str, page_index: int) -> str | None:
     """
-    Extracts the image of a specific PDF page given the stored pdf_id.
-    page_index is 0-based.
-    Returns the base64-encoded JPEG image string, or None if extraction fails.
+    Server-side PDF image rendering is not available on Vercel serverless.
+    Always returns None — Gemini Vision will use the image_base64 sent directly
+    by the frontend (via the PDFViewer canvas snapshot) when available.
     """
-    pdf_path = file_service.get_pdf_path(pdf_id)
-    if not pdf_path:
-        return None
-    
-    try:
-        doc = fitz.open(pdf_path)
-        if page_index < 0 or page_index >= len(doc):
-            return None
-            
-        page = doc[page_index]
-        pix = page.get_pixmap(dpi=150)
-        img_bytes = pix.tobytes("jpeg")
-        return base64.b64encode(img_bytes).decode("utf-8")
-    except Exception as e:
-        print(f"Error extracting image for page {page_index}: {e}")
-        return None
-    finally:
-        if 'doc' in locals():
-            doc.close()
+    return None

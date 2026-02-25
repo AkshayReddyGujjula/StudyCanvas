@@ -87,10 +87,21 @@ export default function RevisionModal({
                 setQuestions(qs)
                 setQuestionStates(qs.map(() => emptyQuestionState()))
                 setLoading(false)
-            } catch (err) {
-                setError('Failed to generate quiz. Please try again.')
+            } catch (err: unknown) {
+                console.error('Revision quiz generation error:', err)
+                const axErr = err as { response?: { status?: number; data?: { detail?: string } }; message?: string }
+                let msg = 'Failed to generate quiz.'
+                if (axErr?.response?.status === 422) {
+                    msg = axErr.response.data?.detail ?? 'Page has no readable content — try a different page.'
+                } else if (axErr?.response?.status === 429) {
+                    msg = 'Rate limit reached — please wait a moment.'
+                } else if (!axErr?.response) {
+                    msg = 'Cannot reach backend server — is it running on port 8000?'
+                } else {
+                    msg += ' ' + (axErr.response.data?.detail ?? axErr.message ?? '')
+                }
+                setError(msg)
                 setLoading(false)
-                console.error(err)
             }
         }
 

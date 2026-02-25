@@ -1,21 +1,35 @@
-# Ignore Vercel CLI generated folder
+# ─── Vercel CLI upload exclusions ─────────────────────────────────────────────
+# These patterns only apply when deploying via `vercel` CLI.
+# Git-integration deployments ignore this file entirely.
+#
+# IMPORTANT: Do NOT exclude any frontend source / config files here — they are
+# required by the buildCommand ("cd frontend && npm install && npm run build").
+
+# Vercel CLI generated folder
 .vercel/
 
-# Ignore local environments
+# Python virtual environments
 .venv/
 backend/.venv/
 venv/
 env/
-__pycache__/
 
-# Testing and local dev files
+# Python bytecode
+__pycache__/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+
+# Local dev / editor files
 .pytest_cache/
-tests/
-.env.*
 .git/
 .gitignore
 .vscode/
 
-# Vercel lambda should ignore the node_modules from local upload
+# Local node_modules (Vercel runs npm install during build)
 node_modules/
 frontend/node_modules/
+
+# Documentation & planning (not needed for build or runtime)
+plans/
+LICENSE

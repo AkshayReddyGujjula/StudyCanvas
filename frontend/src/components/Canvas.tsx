@@ -179,11 +179,22 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
 
             const result = await generatePageQuiz(pageContent, fileData.pdf_id, currentPage - 1, imageBase64)
             questions = result.questions
-        } catch (err) {
+        } catch (err: unknown) {
             console.error('Page quiz generation error:', err)
-            setToast('Failed to generate quiz. Please try again.')
+            const axErr = err as { response?: { status?: number; data?: { detail?: string } }; message?: string }
+            let msg = 'Failed to generate quiz.'
+            if (axErr?.response?.status === 422) {
+                msg = axErr.response.data?.detail ?? 'Page has no readable content — try a different page.'
+            } else if (axErr?.response?.status === 429) {
+                msg = 'Rate limit reached — please wait a moment and try again.'
+            } else if (!axErr?.response) {
+                msg = 'Cannot reach backend server — is it running?'
+            } else {
+                msg += ' ' + (axErr.response.data?.detail ?? axErr.message ?? '')
+            }
+            setToast(msg)
             if (toastTimeout) clearTimeout(toastTimeout)
-            toastTimeout = setTimeout(() => setToast(null), 3000)
+            toastTimeout = setTimeout(() => setToast(null), 5000)
             return
         }
         if (!questions.length) {
@@ -374,11 +385,40 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
     }, [])
 
     // F key shortcut — fit view (only when not typing in input/textarea)
+    // Ctrl+Shift+S / Cmd+Shift+S — snipping tool (globally registered so it
+    // works in both PDF view and markdown view without needing PDFViewer mounted).
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
             const tag = (document.activeElement as HTMLElement)?.tagName
             if (e.key === 'F' && tag !== 'INPUT' && tag !== 'TEXTAREA') {
                 fitView({ duration: 400 })
+            }
+            if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 's') {
+                // Always prevent the browser "Save As" dialog.
+                e.preventDefault()
+                const state = useCanvasStore.getState()
+                if (!state.pdfArrayBuffer) {
+                    // PDF not loaded or not in PDF view — try loading it first
+                    if (state.fileData) {
+                        state.loadPdfFromStorage().then(() => {
+                            const fresh = useCanvasStore.getState()
+                            if (fresh.pdfArrayBuffer) {
+                                fresh.setIsSnippingMode(true)
+                            } else {
+                                setToast('Switch to PDF View mode to use the snipping tool')
+                                if (toastTimeout) clearTimeout(toastTimeout)
+                                toastTimeout = setTimeout(() => setToast(null), 3000)
+                            }
+                        })
+                    } else {
+                        setToast('Upload a PDF first to use the snipping tool')
+                        if (toastTimeout) clearTimeout(toastTimeout)
+                        toastTimeout = setTimeout(() => setToast(null), 3000)
+                    }
+                    return
+                }
+                // Toggle snipping mode — the PDFViewer overlay responds to this store flag.
+                state.setIsSnippingMode(!state.isSnippingMode)
             }
         }
         document.addEventListener('keydown', handleKeyDown)
@@ -802,9 +842,20 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
                 imageBase64
             )
             console.log('FLASHCARD API RETURNED:', cards)
-        } catch (err) {
+        } catch (err: unknown) {
             console.error('Flashcard generation error:', err)
-            showToast('Failed to generate flashcards. Please try again.')
+            const axErr = err as { response?: { status?: number; data?: { detail?: string } }; message?: string }
+            let msg = 'Failed to generate flashcards.'
+            if (axErr?.response?.status === 422) {
+                msg = axErr.response.data?.detail ?? 'Page has no readable content — try a different page.'
+            } else if (axErr?.response?.status === 429) {
+                msg = 'Rate limit reached — please wait a moment and try again.'
+            } else if (!axErr?.response) {
+                msg = 'Cannot reach backend server — is it running?'
+            } else {
+                msg += ' ' + (axErr.response.data?.detail ?? axErr.message ?? '')
+            }
+            showToast(msg)
             setIsGeneratingFlashcards(false)
             return
         }

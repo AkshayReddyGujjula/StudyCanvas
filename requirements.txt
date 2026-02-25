@@ -1,12 +1,11 @@
 # Web framework & server
 fastapi>=0.115.0
-uvicorn[standard]>=0.34.0
+uvicorn>=0.34.0
 pydantic>=2.10.0
 slowapi>=0.1.9
 
-# PDF extraction
-pymupdf4llm>=0.3.4
-PyMuPDF>=1.25.0
+# PDF extraction (pure-Python, keeps Lambda bundle under 249 MB)
+pypdf>=5.0.0
 
 # AI / LLM
 google-generativeai>=0.8.4

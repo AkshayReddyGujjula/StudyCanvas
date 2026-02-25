@@ -14,12 +14,20 @@ export default defineConfig({
     include: ['pdfjs-dist'],
   },
   build: {
+    chunkSizeWarningLimit: 600,
     rollupOptions: {
       output: {
         manualChunks: {
-          pdfjs: ['pdfjs-dist'],
-          xyflow: ['@xyflow/react'],
-          pdfviewer: ['@react-pdf-viewer/core', '@react-pdf-viewer/default-layout'],
+          'vendor-react': ['react', 'react-dom'],
+          'vendor-pdfjs': ['pdfjs-dist'],
+          'vendor-xyflow': ['@xyflow/react'],
+          'vendor-pdfviewer': [
+            '@react-pdf-viewer/core',
+            '@react-pdf-viewer/default-layout',
+            '@react-pdf-viewer/thumbnail',
+          ],
+          'vendor-pdfrenderer': ['@react-pdf/renderer'],
+          'vendor-markdown': ['react-markdown', 'remark-gfm', 'rehype-raw', 'rehype-sanitize'],
         },
       },
     },

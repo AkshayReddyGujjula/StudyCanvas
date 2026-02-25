@@ -6,10 +6,12 @@
 
 import * as pdfjsLib from 'pdfjs-dist'
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-    'pdfjs-dist/build/pdf.worker.min.mjs',
-    import.meta.url
-).toString()
+// Use the same worker path as PDFViewer.tsx — served from the public folder.
+// IMPORTANT: Do NOT use `new URL('pdfjs-dist/build/...', import.meta.url)` here
+// because this module loads AFTER PDFViewer.tsx in the import graph, so this
+// assignment would override PDFViewer's correct '/pdf.worker.min.mjs' path,
+// potentially breaking PDF rendering if the resolved URL differs.
+pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs'
 
 /**
  * Renders a specific page of a PDF to a base64-encoded JPEG string.

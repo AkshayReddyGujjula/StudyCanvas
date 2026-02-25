@@ -228,14 +228,16 @@ export default function PDFViewer({
     const [snipStart, setSnipStart] = useState<{ x: number, y: number } | null>(null)
     const [snipCurrent, setSnipCurrent] = useState<{ x: number, y: number } | null>(null)
     const [isExtracting, setIsExtracting] = useState(false)
+    const [snipErrorMsg, setSnipErrorMsg] = useState<string | null>(null)
 
-    // Handle Ctrl+Shift+S / Cmd+Shift+S for Snipping Tool
+    // Handle Escape to exit snipping mode.
+    // NOTE: Ctrl+Shift+S is handled ONLY by the global handler in Canvas.tsx.
+    // Having a second handler here caused a double-toggle race condition
+    // (Zustand's synchronous set meant the Canvas handler read the already-
+    // flipped value and toggled it back, making snipping mode appear broken
+    // in PDF view).
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
-            if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 's') {
-                e.preventDefault()
-                setIsSnippingMode(!isSnippingMode)
-            }
             if (e.key === 'Escape' && isSnippingMode) {
                 setIsSnippingMode(false)
             }
@@ -390,7 +392,11 @@ export default function PDFViewer({
                 body: JSON.stringify({ image_base64: base64Image })
             })
 
-            if (!response.ok) throw new Error('Failed to extract text from image')
+            if (!response.ok) {
+                const errBody = await response.json().catch(() => null)
+                const detail = errBody?.detail ?? `HTTP ${response.status}`
+                throw new Error(detail)
+            }
 
             const data = await response.json()
             if (data.text && data.text.trim().length > 0) {
@@ -406,9 +412,24 @@ export default function PDFViewer({
                 )
 
                 onTextSelection?.(data.text.trim(), domRect, { x: clientX, y: clientY }, true)
+            } else {
+                // No text detected — exit snipping mode and tell the user.
+                setIsSnippingMode(false)
+                setSnipErrorMsg('No text detected — try selecting a larger area with text')
+                setTimeout(() => setSnipErrorMsg(null), 3500)
             }
         } catch (err) {
             console.error('[PDFViewer] Vision extract error:', err)
+            // Exit snipping mode and surface the error to the user.
+            setIsSnippingMode(false)
+            const errMsg = err instanceof Error ? err.message : ''
+            const isNetworkErr = errMsg.includes('Failed to fetch') || errMsg.includes('NetworkError') || errMsg.includes('ERR_CONNECTION')
+            setSnipErrorMsg(
+                isNetworkErr
+                    ? 'Cannot reach backend server — is it running on port 8000?'
+                    : `Text extraction failed: ${errMsg || 'check connection and try again'}`
+            )
+            setTimeout(() => setSnipErrorMsg(null), 5000)
         } finally {
             setIsExtracting(false)
         }
@@ -605,6 +626,13 @@ export default function PDFViewer({
                                         </div>
                                     </div>
                                 )}
+                            </div>
+                        )}
+
+                        {/* Snip error toast — shown briefly after a failed OCR attempt */}
+                        {snipErrorMsg && (
+                            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-40 px-4 py-2 bg-gray-800 text-white text-xs font-medium rounded-lg shadow-lg whitespace-nowrap pointer-events-none">
+                                {snipErrorMsg}
                             </div>
                         )}
                     </div>
