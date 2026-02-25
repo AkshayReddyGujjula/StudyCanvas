@@ -67,7 +67,7 @@ export default function RevisionModal({
                     highlighted_text: d.highlighted_text,
                     question: d.question,
                     answer: d.answer,
-                    pageIndex: d.pageIndex ? d.pageIndex - 1 : undefined,
+                    page_index: d.pageIndex ? d.pageIndex - 1 : undefined,
                 }
             })
         }

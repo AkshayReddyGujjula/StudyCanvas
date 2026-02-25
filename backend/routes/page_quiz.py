@@ -1,6 +1,6 @@
 import logging
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from rate_limiter import limiter
 from services import gemini_service
 
@@ -9,7 +9,6 @@ router = APIRouter()
 
 
 class PageQuizRequest(BaseModel):
-    from pydantic import Field
     page_content: str = Field(..., max_length=200000)
     pdf_id: str | None = None
     page_index: int | None = None
@@ -21,7 +20,6 @@ class PageQuizResponse(BaseModel):
 
 
 class GradeAnswerRequest(BaseModel):
-    from pydantic import Field
     question: str = Field(..., max_length=2000)
     student_answer: str = Field(..., max_length=5000)
     page_content: str = Field(..., max_length=200000)

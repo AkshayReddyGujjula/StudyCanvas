@@ -6,6 +6,11 @@
 
 import * as pdfjsLib from 'pdfjs-dist'
 
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+    'pdfjs-dist/build/pdf.worker.min.mjs',
+    import.meta.url
+).toString()
+
 /**
  * Renders a specific page of a PDF to a base64-encoded JPEG string.
  * @param pdfData - The raw PDF as an ArrayBuffer.

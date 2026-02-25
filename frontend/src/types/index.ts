@@ -59,7 +59,7 @@ export interface QuizNodeInput {
     highlighted_text: string
     question: string
     answer: string
-    pageIndex?: number
+    page_index?: number
 }
 
 export interface FlashcardNodeData {
