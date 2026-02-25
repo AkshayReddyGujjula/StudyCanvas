@@ -1,0 +1,21 @@
+# Ignore Vercel CLI generated folder
+.vercel/
+
+# Ignore local environments
+.venv/
+backend/.venv/
+venv/
+env/
+__pycache__/
+
+# Testing and local dev files
+.pytest_cache/
+tests/
+.env.*
+.git/
+.gitignore
+.vscode/
+
+# Vercel lambda should ignore the node_modules from local upload
+node_modules/
+frontend/node_modules/
