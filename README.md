@@ -48,6 +48,7 @@ The result is a **visual knowledge map** of exactly what you understood, what co
 | Canvas | @xyflow/react (React Flow v12) |
 | Styling | Tailwind CSS + @tailwindcss/typography |
 | State Management | Zustand |
+| Local Storage | Native IndexedDB |
 | Markdown Rendering | react-markdown + remark-gfm + rehype-raw + rehype-sanitize |
 | HTTP (streaming) | Native Fetch API + ReadableStream + AbortController |
 | HTTP (upload/quiz) | Axios |
@@ -130,9 +131,7 @@ cd StudyCanvas
 ### 2. Backend setup
 
 ```bash
-cd backend
-
-# Create and activate a virtual environment
+# Create and activate a virtual environment in the root directory
 python -m venv .venv
 
 # Windows
@@ -141,7 +140,7 @@ python -m venv .venv
 # macOS / Linux
 source .venv/bin/activate
 
-# Install dependencies
+# Install dependencies from the root directory
 pip install -r requirements.txt
 ```
 
@@ -154,6 +153,7 @@ GEMINI_API_KEY=your_gemini_api_key_here
 Start the backend server:
 
 ```bash
+cd backend
 uvicorn main:app --port 8000 --reload
 ```
 

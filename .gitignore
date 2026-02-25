@@ -98,6 +98,7 @@ $RECYCLE.BIN/
 .project
 .classpath
 
-# ─── Build Outputs ────────────────────────────────────────────────────────────
+# ─── Build Outputs & Vercel ───────────────────────────────────────────────────
 *.tsbuildinfo
 frontend/dist/
+.vercel/
