@@ -15,6 +15,8 @@ export default function App() {
   const resetCanvas = useCanvasStore((s) => s.resetCanvas)
   const setUserDetails = useCanvasStore((s) => s.setUserDetails)
 
+  const loadPdfFromStorage = useCanvasStore((s) => s.loadPdfFromStorage)
+
   // Determine initial state: has canvas or needs upload
   const [hasCanvas, setHasCanvas] = useState(false)
   const [initialized, setInitialized] = useState(false)
@@ -55,12 +57,16 @@ export default function App() {
         if (state.nodes && state.nodes.length > 0) {
           setHasCanvas(true)
         }
+        // Load the PDF ArrayBuffer from IndexedDB (async, non-blocking)
+        if (state.fileData) {
+          loadPdfFromStorage()
+        }
       } catch (e) {
         console.error('Failed to restore canvas from localStorage', e)
       }
     }
     setInitialized(true)
-  }, [setNodes, setEdges, setFileData, setUserDetails])
+  }, [setNodes, setEdges, setFileData, setUserDetails, loadPdfFromStorage])
 
   const handleUploaded = () => setHasCanvas(true)
 

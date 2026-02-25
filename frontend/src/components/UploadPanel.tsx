@@ -35,15 +35,17 @@ export default function UploadPanel({ onUploaded }: UploadPanelProps) {
             setLoading(true)
 
             try {
+                // Read the file into an ArrayBuffer for client-side storage
+                const pdfArrayBuffer = await file.arrayBuffer()
+
                 const data = await uploadPdf(file)
                 setFileData({
                     markdown_content: data.markdown_content,
                     raw_text: data.raw_text,
                     filename: data.filename,
                     page_count: data.page_count,
-                    pdf_url: data.pdf_id ? `/api/pdf/${data.pdf_id}` : undefined,
                     pdf_id: data.pdf_id,
-                })
+                }, pdfArrayBuffer)
 
                 // After setFileData the store has split the markdown into pages.
                 // Use page 1's markdown so the contentNode only shows the first page.

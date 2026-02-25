@@ -91,10 +91,10 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
     // 'pdf' = PDF view, 'markdown' = Markdown view
     // Start with markdown, switch to pdf after loading if successful
     const [viewMode, setViewMode] = useState<'pdf' | 'markdown'>('markdown')
-    // PDF data buffer
-    const [pdfData, setPdfData] = useState<ArrayBuffer | null>(null)
+    // PDF data buffer — sourced from the Zustand store (backed by IndexedDB)
+    const pdfArrayBuffer = useCanvasStore((s) => s.pdfArrayBuffer)
+    const loadPdfFromStorage = useCanvasStore((s) => s.loadPdfFromStorage)
     const [isLoadingPdf, setIsLoadingPdf] = useState(false)
-    const [, setPdfError] = useState<string | null>(null)
 
     const isMac = useMemo(() => {
         if (typeof window !== 'undefined') {
@@ -103,59 +103,25 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
         return false
     }, [])
 
-    // Load PDF data when pdf_id changes or when viewMode changes to 'pdf'
+    // Load PDF data from IndexedDB when switching to PDF view mode
     useEffect(() => {
-        console.log('[ContentNode] PDF effect triggered:', { pdf_id: data.pdf_id, viewMode, hasPdfData: !!pdfData })
-
         // Don't load if we're not in PDF view mode
-        if (viewMode !== 'pdf') {
-            console.log('[ContentNode] Not in PDF view mode, skipping')
-            return
-        }
+        if (viewMode !== 'pdf') return
 
-        if (!data.pdf_id) {
-            console.log('[ContentNode] No PDF ID available')
-            setPdfData(null)
-            setViewMode('markdown')
-            return
-        }
+        // Already have the buffer in memory
+        if (pdfArrayBuffer) return
 
-        // Don't reload if we already have the PDF data
-        if (pdfData) {
-            console.log('[ContentNode] PDF data already loaded, skipping')
-            return
-        }
-
-        const loadPdf = async () => {
-            console.log('[ContentNode] Starting PDF load...')
-            setIsLoadingPdf(true)
-            setPdfError(null)
-            try {
-                // Get the API base URL from environment
-                const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
-                const url = `${API_BASE}/api/pdf/${data.pdf_id}`
-                console.log('[ContentNode] Loading PDF from:', url)
-
-                const response = await fetch(url)
-                if (!response.ok) {
-                    throw new Error(`Failed to load PDF: ${response.status} ${response.statusText}`)
-                }
-                const arrayBuffer = await response.arrayBuffer()
-                console.log('[ContentNode] PDF loaded, size:', arrayBuffer.byteLength)
-                setPdfData(arrayBuffer)
-                console.log('[ContentNode] PDF data state updated')
-            } catch (err) {
-                console.error('[ContentNode] Error loading PDF:', err)
-                setPdfError(err instanceof Error ? err.message : 'Failed to load PDF. Showing markdown view instead.')
+        // Try loading from IndexedDB
+        setIsLoadingPdf(true)
+        loadPdfFromStorage().finally(() => {
+            setIsLoadingPdf(false)
+            // If still no buffer after loading, fall back to markdown
+            const currentBuffer = useCanvasStore.getState().pdfArrayBuffer
+            if (!currentBuffer) {
                 setViewMode('markdown')
-            } finally {
-                setIsLoadingPdf(false)
-                console.log('[ContentNode] PDF loading complete')
             }
-        }
-
-        loadPdf()
-    }, [data.pdf_id, viewMode])
+        })
+    }, [viewMode, pdfArrayBuffer, loadPdfFromStorage])
 
     const processedMarkdown = useMemo(() => {
         let content = data.markdown_content
@@ -249,7 +215,7 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
         const minH = minViewerHeightRef.current
 
         // In text mode, only allow width resizing
-        const isPdfMode = viewMode === 'pdf' && pdfData
+        const isPdfMode = viewMode === 'pdf' && pdfArrayBuffer
         const effectiveMode = isPdfMode ? mode : 'w'
 
         const cursors: Record<string, string> = {
@@ -290,7 +256,7 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
 
         document.addEventListener('mousemove', onMove)
         document.addEventListener('mouseup', onUp)
-    }, [nodeWidth, pdfViewerHeight, autoFitHeight, viewMode, pdfData])
+    }, [nodeWidth, pdfViewerHeight, autoFitHeight, viewMode, pdfArrayBuffer])
 
     const handleMarkdownClick = useCallback(
         (event: React.MouseEvent) => {
@@ -323,7 +289,7 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
     const headerHeight = 44
     const toolbarHeight = 40
     const footerHeight = hasFooter ? 44 : 0
-    const isPdfMode = viewMode === 'pdf' && pdfData
+    const isPdfMode = viewMode === 'pdf' && pdfArrayBuffer
     const effectiveHeight = (isPdfMode && pdfViewerHeight)
         ? headerHeight + toolbarHeight + pdfViewerHeight + footerHeight
         : undefined
@@ -393,7 +359,7 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
             </div>
 
             {/* View mode toggle - standalone only when in markdown mode */}
-            {(data.pdf_id || pdfData) && viewMode === 'markdown' && (
+            {(pdfArrayBuffer || data.pdf_id) && viewMode === 'markdown' && (
                 <div className="nodrag px-4 py-2 border-b border-gray-100 flex justify-center bg-gray-50">
                     {renderViewModeButtons()}
                 </div>
@@ -411,10 +377,10 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
 
             {/* Content - PDF view or Markdown view - hide when loading */}
             {!isLoadingPdf && (
-                viewMode === 'pdf' && pdfData ? (
+                viewMode === 'pdf' && pdfArrayBuffer ? (
                     <div className="nodrag nopan">
                         <PDFViewer
-                            pdfData={pdfData}
+                            pdfData={pdfArrayBuffer}
                             initialPage={currentPage}
                             scrollPositions={scrollPositions}
                             onScrollPositionChange={(page, position) => updateScrollPosition(page, position)}

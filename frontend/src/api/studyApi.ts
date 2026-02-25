@@ -24,7 +24,8 @@ export const generateQuiz = async (
     pdf_id?: string,
     source_type: 'struggling' | 'page' = 'struggling',
     page_index?: number,
-    page_content?: string
+    page_content?: string,
+    image_base64?: string
 ): Promise<QuizQuestion[]> => {
     const response = await api.post<QuizQuestion[]>('/api/quiz', {
         struggling_nodes,
@@ -32,7 +33,8 @@ export const generateQuiz = async (
         pdf_id,
         source_type,
         page_index,
-        page_content
+        page_content,
+        image_base64
     })
     return response.data
 }
@@ -65,8 +67,8 @@ export const generateTitle = async (raw_text: string): Promise<string> => {
 /**
  * Generate 3-5 short-answer quiz questions for a single page's content.
  */
-export const generatePageQuiz = async (page_content: string, pdf_id?: string, page_index?: number): Promise<{ questions: string[] }> => {
-    const response = await api.post<{ questions: string[] }>('/api/page-quiz', { page_content, pdf_id, page_index })
+export const generatePageQuiz = async (page_content: string, pdf_id?: string, page_index?: number, image_base64?: string): Promise<{ questions: string[] }> => {
+    const response = await api.post<{ questions: string[] }>('/api/page-quiz', { page_content, pdf_id, page_index, image_base64 })
     return response.data
 }
 
@@ -79,7 +81,8 @@ export const gradeAnswer = async (
     page_content: string,
     user_details?: { name: string; age: string; status: string; educationLevel: string },
     pdf_id?: string,
-    page_index?: number
+    page_index?: number,
+    image_base64?: string
 ): Promise<{ feedback: string }> => {
     const response = await api.post<{ feedback: string }>('/api/grade-answer', {
         question,
@@ -88,6 +91,7 @@ export const gradeAnswer = async (
         user_details,
         pdf_id,
         page_index,
+        image_base64,
     })
     return response.data
 }
@@ -102,7 +106,8 @@ export const generateFlashcards = async (
     source_type: 'struggling' | 'page' = 'struggling',
     page_index?: number,
     page_content?: string,
-    existing_flashcards?: string[]
+    existing_flashcards?: string[],
+    image_base64?: string
 ): Promise<{ question: string; answer: string }[]> => {
     const response = await api.post<{ question: string; answer: string }[]>('/api/flashcards', {
         struggling_nodes,
@@ -111,7 +116,8 @@ export const generateFlashcards = async (
         source_type,
         page_index,
         page_content,
-        existing_flashcards
+        existing_flashcards,
+        image_base64
     })
     return response.data
 }

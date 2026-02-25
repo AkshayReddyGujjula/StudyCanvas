@@ -30,12 +30,6 @@ async def upload_pdf(request: Request, file: UploadFile):
         raise HTTPException(status_code=400, detail="Invalid PDF file format.")
     await file.seek(0)
 
-    # Save PDF to persistent storage initially
-    pdf_id = await file_service.save_pdf_file(file)
-    
-    # Reset file position for reading
-    await file.seek(0)
-    
     # Async read — does not block the event loop even for large uploads.
     tmp_path = await file_service.save_temp_file(file)
 
@@ -47,13 +41,7 @@ async def upload_pdf(request: Request, file: UploadFile):
                 pdf_service.extract_text_and_markdown, tmp_path
             )
             
-            # If the PDF was enhanced with OCR text layers, overwrite the saved file
             if new_pdf_path:
-                import shutil
-                persistent_path = file_service.get_pdf_path(pdf_id)
-                if persistent_path:
-                    shutil.copy2(new_pdf_path, persistent_path)
-                # Cleanup the temp OCR file
                 file_service.delete_file(new_pdf_path)
                 
         except ValueError as e:
@@ -61,27 +49,13 @@ async def upload_pdf(request: Request, file: UploadFile):
     finally:
         file_service.delete_file(tmp_path)
 
+    import uuid
+    pdf_id = str(uuid.uuid4())
+
     return UploadResponse(
         markdown_content=markdown_content,
         raw_text=raw_text,
         filename=file.filename or "upload.pdf",
         page_count=page_count,
         pdf_id=pdf_id,
-    )
-
-
-@router.get("/pdf/{pdf_id}")
-@limiter.limit("50/minute; 500/hour")
-async def get_pdf(request: Request, pdf_id: str):
-    """
-    Retrieves a stored PDF file by its ID.
-    """
-    pdf_path = file_service.get_pdf_path(pdf_id)
-    if not pdf_path:
-        raise HTTPException(status_code=404, detail="PDF not found")
-    
-    return FileResponse(
-        pdf_path,
-        media_type="application/pdf",
-        filename=f"{pdf_id}.pdf"
     )

@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import type { Node } from '@xyflow/react'
+import { useCanvasStore } from '../store/canvasStore'
+import { extractPageImageBase64 } from '../utils/pdfImageExtractor'
 import { generateQuiz, validateAnswer } from '../api/studyApi'
 import type { AnswerNodeData, QuizQuestion, ValidateAnswerResponse } from '../types'
 
@@ -70,17 +72,29 @@ export default function RevisionModal({
             })
         }
 
-        generateQuiz(input, rawText, pdfId, sourceType, pageIndex, pageContent)
-            .then((qs) => {
+        const fetchQuiz = async () => {
+            let imageBase64: string | undefined
+            if (sourceType === 'page' && pageContent !== undefined && pageContent.length < 50) {
+                const pdfBuffer = useCanvasStore.getState().pdfArrayBuffer
+                if (pdfBuffer && pageIndex !== undefined) {
+                    const b64 = await extractPageImageBase64(pdfBuffer, pageIndex)
+                    if (b64) imageBase64 = b64
+                }
+            }
+
+            try {
+                const qs = await generateQuiz(input, rawText, pdfId, sourceType, pageIndex, pageContent, imageBase64)
                 setQuestions(qs)
                 setQuestionStates(qs.map(() => emptyQuestionState()))
                 setLoading(false)
-            })
-            .catch((err) => {
+            } catch (err) {
                 setError('Failed to generate quiz. Please try again.')
                 setLoading(false)
                 console.error(err)
-            })
+            }
+        }
+
+        fetchQuiz()
     }, []) // eslint-disable-line react-hooks/exhaustive-deps — intentionally run once on mount
 
     const current = questions?.[currentIndex]

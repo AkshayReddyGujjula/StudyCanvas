@@ -27,6 +27,7 @@ import RevisionModal from './RevisionModal'
 import ToolsModal from './ToolsModal'
 import { useTextSelection } from '../hooks/useTextSelection'
 import { useCanvasStore } from '../store/canvasStore'
+import { extractPageImageBase64 } from '../utils/pdfImageExtractor'
 import { streamQuery, generateTitle, generatePageQuiz, gradeAnswer, generateFlashcards } from '../api/studyApi'
 import { getNewNodePosition, recalculateSiblingPositions, resolveOverlaps, isOverlapping, rerouteEdgeHandles, getQuizNodePositions } from '../utils/positioning'
 import type { AnswerNodeData, QuizQuestionNodeData, FlashcardNodeData } from '../types'
@@ -123,6 +124,14 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
             ? ((targetNode.data as Record<string, unknown>).pageIndex as number ?? currentPage)
             : currentPage
         const pageContent = pageMarkdowns[nodePageIndex - 1] ?? ''
+
+        let imageBase64: string | undefined
+        const pdfBuffer = useCanvasStore.getState().pdfArrayBuffer
+        if (pageContent.length < 50 && pdfBuffer) {
+            const b64 = await extractPageImageBase64(pdfBuffer, nodePageIndex - 1)
+            if (b64) imageBase64 = b64
+        }
+
         try {
             const result = await gradeAnswer(
                 question,
@@ -130,7 +139,8 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
                 pageContent,
                 userDetails,
                 fileData?.pdf_id,
-                nodePageIndex - 1
+                nodePageIndex - 1,
+                imageBase64
             )
             updateQuizNodeData(nodeId, { isGrading: false, feedback: result.feedback })
         } catch (err) {
@@ -159,7 +169,15 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
 
         let questions: string[]
         try {
-            const result = await generatePageQuiz(pageMarkdowns[currentPage - 1] ?? '', fileData.pdf_id, currentPage - 1)
+            const pageContent = pageMarkdowns[currentPage - 1] ?? ''
+            let imageBase64: string | undefined
+            const pdfBuffer = useCanvasStore.getState().pdfArrayBuffer
+            if (pageContent.length < 50 && pdfBuffer) {
+                const b64 = await extractPageImageBase64(pdfBuffer, currentPage - 1)
+                if (b64) imageBase64 = b64
+            }
+
+            const result = await generatePageQuiz(pageContent, fileData.pdf_id, currentPage - 1, imageBase64)
             questions = result.questions
         } catch (err) {
             console.error('Page quiz generation error:', err)
@@ -763,6 +781,16 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
 
         let cards: { question: string; answer: string }[]
         try {
+            let imageBase64: string | undefined
+            // If the source is the current page and it has very little text, send the image instead
+            if (sourceType === 'page' && pageContent && pageContent.length < 50) {
+                const pdfBuffer = useCanvasStore.getState().pdfArrayBuffer
+                if (pdfBuffer && pIndex !== undefined) {
+                    const b64 = await extractPageImageBase64(pdfBuffer, pIndex)
+                    if (b64) imageBase64 = b64
+                }
+            }
+
             cards = await generateFlashcards(
                 payload,
                 fileData.raw_text,
@@ -770,7 +798,8 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
                 sourceType,
                 pIndex,
                 pageContent,
-                currentFlashcards.length > 0 ? currentFlashcards : undefined
+                currentFlashcards.length > 0 ? currentFlashcards : undefined,
+                imageBase64
             )
             console.log('FLASHCARD API RETURNED:', cards)
         } catch (err) {

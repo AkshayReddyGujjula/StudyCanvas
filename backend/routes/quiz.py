@@ -27,7 +27,8 @@ async def generate_quiz(request: Request, payload: QuizRequest):
             pdf_id=payload.pdf_id,
             source_type=payload.source_type,
             page_index=payload.page_index,
-            page_content=payload.page_content
+            page_content=payload.page_content,
+            image_base64=payload.image_base64
         )
         _validate_quiz(result)
         return result
@@ -41,7 +42,8 @@ async def generate_quiz(request: Request, payload: QuizRequest):
             pdf_id=payload.pdf_id,
             source_type=payload.source_type,
             page_index=payload.page_index,
-            page_content=payload.page_content
+            page_content=payload.page_content,
+            image_base64=payload.image_base64
         )
         _validate_quiz(result)
         return result

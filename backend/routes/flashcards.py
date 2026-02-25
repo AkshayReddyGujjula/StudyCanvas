@@ -34,7 +34,8 @@ async def create_flashcards(request: Request, payload: FlashcardsRequest):
             source_type=payload.source_type,
             page_index=payload.page_index,
             page_content=payload.page_content,
-            existing_flashcards=payload.existing_flashcards
+            existing_flashcards=payload.existing_flashcards,
+            image_base64=payload.image_base64
         )
         return cards
     except Exception as e:

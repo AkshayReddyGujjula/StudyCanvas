@@ -238,7 +238,8 @@ async def generate_quiz(
     pdf_id: str | None = None,
     source_type: str = "struggling",
     page_index: int | None = None,
-    page_content: str | None = None
+    page_content: str | None = None,
+    image_base64: str | None = None
 ) -> list[dict]:
     """
     Generates between 3 and 15 mixed-format (MCQ + short-answer) questions.
@@ -261,8 +262,8 @@ async def generate_quiz(
         effective_content = _re.sub(r'^##\s*Page\s*\d+\s*', '', effective_content).strip()
         
         has_image = False
-        if len(effective_content) < 50 and pdf_id and page_index is not None:
-            img_b64 = get_page_image_base64(pdf_id, page_index)
+        if len(effective_content) < 50:
+            img_b64 = image_base64 or (get_page_image_base64(pdf_id, page_index) if pdf_id and page_index is not None else None)
             if img_b64:
                 # Send the page image directly to Gemini as multimodal content
                 # instead of doing an intermediate OCR extraction
@@ -350,12 +351,16 @@ async def generate_quiz(
 
         if len(raw_text.strip()) < 50 and pdf_id:
             page_indexes = set(n.get("page_index") for n in struggling_nodes if n.get("page_index") is not None)
-            for p_idx in page_indexes:
-                img_b64 = get_page_image_base64(pdf_id, p_idx)
-                if img_b64:
-                    contents.append({"mime_type": "image/jpeg", "data": img_b64})
-            if page_indexes:
-                prompt += "\n\n(Images of the relevant pages are provided since text was unavailable.)"
+            if image_base64:
+                contents.append({"mime_type": "image/jpeg", "data": image_base64})
+                prompt += "\n\n(An image of the relevant page is provided since text was unavailable.)"
+            elif pdf_id:
+                for p_idx in page_indexes:
+                    img_b64 = get_page_image_base64(pdf_id, p_idx)
+                    if img_b64:
+                        contents.append({"mime_type": "image/jpeg", "data": img_b64})
+                if page_indexes:
+                    prompt += "\n\n(Images of the relevant pages are provided since text was unavailable.)"
 
     contents.append(prompt)
     response = await asyncio.to_thread(lambda: model.generate_content(contents))
@@ -376,7 +381,8 @@ async def generate_flashcards(
     source_type: str = "struggling",
     page_index: int | None = None,
     page_content: str | None = None,
-    existing_flashcards: list[str] | None = None
+    existing_flashcards: list[str] | None = None,
+    image_base64: str | None = None
 ) -> list[dict]:
     """
     Generates flashcards based on struggling topics or page context depending on source_type.
@@ -403,8 +409,8 @@ async def generate_flashcards(
         effective_content = _re.sub(r'^##\s*Page\s*\d+\s*', '', effective_content).strip()
         
         has_image = False
-        if len(effective_content) < 50 and pdf_id and page_index is not None:
-            img_b64 = get_page_image_base64(pdf_id, page_index)
+        if len(effective_content) < 50:
+            img_b64 = image_base64 or (get_page_image_base64(pdf_id, page_index) if pdf_id and page_index is not None else None)
             if img_b64:
                 # Send the page image directly to Gemini as multimodal content
                 contents.append({"mime_type": "image/jpeg", "data": img_b64})
@@ -475,12 +481,16 @@ async def generate_flashcards(
 
         if len(raw_text.strip()) < 50 and pdf_id:
             page_indexes = set(n.get("page_index") for n in struggling_nodes if n.get("page_index") is not None)
-            for p_idx in page_indexes:
-                img_b64 = get_page_image_base64(pdf_id, p_idx)
-                if img_b64:
-                    contents.append({"mime_type": "image/jpeg", "data": img_b64})
-            if page_indexes:
-                prompt += "\n\n(Images of the relevant pages are provided since text was unavailable.)"
+            if image_base64:
+                contents.append({"mime_type": "image/jpeg", "data": image_base64})
+                prompt += "\n\n(An image of the relevant page is provided since text was unavailable.)"
+            elif pdf_id:
+                for p_idx in page_indexes:
+                    img_b64 = get_page_image_base64(pdf_id, p_idx)
+                    if img_b64:
+                        contents.append({"mime_type": "image/jpeg", "data": img_b64})
+                if page_indexes:
+                    prompt += "\n\n(Images of the relevant pages are provided since text was unavailable.)"
 
     contents.append(prompt)
     response = await asyncio.to_thread(lambda: model.generate_content(contents))
@@ -494,7 +504,7 @@ async def generate_flashcards(
     return json.loads(text.strip())
 
 
-async def generate_page_quiz(page_content: str, pdf_id: str | None = None, page_index: int | None = None) -> list[str]:
+async def generate_page_quiz(page_content: str, pdf_id: str | None = None, page_index: int | None = None, image_base64: str | None = None) -> list[str]:
     """
     Generates 3-5 short-answer questions based ONLY on the provided page content.
     No struggling nodes, no user context — pure page comprehension test.
@@ -514,8 +524,8 @@ async def generate_page_quiz(page_content: str, pdf_id: str | None = None, page_
     effective_content = _re.sub(r'^##\s*Page\s*\d+\s*', '', effective_content).strip()
     
     has_image = False
-    if len(effective_content) < 50 and pdf_id and page_index is not None:
-        img_b64 = get_page_image_base64(pdf_id, page_index)
+    if len(effective_content) < 50:
+        img_b64 = image_base64 or (get_page_image_base64(pdf_id, page_index) if pdf_id and page_index is not None else None)
         if img_b64:
             # Send the page image directly to Gemini as multimodal content
             contents.append({"mime_type": "image/jpeg", "data": img_b64})
@@ -572,6 +582,7 @@ async def grade_answer(
     user_details: dict | None = None,
     pdf_id: str | None = None,
     page_index: int | None = None,
+    image_base64: str | None = None,
 ) -> str:
     """
     Grades a student's answer to a page-quiz question and returns direct, personalised
@@ -614,8 +625,8 @@ async def grade_answer(
     # Strip the '## Page N' header before checking if content is readable
     cleaned_page_content = _re.sub(r'^##\s*Page\s*\d+\s*', '', page_content.strip()).strip()
     contents = []
-    if len(cleaned_page_content) < 50 and pdf_id and page_index is not None:
-        img_b64 = get_page_image_base64(pdf_id, page_index)
+    if len(cleaned_page_content) < 50:
+        img_b64 = image_base64 or (get_page_image_base64(pdf_id, page_index) if pdf_id and page_index is not None else None)
         if img_b64:
             contents.append({"mime_type": "image/jpeg", "data": img_b64})
             prompt += "\n\n(No readable text was found, so an image of the page is provided instead.)"

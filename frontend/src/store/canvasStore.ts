@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { Node, Edge } from '@xyflow/react'
 import type { HighlightEntry } from '../types'
+import { savePdfToLocal, loadPdfFromLocal, deletePdfFromLocal } from '../utils/pdfStorage'
 
 /** Split markdown into per-page chunks using the '## Page N' headers injected by Gemini. */
 function splitMarkdownByPage(markdown: string): string[] {
@@ -41,12 +42,14 @@ interface CanvasState {
     scrollPositions: Record<number, number>
     /** Whether the user is currently in image snipping mode */
     isSnippingMode: boolean
+    /** Raw PDF ArrayBuffer stored in-memory (loaded from IndexedDB) */
+    pdfArrayBuffer: ArrayBuffer | null
 }
 
 interface CanvasActions {
     setNodes: (nodes: Node[] | ((prev: Node[]) => Node[])) => void
     setEdges: (edges: Edge[] | ((prev: Edge[]) => Edge[])) => void
-    setFileData: (data: FileData) => void
+    setFileData: (data: FileData, pdfBuffer?: ArrayBuffer) => void
     addHighlight: (entry: HighlightEntry) => void
     removeHighlight: (nodeId: string) => void
     updateNodeData: (nodeId: string, data: Partial<Record<string, unknown>>) => void
@@ -68,6 +71,10 @@ interface CanvasActions {
     getQuizNodesForPage: (pageIndex: number) => Node[]
     /** Toggle snipping mode */
     setIsSnippingMode: (isSnipping: boolean) => void
+    /** Store a PDF ArrayBuffer in memory + IndexedDB */
+    setPdfArrayBuffer: (buffer: ArrayBuffer | null) => void
+    /** Load the PDF ArrayBuffer from IndexedDB into memory */
+    loadPdfFromStorage: () => Promise<void>
 }
 
 const STORAGE_KEY = 'studycanvas_state'
@@ -84,6 +91,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
     zoomLevel: 1.0,
     scrollPositions: {},
     isSnippingMode: false,
+    pdfArrayBuffer: null,
 
     setNodes: (nodes) =>
         set((state) => ({
@@ -95,9 +103,15 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
             edges: typeof edges === 'function' ? edges(state.edges) : edges,
         })),
 
-    setFileData: (data) => {
+    setFileData: (data, pdfBuffer) => {
         const pages = splitMarkdownByPage(data.markdown_content)
         set({ fileData: data, pageMarkdowns: pages, currentPage: 1, zoomLevel: 1.0, scrollPositions: {} })
+        if (pdfBuffer) {
+            set({ pdfArrayBuffer: pdfBuffer })
+            // Persist to IndexedDB using a stable key
+            const key = data.pdf_id || data.filename || 'current_pdf'
+            savePdfToLocal(key, pdfBuffer).catch(err => console.error('[canvasStore] Failed to save PDF to IndexedDB:', err))
+        }
     },
 
     addHighlight: (entry) =>
@@ -128,8 +142,11 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
         })),
 
     resetCanvas: () => {
-        const { activeAbortController } = get()
+        const { activeAbortController, fileData } = get()
         activeAbortController?.abort()
+        // Clear IndexedDB PDF storage
+        const key = fileData?.pdf_id || fileData?.filename || 'current_pdf'
+        deletePdfFromLocal(key).catch(() => { })
         set({
             nodes: [],
             edges: [],
@@ -142,6 +159,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
             zoomLevel: 1.0,
             scrollPositions: {},
             isSnippingMode: false,
+            pdfArrayBuffer: null,
         })
         localStorage.removeItem(STORAGE_KEY)
     },
@@ -179,6 +197,22 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
     },
 
     setIsSnippingMode: (isSnipping) => set({ isSnippingMode: isSnipping }),
+
+    setPdfArrayBuffer: (buffer) => set({ pdfArrayBuffer: buffer }),
+
+    loadPdfFromStorage: async () => {
+        const { fileData } = get()
+        if (!fileData) return
+        const key = fileData.pdf_id || fileData.filename || 'current_pdf'
+        try {
+            const buffer = await loadPdfFromLocal(key)
+            if (buffer) {
+                set({ pdfArrayBuffer: buffer })
+            }
+        } catch (err) {
+            console.error('[canvasStore] Failed to load PDF from IndexedDB:', err)
+        }
+    },
 }))
 
 export { STORAGE_KEY }
