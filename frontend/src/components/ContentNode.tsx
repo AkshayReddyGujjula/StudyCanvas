@@ -94,7 +94,7 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
     // PDF data buffer
     const [pdfData, setPdfData] = useState<ArrayBuffer | null>(null)
     const [isLoadingPdf, setIsLoadingPdf] = useState(false)
-    const [pdfError, setPdfError] = useState<string | null>(null)
+    const [, setPdfError] = useState<string | null>(null)
 
     const isMac = useMemo(() => {
         if (typeof window !== 'undefined') {

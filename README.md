@@ -33,7 +33,10 @@ The result is a **visual knowledge map** of exactly what you understood, what co
 | **Flashcard Mode** | Turn struggling nodes into flashcards for rapid-fire review. Each card is generated from the specific text and question context you found difficult. |
 | **Page Comprehension Checks** | Generate 3–5 short-answer questions on any individual page and receive instant, personalised feedback on your answers. |
 | **AI Answer Validation** | Short-answer quiz responses are graded by Gemini with clear, constructive feedback. MCQ answers are validated instantly. |
+| **OCR & Vision Support** | Highlight regions in image-only, scanned, or handwritten PDFs. The system intelligently captures the image context and uses Vision AI for accurate answers. |
+| **Google Search Grounding** | For general knowledge questions outside the document's scope, Gemini seamlessly retrieves accurate and up-to-date context from Google Search. |
 | **Streaming Responses** | All AI answers stream token-by-token using the browser's native `fetch` + `ReadableStream` API, with a cancel button to interrupt any generation. |
+| **Rate Limiting & Security** | Built-in robust rate limiting and security layers protect your backend API against spam and abuse. |
 
 ---
 

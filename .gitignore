@@ -71,6 +71,7 @@ uploads/
 tmp/
 temp/
 *.pdf
+backend/pdf_storage/
 
 # ─── Security ─────────────────────────────────────────────────────────────────
 *.pem
