@@ -18,6 +18,8 @@ export default defineConfig({
       output: {
         manualChunks: {
           pdfjs: ['pdfjs-dist'],
+          xyflow: ['@xyflow/react'],
+          pdfviewer: ['@react-pdf-viewer/core', '@react-pdf-viewer/default-layout'],
         },
       },
     },

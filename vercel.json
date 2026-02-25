@@ -4,7 +4,7 @@
   "functions": {
     "api/index.py": {
       "maxDuration": 60,
-      "excludeFiles": "{frontend/**,node_modules/**}"
+      "excludeFiles": "{frontend/**,node_modules/**,**/venv/**,**/.venv/**,**/__pycache__/**,**/*.pyc,**/.git/**,**/.vercel/**}"
     }
   },
   "rewrites": [
