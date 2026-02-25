@@ -255,7 +255,6 @@ async def generate_quiz(
     contents = []
     
     if source_type == "page":
-        num_questions = 10
         effective_content = (page_content or "").strip()
         # Strip the '## Page N' header that splitMarkdownByPage injects — it's not educational content
         import re as _re
@@ -288,19 +287,19 @@ async def generate_quiz(
             "You are an intelligent quiz generator for university students.\n\n"
             "A student wants to be tested on the following page content.\n\n"
             "Format Rules:\n"
-            f"  \u2022 Generate EXACTLY {num_questions} questions total.\n"
-            "  \u2022 Mix question types intelligently:\n"
+            "  • Generate a default of 4 questions total. If there is a lot of content or complex concepts, intelligently decide to ask up to a maximum of 7 questions.\n"
+            "  • Mix question types intelligently:\n"
             "      - Use 'mcq' when the concept has clearly defined, distinct alternatives "
             "(definitions, comparisons, cause-effect, best/worst choice).\n"
             "      - Use 'short_answer' when the concept requires explanation, reasoning, or "
             "open-ended understanding.\n"
-            "  \u2022 For MCQ questions:\n"
+            "  • For MCQ questions:\n"
             "      - Provide EXACTLY 4 options in the 'options' array.\n"
-            "      - Set 'correct_option' to the 0-based index (0\u20133) of the correct option.\n"
+            "      - Set 'correct_option' to the 0-based index (0–3) of the correct option.\n"
             "      - Make distractors plausible but clearly wrong on reflection.\n"
-            "  \u2022 For short_answer questions: leave 'options' as null and 'correct_option' as null.\n\n"
+            "  • For short_answer questions: leave 'options' as null and 'correct_option' as null.\n\n"
             f"{context_section}\n\n"
-            f"Return exactly {num_questions} questions as a JSON array. No markdown fencing, no extra keys.\n"
+            "Return the questions as a JSON array. No markdown fencing, no extra keys.\n"
             "Each object must have exactly these keys: question (string), question_type ('mcq' or 'short_answer'), "
             "options (array of 4 strings for mcq, null for short_answer), "
             "correct_option (0-based integer for mcq, null for short_answer)."
@@ -309,7 +308,6 @@ async def generate_quiz(
         # Limit raw_text to avoid Gemini token exhaustion (struggling nodes provide the primary context)
         truncated_raw = raw_text[:8000] if raw_text else ""
         num_topics = len(struggling_nodes)
-        num_questions = min(max(3, num_topics * 3), 15)
         nodes_summary = "\n".join(
             f"- Highlighted passage: {n['highlighted_text']}\n"
             f"  Student's question:   {n['question']}\n"
@@ -331,7 +329,7 @@ async def generate_quiz(
             "covered in the Gemini answer but is NOT in the PDF, you MUST still test it — do NOT skip "
             "it or restrict yourself only to PDF content.\n\n"
             "Format Rules:\n"
-            f"  • Generate EXACTLY {num_questions} questions total.\n"
+            "  • Generate a default of 4 questions total. If the content is dense or there are many struggling topics, intelligently decide to ask up to a maximum of 7 questions.\n"
             "  • Mix question types intelligently:\n"
             "      - Use 'mcq' when the concept has clearly defined, distinct alternatives "
             "(definitions, comparisons, cause-effect, best/worst choice).\n"
@@ -344,7 +342,7 @@ async def generate_quiz(
             "  • For short_answer questions: leave 'options' as null and 'correct_option' as null.\n\n"
             f"Struggling topics:\n{nodes_summary}\n\n"
             f"Document (secondary context only, first 8000 chars):\n{truncated_raw}\n\n"
-            f"Return exactly {num_questions} questions as a JSON array. No markdown fencing, no extra keys.\n"
+            "Return the questions as a JSON array. No markdown fencing, no extra keys.\n"
             "Each object must have exactly these keys: question (string), question_type ('mcq' or 'short_answer'), "
             "options (array of 4 strings for mcq, null for short_answer), "
             "correct_option (0-based integer for mcq, null for short_answer)."
@@ -430,8 +428,8 @@ async def generate_flashcards(
             "You are an expert study-aid creator making flash cards for a university student.\n\n"
             "A student wants to review the key concepts from the following page content.\n\n"
             "Flash card rules:\n"
-            f"  \u2022 Create between 3 and 5 flash cards total.\n"
-            "  \u2022 The 'question' field (front of card): A concise, specific question that tests active recall of a key concept.\n"
+            "  • Create a minimum of 3 and up to a maximum of 5 flash cards total. Intelligently decide how many to generate based on the amount of content.\n"
+            "  • The 'question' field (front of card): A concise, specific question that tests active recall of a key concept.\n"
             "    - Keep it SHORT \u2014 one sentence maximum.\n"
             "  \u2022 The 'answer' field (back of card): A clear, complete explanation the student can use to learn.\n"
             "    - 2-4 sentences. Not too short, not an essay.\n"
@@ -444,7 +442,6 @@ async def generate_flashcards(
     else:
         # Limit raw_text to avoid token exhaustion — struggling nodes are the primary context
         truncated_raw = raw_text[:3000] if raw_text else ""
-        num_cards = min(max(len(struggling_nodes), 3), 5)
         nodes_summary = "\n".join(
             f"- Highlighted passage: {n['highlighted_text']}\n"
             f"  Student's question:   {n['question']}\n"
@@ -460,19 +457,19 @@ async def generate_flashcards(
             "  3. The answer that was provided to the student\n\n"
             "Your task is to create flash cards that will help the student ACTIVELY RECALL these topics.\n\n"
             "Flash card rules:\n"
-            f"  • Create EXACTLY {num_cards} flash cards.\n"
+            "  • Create a minimum of 3 and up to a maximum of 5 flash cards total. Intelligently decide how many to generate based on the amount of content and struggling topics.\n"
             "  • The 'question' field (front of card): A concise, specific question that tests active recall of the concept.\n"
             "    - Keep it SHORT — one sentence maximum.\n"
             "    - It should test the CORE concept, not trivia.\n"
             "  • The 'answer' field (back of card): A clear, complete explanation the student can use to learn.\n"
             "    - 2-4 sentences. Not too short, not an essay.\n"
             "    - Should directly answer the question and explain WHY/HOW if relevant.\n"
-            "  • Each card must correspond to ONE distinct struggling topic.\n"
+            "  • Each card must correspond to ONE distinct struggling topic (if possible, without exceeding the max limit).\n"
             "  • Do NOT add any intro text, markdown fencing, or extra keys.\n"
             f"{avoid_duplicates_instruction}\n"
             f"Struggling topics:\n{nodes_summary}\n\n"
             f"Document context (for reference):\n{truncated_raw}\n\n"
-            f"Return exactly {num_cards} flash cards as a JSON array of objects. "
+            "Return the flash cards as a JSON array of objects. "
             "Each object must have exactly two keys: \"question\" (string) and \"answer\" (string)."
         )
 
@@ -540,8 +537,8 @@ async def generate_page_quiz(page_content: str, pdf_id: str | None = None, page_
 
     prompt = (
         "You are an expert academic tutor creating a short comprehension quiz.\n\n"
-        "Based ONLY on the page content below, generate between 3 and 5 concise short-answer "
-        "questions that test a student's understanding of the key concepts on this page.\n\n"
+        "Based ONLY on the page content below, generate between 2 and 5 concise short-answer "
+        "questions that test a student's understanding of the key concepts on this page. Intelligently decide how many questions to ask based on the amount of content.\n\n"
         "Rules:\n"
         "- Use ONLY information from the provided page content. Do not introduce outside concepts.\n"
         "- Questions should be specific, not vague or generic.\n"
