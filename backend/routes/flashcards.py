@@ -13,7 +13,7 @@ async def create_flashcards(request: Request, payload: FlashcardsRequest):
     Generate flash cards from the student's struggling nodes.
     Returns a list of { question, answer } objects — one card per struggling topic.
     """
-    if not payload.struggling_nodes:
+    if payload.source_type == "struggling" and not payload.struggling_nodes:
         raise HTTPException(status_code=400, detail="No struggling nodes provided.")
 
     nodes_payload = [
@@ -27,7 +27,15 @@ async def create_flashcards(request: Request, payload: FlashcardsRequest):
     ]
 
     try:
-        cards = await generate_flashcards(nodes_payload, payload.raw_text, pdf_id=payload.pdf_id)
+        cards = await generate_flashcards(
+            nodes_payload,
+            payload.raw_text,
+            pdf_id=payload.pdf_id,
+            source_type=payload.source_type,
+            page_index=payload.page_index,
+            page_content=payload.page_content,
+            existing_flashcards=payload.existing_flashcards
+        )
         return cards
     except Exception as e:
         import logging

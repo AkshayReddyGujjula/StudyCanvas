@@ -8,6 +8,9 @@ interface RevisionModalProps {
     rawText: string
     pdfId?: string
     onClose: () => void
+    sourceType?: 'struggling' | 'page'
+    pageIndex?: number
+    pageContent?: string
 }
 
 interface QuestionState {
@@ -22,7 +25,15 @@ const emptyQuestionState = (): QuestionState => ({
     validationResult: null,
 })
 
-export default function RevisionModal({ nodes, rawText, pdfId, onClose }: RevisionModalProps) {
+export default function RevisionModal({
+    nodes,
+    rawText,
+    pdfId,
+    onClose,
+    sourceType = 'struggling',
+    pageIndex,
+    pageContent
+}: RevisionModalProps) {
     const [questions, setQuestions] = useState<QuizQuestion[] | null>(null)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
@@ -43,20 +54,23 @@ export default function RevisionModal({ nodes, rawText, pdfId, onClose }: Revisi
         if (hasFetchedRef.current) return
         hasFetchedRef.current = true
 
-        const strugglingNodes = nodes.filter(
-            (n) => n.type === 'answerNode' && (n.data as unknown as AnswerNodeData).status === 'struggling'
-        )
-        const input = strugglingNodes.map((n) => {
-            const d = n.data as unknown as AnswerNodeData
-            return {
-                highlighted_text: d.highlighted_text,
-                question: d.question,
-                answer: d.answer,
-                pageIndex: d.pageIndex ? d.pageIndex - 1 : undefined,
-            }
-        })
+        let input: any[] = []
+        if (sourceType !== 'page') {
+            const strugglingNodes = nodes.filter(
+                (n) => n.type === 'answerNode' && (n.data as unknown as AnswerNodeData).status === 'struggling'
+            )
+            input = strugglingNodes.map((n) => {
+                const d = n.data as unknown as AnswerNodeData
+                return {
+                    highlighted_text: d.highlighted_text,
+                    question: d.question,
+                    answer: d.answer,
+                    pageIndex: d.pageIndex ? d.pageIndex - 1 : undefined,
+                }
+            })
+        }
 
-        generateQuiz(input, rawText, pdfId)
+        generateQuiz(input, rawText, pdfId, sourceType, pageIndex, pageContent)
             .then((qs) => {
                 setQuestions(qs)
                 setQuestionStates(qs.map(() => emptyQuestionState()))
@@ -242,10 +256,10 @@ export default function RevisionModal({ nodes, rawText, pdfId, onClose }: Revisi
                                             <div
                                                 key={i}
                                                 className={`w-2 h-2 rounded-full ${i === currentIndex
-                                                        ? 'bg-indigo-600'
-                                                        : answered
-                                                            ? 'bg-indigo-400'
-                                                            : 'bg-gray-200'
+                                                    ? 'bg-indigo-600'
+                                                    : answered
+                                                        ? 'bg-indigo-400'
+                                                        : 'bg-gray-200'
                                                     }`}
                                             />
                                         )

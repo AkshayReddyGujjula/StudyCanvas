@@ -15,17 +15,34 @@ async def generate_quiz(request: Request, payload: QuizRequest):
     Generates short-answer quiz questions using Gemini with JSON schema enforcement.
     Validates response; retries once if invalid.
     """
+    if payload.source_type == "struggling" and not payload.struggling_nodes:
+        raise HTTPException(status_code=400, detail="No struggling nodes provided.")
+
     struggling_nodes = [n.model_dump() for n in payload.struggling_nodes]
 
     try:
-        result = await gemini_service.generate_quiz(struggling_nodes, payload.raw_text, pdf_id=payload.pdf_id)
+        result = await gemini_service.generate_quiz(
+            struggling_nodes,
+            payload.raw_text,
+            pdf_id=payload.pdf_id,
+            source_type=payload.source_type,
+            page_index=payload.page_index,
+            page_content=payload.page_content
+        )
         _validate_quiz(result)
         return result
     except Exception as e:
         logger.warning("Quiz generation attempt 1 failed: %s — retrying...", e)
 
     try:
-        result = await gemini_service.generate_quiz(struggling_nodes, payload.raw_text, pdf_id=payload.pdf_id)
+        result = await gemini_service.generate_quiz(
+            struggling_nodes,
+            payload.raw_text,
+            pdf_id=payload.pdf_id,
+            source_type=payload.source_type,
+            page_index=payload.page_index,
+            page_content=payload.page_content
+        )
         _validate_quiz(result)
         return result
     except Exception as e:

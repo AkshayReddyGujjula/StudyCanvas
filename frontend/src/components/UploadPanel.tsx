@@ -42,6 +42,7 @@ export default function UploadPanel({ onUploaded }: UploadPanelProps) {
                     filename: data.filename,
                     page_count: data.page_count,
                     pdf_url: data.pdf_id ? `/api/pdf/${data.pdf_id}` : undefined,
+                    pdf_id: data.pdf_id,
                 })
 
                 // After setFileData the store has split the markdown into pages.

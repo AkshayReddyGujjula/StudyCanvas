@@ -43,9 +43,12 @@ class QuizNode(BaseModel):
 
 
 class QuizRequest(BaseModel):
-    struggling_nodes: list[QuizNode] = Field(..., max_length=50) # Limit number of nodes
+    source_type: Literal["struggling", "page"] = "struggling"
+    struggling_nodes: list[QuizNode] = Field(default_factory=list, max_length=50) # Limit number of nodes
     raw_text: str = Field(..., max_length=500000)
     pdf_id: Optional[str] = None
+    page_index: Optional[int] = None
+    page_content: Optional[str] = None
 
 
 class QuizQuestion(BaseModel):
@@ -69,9 +72,13 @@ class ValidateAnswerResponse(BaseModel):
 
 
 class FlashcardsRequest(BaseModel):
-    struggling_nodes: list[QuizNode] = Field(..., max_length=50)
+    source_type: Literal["struggling", "page"] = "struggling"
+    struggling_nodes: list[QuizNode] = Field(default_factory=list, max_length=50)
     raw_text: str = Field(..., max_length=500000)
     pdf_id: Optional[str] = None
+    page_index: Optional[int] = None
+    page_content: Optional[str] = None
+    existing_flashcards: list[str] = Field(default_factory=list)
 
 
 class Flashcard(BaseModel):

@@ -1,8 +1,10 @@
-from fastapi import APIRouter, Request
+import logging
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from rate_limiter import limiter
 from services import gemini_service
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -35,10 +37,16 @@ class GradeAnswerResponse(BaseModel):
 @limiter.limit("15/minute; 100/hour; 500/day")
 async def generate_page_quiz(request: Request, payload: PageQuizRequest):
     """Generate 3-5 short-answer questions based solely on a single page's content."""
-    questions = await gemini_service.generate_page_quiz(
-        payload.page_content, pdf_id=payload.pdf_id, page_index=payload.page_index
-    )
-    return PageQuizResponse(questions=questions)
+    try:
+        questions = await gemini_service.generate_page_quiz(
+            payload.page_content, pdf_id=payload.pdf_id, page_index=payload.page_index
+        )
+        return PageQuizResponse(questions=questions)
+    except HTTPException:
+        raise  # Re-raise 422 errors as-is
+    except Exception as e:
+        logger.error(f"Page quiz generation failed: {e}")
+        raise HTTPException(status_code=500, detail="Page quiz generation failed due to an internal error.")
 
 
 @router.post("/grade-answer", response_model=GradeAnswerResponse)

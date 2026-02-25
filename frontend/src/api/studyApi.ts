@@ -21,12 +21,18 @@ export const uploadPdf = async (file: File): Promise<UploadResponse> => {
 export const generateQuiz = async (
     struggling_nodes: QuizNodeInput[],
     raw_text: string,
-    pdf_id?: string
+    pdf_id?: string,
+    source_type: 'struggling' | 'page' = 'struggling',
+    page_index?: number,
+    page_content?: string
 ): Promise<QuizQuestion[]> => {
     const response = await api.post<QuizQuestion[]>('/api/quiz', {
         struggling_nodes,
         raw_text,
         pdf_id,
+        source_type,
+        page_index,
+        page_content
     })
     return response.data
 }
@@ -92,12 +98,20 @@ export const gradeAnswer = async (
 export const generateFlashcards = async (
     struggling_nodes: QuizNodeInput[],
     raw_text: string,
-    pdf_id?: string
+    pdf_id?: string,
+    source_type: 'struggling' | 'page' = 'struggling',
+    page_index?: number,
+    page_content?: string,
+    existing_flashcards?: string[]
 ): Promise<{ question: string; answer: string }[]> => {
     const response = await api.post<{ question: string; answer: string }[]>('/api/flashcards', {
         struggling_nodes,
         raw_text,
         pdf_id,
+        source_type,
+        page_index,
+        page_content,
+        existing_flashcards
     })
     return response.data
 }

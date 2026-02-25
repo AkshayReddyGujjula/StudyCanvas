@@ -1,8 +1,10 @@
 import os
 import json
+import base64
 import logging
 import asyncio
 import google.generativeai as genai
+from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)
 
@@ -201,11 +203,47 @@ Student's question:
 
 from services.pdf_service import get_page_image_base64
 
-async def generate_quiz(struggling_nodes: list, raw_text: str, pdf_id: str | None = None) -> list[dict]:
+def _make_image_part(img_b64: str) -> dict:
+    """Convert a base64 JPEG string into the dictionary format Gemini expects."""
+    return {
+        "mime_type": "image/jpeg",
+        "data": img_b64,
+    }
+
+async def extract_text_from_image_b64(img_b64: str) -> str:
+    """
+    Uses Gemini Vision to read substantive educational text from an image,
+    ignoring page numbers and footers.
+    """
+    model = genai.GenerativeModel("gemini-2.5-flash")
+    prompt = (
+        "You are an OCR system. Extract ALL educational text, headings, bullet points, and "
+        "substantive content visible in this image. "
+        "CRITICAL: Skip page numbers, copyright footers, slide numbers, and purely decorative text. "
+        "Return the extracted text only, no commentary."
+    )
+    contents = [_make_image_part(img_b64), prompt]
+    try:
+        response = await asyncio.to_thread(lambda: model.generate_content(contents))
+        extracted = (response.text or "").strip()
+        logger.info(f"OCR extracted {len(extracted)} chars from image")
+        return extracted
+    except Exception as e:
+        logger.error(f"OCR Error: {e}")
+        return ""
+
+async def generate_quiz(
+    struggling_nodes: list, 
+    raw_text: str, 
+    pdf_id: str | None = None,
+    source_type: str = "struggling",
+    page_index: int | None = None,
+    page_content: str | None = None
+) -> list[dict]:
     """
     Generates between 3 and 15 mixed-format (MCQ + short-answer) questions.
-    Primary source is the Gemini answers the student already struggled with;
-    PDF text is used only for additional/overlapping context.
+    Primary source is either the Gemini answers the student struggled with
+    or the provided page content, depending on source_type.
     """
     model = genai.GenerativeModel(
         "gemini-2.5-flash",
@@ -214,70 +252,136 @@ async def generate_quiz(struggling_nodes: list, raw_text: str, pdf_id: str | Non
         ),
     )
 
-    nodes_summary = "\n".join(
-        f"- Highlighted passage: {n['highlighted_text']}\n"
-        f"  Student's question:   {n['question']}\n"
-        f"  Gemini's answer:      {n['answer']}"
-        for n in struggling_nodes
-    )
-
-    num_topics = len(struggling_nodes)
-    num_questions = min(max(3, num_topics * 3), 15)
-
-    prompt = (
-        "You are an intelligent quiz generator for university students.\n\n"
-        "A student has been studying and has marked certain topics as ones they are struggling with. "
-        "For each struggling topic you are given three things:\n"
-        "  1. The highlighted passage from the document\n"
-        "  2. The question the student asked about it\n"
-        "  3. The answer that was provided to the student\n\n"
-        "CRITICAL RULE — Source Priority:\n"
-        "  • The PRIMARY source for questions is the GEMINI ANSWER given to the student. "
-        "Test whether the student understood and retained what the answer explained.\n"
-        "  • If the topic appears in the PDF as well, you may draw on that overlap too.\n"
-        "  • If the topic (e.g. macOS efficiency, a specific algorithm, a historical event) was "
-        "covered in the Gemini answer but is NOT in the PDF, you MUST still test it — do NOT skip "
-        "it or restrict yourself only to PDF content.\n\n"
-        "Format Rules:\n"
-        f"  • Generate EXACTLY {num_questions} questions total.\n"
-        "  • Mix question types intelligently:\n"
-        "      - Use 'mcq' when the concept has clearly defined, distinct alternatives "
-        "(definitions, comparisons, cause-effect, best/worst choice).\n"
-        "      - Use 'short_answer' when the concept requires explanation, reasoning, or "
-        "open-ended understanding.\n"
-        "  • For MCQ questions:\n"
-        "      - Provide EXACTLY 4 options in the 'options' array.\n"
-        "      - Set 'correct_option' to the 0-based index (0–3) of the correct option.\n"
-        "      - Make distractors plausible but clearly wrong on reflection.\n"
-        "  • For short_answer questions: leave 'options' as null and 'correct_option' as null.\n\n"
-        f"Struggling topics:\n{nodes_summary}\n\n"
-        f"Document (secondary context only):\n{raw_text}\n\n"
-        f"Return exactly {num_questions} questions as a JSON array. No markdown fencing, no extra keys.\n"
-        "Each object must have exactly these keys: question (string), question_type ('mcq' or 'short_answer'), "
-        "options (array of 4 strings for mcq, null for short_answer), "
-        "correct_option (0-based integer for mcq, null for short_answer)."
-    )
-
     contents = []
-    if len(raw_text.strip()) < 50 and pdf_id:
-        page_indexes = set(n.get("page_index") for n in struggling_nodes if n.get("page_index") is not None)
-        for p_idx in page_indexes:
-            img_b64 = get_page_image_base64(pdf_id, p_idx)
+    
+    if source_type == "page":
+        num_questions = 10
+        effective_content = (page_content or "").strip()
+        # Strip the '## Page N' header that splitMarkdownByPage injects — it's not educational content
+        import re as _re
+        effective_content = _re.sub(r'^##\s*Page\s*\d+\s*', '', effective_content).strip()
+        
+        has_image = False
+        if len(effective_content) < 50 and pdf_id and page_index is not None:
+            img_b64 = get_page_image_base64(pdf_id, page_index)
             if img_b64:
+                # Send the page image directly to Gemini as multimodal content
+                # instead of doing an intermediate OCR extraction
                 contents.append({"mime_type": "image/jpeg", "data": img_b64})
-        if page_indexes:
-            prompt += "\n\n(Images of the relevant pages are provided since text was unavailable.)"
+                has_image = True
+
+        if len(effective_content) < 20 and not has_image:
+            raise HTTPException(
+                status_code=422,
+                detail="This page appears to have no readable content. Please navigate to a different page and try again."
+            )
+
+        # Build context description depending on whether we have text, image, or both
+        if has_image and len(effective_content) < 20:
+            context_section = "(An image of the page is provided above. Base your questions on the visual content.)"
+        elif has_image:
+            context_section = f"Page text:\n{effective_content}\n\n(An image of the page is also provided for additional context.)"
+        else:
+            context_section = f"Page context:\n{effective_content}"
+
+        prompt = (
+            "You are an intelligent quiz generator for university students.\n\n"
+            "A student wants to be tested on the following page content.\n\n"
+            "Format Rules:\n"
+            f"  \u2022 Generate EXACTLY {num_questions} questions total.\n"
+            "  \u2022 Mix question types intelligently:\n"
+            "      - Use 'mcq' when the concept has clearly defined, distinct alternatives "
+            "(definitions, comparisons, cause-effect, best/worst choice).\n"
+            "      - Use 'short_answer' when the concept requires explanation, reasoning, or "
+            "open-ended understanding.\n"
+            "  \u2022 For MCQ questions:\n"
+            "      - Provide EXACTLY 4 options in the 'options' array.\n"
+            "      - Set 'correct_option' to the 0-based index (0\u20133) of the correct option.\n"
+            "      - Make distractors plausible but clearly wrong on reflection.\n"
+            "  \u2022 For short_answer questions: leave 'options' as null and 'correct_option' as null.\n\n"
+            f"{context_section}\n\n"
+            f"Return exactly {num_questions} questions as a JSON array. No markdown fencing, no extra keys.\n"
+            "Each object must have exactly these keys: question (string), question_type ('mcq' or 'short_answer'), "
+            "options (array of 4 strings for mcq, null for short_answer), "
+            "correct_option (0-based integer for mcq, null for short_answer)."
+        )
+    else:
+        # Limit raw_text to avoid Gemini token exhaustion (struggling nodes provide the primary context)
+        truncated_raw = raw_text[:8000] if raw_text else ""
+        num_topics = len(struggling_nodes)
+        num_questions = min(max(3, num_topics * 3), 15)
+        nodes_summary = "\n".join(
+            f"- Highlighted passage: {n['highlighted_text']}\n"
+            f"  Student's question:   {n['question']}\n"
+            f"  Gemini's answer:      {n['answer']}"
+            for n in struggling_nodes
+        )
+        prompt = (
+            "You are an intelligent quiz generator for university students.\n\n"
+            "A student has been studying and has marked certain topics as ones they are struggling with. "
+            "For each struggling topic you are given three things:\n"
+            "  1. The highlighted passage from the document\n"
+            "  2. The question the student asked about it\n"
+            "  3. The answer that was provided to the student\n\n"
+            "CRITICAL RULE — Source Priority:\n"
+            "  • The PRIMARY source for questions is the GEMINI ANSWER given to the student. "
+            "Test whether the student understood and retained what the answer explained.\n"
+            "  • If the topic appears in the PDF as well, you may draw on that overlap too.\n"
+            "  • If the topic (e.g. macOS efficiency, a specific algorithm, a historical event) was "
+            "covered in the Gemini answer but is NOT in the PDF, you MUST still test it — do NOT skip "
+            "it or restrict yourself only to PDF content.\n\n"
+            "Format Rules:\n"
+            f"  • Generate EXACTLY {num_questions} questions total.\n"
+            "  • Mix question types intelligently:\n"
+            "      - Use 'mcq' when the concept has clearly defined, distinct alternatives "
+            "(definitions, comparisons, cause-effect, best/worst choice).\n"
+            "      - Use 'short_answer' when the concept requires explanation, reasoning, or "
+            "open-ended understanding.\n"
+            "  • For MCQ questions:\n"
+            "      - Provide EXACTLY 4 options in the 'options' array.\n"
+            "      - Set 'correct_option' to the 0-based index (0–3) of the correct option.\n"
+            "      - Make distractors plausible but clearly wrong on reflection.\n"
+            "  • For short_answer questions: leave 'options' as null and 'correct_option' as null.\n\n"
+            f"Struggling topics:\n{nodes_summary}\n\n"
+            f"Document (secondary context only, first 8000 chars):\n{truncated_raw}\n\n"
+            f"Return exactly {num_questions} questions as a JSON array. No markdown fencing, no extra keys.\n"
+            "Each object must have exactly these keys: question (string), question_type ('mcq' or 'short_answer'), "
+            "options (array of 4 strings for mcq, null for short_answer), "
+            "correct_option (0-based integer for mcq, null for short_answer)."
+        )
+
+        if len(raw_text.strip()) < 50 and pdf_id:
+            page_indexes = set(n.get("page_index") for n in struggling_nodes if n.get("page_index") is not None)
+            for p_idx in page_indexes:
+                img_b64 = get_page_image_base64(pdf_id, p_idx)
+                if img_b64:
+                    contents.append({"mime_type": "image/jpeg", "data": img_b64})
+            if page_indexes:
+                prompt += "\n\n(Images of the relevant pages are provided since text was unavailable.)"
 
     contents.append(prompt)
     response = await asyncio.to_thread(lambda: model.generate_content(contents))
-    return json.loads(response.text)
+    text = response.text.strip()
+    if text.startswith("```json"):
+        text = text[7:]
+    elif text.startswith("```"):
+        text = text[3:]
+    if text.endswith("```"):
+        text = text[:-3]
+    return json.loads(text.strip())
 
 
-async def generate_flashcards(struggling_nodes: list, raw_text: str, pdf_id: str | None = None) -> list[dict]:
+async def generate_flashcards(
+    struggling_nodes: list, 
+    raw_text: str, 
+    pdf_id: str | None = None,
+    source_type: str = "struggling",
+    page_index: int | None = None,
+    page_content: str | None = None,
+    existing_flashcards: list[str] | None = None
+) -> list[dict]:
     """
-    Generates one flashcard per struggling topic (plus a few overview cards).
-    Each flashcard has a concise 'question' (front) and a complete 'answer' (back).
-    Returns a JSON array of { "question": str, "answer": str } objects.
+    Generates flashcards based on struggling topics or page context depending on source_type.
     """
     model = genai.GenerativeModel(
         "gemini-2.5-flash",
@@ -286,52 +390,111 @@ async def generate_flashcards(struggling_nodes: list, raw_text: str, pdf_id: str
         ),
     )
 
-    nodes_summary = "\n".join(
-        f"- Highlighted passage: {n['highlighted_text']}\n"
-        f"  Student's question:   {n['question']}\n"
-        f"  Gemini's answer:      {n['answer']}"
-        for n in struggling_nodes
-    )
-
-    num_cards = min(max(len(struggling_nodes), 3), 12)
-
-    prompt = (
-        "You are an expert study-aid creator making flash cards for a university student.\n\n"
-        "A student has been studying and marked certain topics as ones they are struggling with. "
-        "For each struggling topic you are given:\n"
-        "  1. The highlighted passage from the document\n"
-        "  2. The question the student asked about it\n"
-        "  3. The answer that was provided to the student\n\n"
-        "Your task is to create flash cards that will help the student ACTIVELY RECALL these topics.\n\n"
-        "Flash card rules:\n"
-        f"  • Create EXACTLY {num_cards} flash cards.\n"
-        "  • The 'question' field (front of card): A concise, specific question that tests active recall of the concept.\n"
-        "    - Keep it SHORT — one sentence maximum.\n"
-        "    - It should test the CORE concept, not trivia.\n"
-        "  • The 'answer' field (back of card): A clear, complete explanation the student can use to learn.\n"
-        "    - 2-4 sentences. Not too short, not an essay.\n"
-        "    - Should directly answer the question and explain WHY/HOW if relevant.\n"
-        "  • Each card must correspond to ONE distinct struggling topic.\n"
-        "  • Do NOT add any intro text, markdown fencing, or extra keys.\n\n"
-        f"Struggling topics:\n{nodes_summary}\n\n"
-        f"Document context (for reference):\n{raw_text[:3000]}\n\n"
-        f"Return exactly {num_cards} flash cards as a JSON array of objects. "
-        "Each object must have exactly two keys: \"question\" (string) and \"answer\" (string)."
-    )
-
     contents = []
-    if len(raw_text.strip()) < 50 and pdf_id:
-        page_indexes = set(n.get("page_index") for n in struggling_nodes if n.get("page_index") is not None)
-        for p_idx in page_indexes:
-            img_b64 = get_page_image_base64(pdf_id, p_idx)
+
+    if existing_flashcards and len(existing_flashcards) > 0:
+        existing_str = "\n".join(f"- {q}" for q in existing_flashcards)
+        avoid_duplicates_instruction = f"\n\nIMPORTANT: Do NOT generate flashcards with questions similar to the ones already on the canvas:\n{existing_str}\n"
+    else:
+        avoid_duplicates_instruction = ""
+
+    if source_type == "page":
+        effective_content = (page_content or "").strip()
+        # Strip the '## Page N' header that splitMarkdownByPage injects
+        import re as _re
+        effective_content = _re.sub(r'^##\s*Page\s*\d+\s*', '', effective_content).strip()
+        
+        has_image = False
+        if len(effective_content) < 50 and pdf_id and page_index is not None:
+            img_b64 = get_page_image_base64(pdf_id, page_index)
             if img_b64:
+                # Send the page image directly to Gemini as multimodal content
                 contents.append({"mime_type": "image/jpeg", "data": img_b64})
-        if page_indexes:
-            prompt += "\n\n(Images of the relevant pages are provided since text was unavailable.)"
+                has_image = True
+
+        if len(effective_content) < 20 and not has_image:
+            raise HTTPException(
+                status_code=422,
+                detail="This page appears to have no readable content. Please navigate to a different page and try again."
+            )
+
+        # Build context description depending on whether we have text, image, or both
+        if has_image and len(effective_content) < 20:
+            context_section = "(An image of the page is provided above. Base your flashcards on the visual content.)"
+        elif has_image:
+            context_section = f"Page text:\n{effective_content}\n\n(An image of the page is also provided for additional context.)"
+        else:
+            context_section = f"Page context:\n{effective_content}"
+
+        prompt = (
+            "You are an expert study-aid creator making flash cards for a university student.\n\n"
+            "A student wants to review the key concepts from the following page content.\n\n"
+            "Flash card rules:\n"
+            f"  \u2022 Create between 3 and 5 flash cards total.\n"
+            "  \u2022 The 'question' field (front of card): A concise, specific question that tests active recall of a key concept.\n"
+            "    - Keep it SHORT \u2014 one sentence maximum.\n"
+            "  \u2022 The 'answer' field (back of card): A clear, complete explanation the student can use to learn.\n"
+            "    - 2-4 sentences. Not too short, not an essay.\n"
+            "  \u2022 Do NOT add any intro text, markdown fencing, or extra keys.\n"
+            f"{avoid_duplicates_instruction}\n"
+            f"{context_section}\n\n"
+            f"Return the flash cards as a JSON array of objects. "
+            "Each object must have exactly two keys: \"question\" (string) and \"answer\" (string)."
+        )
+    else:
+        # Limit raw_text to avoid token exhaustion — struggling nodes are the primary context
+        truncated_raw = raw_text[:3000] if raw_text else ""
+        num_cards = min(max(len(struggling_nodes), 3), 5)
+        nodes_summary = "\n".join(
+            f"- Highlighted passage: {n['highlighted_text']}\n"
+            f"  Student's question:   {n['question']}\n"
+            f"  Gemini's answer:      {n['answer']}"
+            for n in struggling_nodes
+        )
+        prompt = (
+            "You are an expert study-aid creator making flash cards for a university student.\n\n"
+            "A student has been studying and marked certain topics as ones they are struggling with. "
+            "For each struggling topic you are given:\n"
+            "  1. The highlighted passage from the document\n"
+            "  2. The question the student asked about it\n"
+            "  3. The answer that was provided to the student\n\n"
+            "Your task is to create flash cards that will help the student ACTIVELY RECALL these topics.\n\n"
+            "Flash card rules:\n"
+            f"  • Create EXACTLY {num_cards} flash cards.\n"
+            "  • The 'question' field (front of card): A concise, specific question that tests active recall of the concept.\n"
+            "    - Keep it SHORT — one sentence maximum.\n"
+            "    - It should test the CORE concept, not trivia.\n"
+            "  • The 'answer' field (back of card): A clear, complete explanation the student can use to learn.\n"
+            "    - 2-4 sentences. Not too short, not an essay.\n"
+            "    - Should directly answer the question and explain WHY/HOW if relevant.\n"
+            "  • Each card must correspond to ONE distinct struggling topic.\n"
+            "  • Do NOT add any intro text, markdown fencing, or extra keys.\n"
+            f"{avoid_duplicates_instruction}\n"
+            f"Struggling topics:\n{nodes_summary}\n\n"
+            f"Document context (for reference):\n{truncated_raw}\n\n"
+            f"Return exactly {num_cards} flash cards as a JSON array of objects. "
+            "Each object must have exactly two keys: \"question\" (string) and \"answer\" (string)."
+        )
+
+        if len(raw_text.strip()) < 50 and pdf_id:
+            page_indexes = set(n.get("page_index") for n in struggling_nodes if n.get("page_index") is not None)
+            for p_idx in page_indexes:
+                img_b64 = get_page_image_base64(pdf_id, p_idx)
+                if img_b64:
+                    contents.append({"mime_type": "image/jpeg", "data": img_b64})
+            if page_indexes:
+                prompt += "\n\n(Images of the relevant pages are provided since text was unavailable.)"
 
     contents.append(prompt)
     response = await asyncio.to_thread(lambda: model.generate_content(contents))
-    return json.loads(response.text)
+    text = response.text.strip()
+    if text.startswith("```json"):
+        text = text[7:]
+    elif text.startswith("```"):
+        text = text[3:]
+    if text.endswith("```"):
+        text = text[:-3]
+    return json.loads(text.strip())
 
 
 async def generate_page_quiz(page_content: str, pdf_id: str | None = None, page_index: int | None = None) -> list[str]:
@@ -347,6 +510,34 @@ async def generate_page_quiz(page_content: str, pdf_id: str | None = None, page_
         ),
     )
 
+    import re as _re
+    contents = []
+    effective_content = (page_content or "").strip()
+    # Strip the '## Page N' header injected by splitMarkdownByPage — not educational content
+    effective_content = _re.sub(r'^##\s*Page\s*\d+\s*', '', effective_content).strip()
+    
+    has_image = False
+    if len(effective_content) < 50 and pdf_id and page_index is not None:
+        img_b64 = get_page_image_base64(pdf_id, page_index)
+        if img_b64:
+            # Send the page image directly to Gemini as multimodal content
+            contents.append({"mime_type": "image/jpeg", "data": img_b64})
+            has_image = True
+
+    if len(effective_content) < 20 and not has_image:
+        raise HTTPException(
+            status_code=422,
+            detail="This page appears to have no readable content. Please navigate to a page with text content and try again."
+        )
+
+    # Build context description depending on whether we have text, image, or both
+    if has_image and len(effective_content) < 20:
+        context_section = "(An image of the page is provided above. Base your questions on the visual content.)"
+    elif has_image:
+        context_section = f"Page text:\n{effective_content}\n\n(An image of the page is also provided for additional context.)"
+    else:
+        context_section = f"Page content:\n\n{effective_content}"
+
     prompt = (
         "You are an expert academic tutor creating a short comprehension quiz.\n\n"
         "Based ONLY on the page content below, generate between 3 and 5 concise short-answer "
@@ -358,19 +549,19 @@ async def generate_page_quiz(page_content: str, pdf_id: str | None = None, page_
         "- Number the questions with the depth of understanding ranging from recall → application.\n"
         "- Output ONLY a JSON array of question strings. No explanation, no extra keys.\n"
         "- Example: [\"What is X?\", \"How does Y relate to Z?\", \"Why is W important?\"]\n\n"
-        f"Page content:\n\n{page_content}"
+        f"{context_section}"
     )
-
-    contents = []
-    if len(page_content.strip()) < 50 and pdf_id and page_index is not None:
-        img_b64 = get_page_image_base64(pdf_id, page_index)
-        if img_b64:
-            contents.append({"mime_type": "image/jpeg", "data": img_b64})
-            prompt += "\n\n(No readable text was found, so an image of the page is provided instead.)"
 
     contents.append(prompt)
     response = await asyncio.to_thread(lambda: model.generate_content(contents))
-    data = json.loads(response.text)
+    text = response.text.strip()
+    if text.startswith("```json"):
+        text = text[7:]
+    elif text.startswith("```"):
+        text = text[3:]
+    if text.endswith("```"):
+        text = text[:-3]
+    data = json.loads(text.strip())
     # Ensure we always return a flat list of strings
     if isinstance(data, list):
         return [str(q) for q in data]
@@ -422,8 +613,11 @@ async def grade_answer(
         "Write your feedback now (plain text, no markdown, no JSON):"
     )
 
+    import re as _re
+    # Strip the '## Page N' header before checking if content is readable
+    cleaned_page_content = _re.sub(r'^##\s*Page\s*\d+\s*', '', page_content.strip()).strip()
     contents = []
-    if len(page_content.strip()) < 50 and pdf_id and page_index is not None:
+    if len(cleaned_page_content) < 50 and pdf_id and page_index is not None:
         img_b64 = get_page_image_base64(pdf_id, page_index)
         if img_b64:
             contents.append({"mime_type": "image/jpeg", "data": img_b64})
