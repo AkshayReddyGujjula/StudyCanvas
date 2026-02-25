@@ -2,6 +2,7 @@
 fastapi
 uvicorn[standard]
 pydantic
+slowapi
 
 # PDF extraction
 pymupdf4llm        # also installs PyMuPDF (fitz)
