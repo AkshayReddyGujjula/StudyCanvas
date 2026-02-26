@@ -81,7 +81,8 @@ async def upload_pdf_text(request: Request, body: UploadTextRequest):
     for i, page_text in enumerate(body.pages):
         cleaned = pdf_service._clean(page_text)
         raw_pages.append(cleaned)
-        md_pages.append(f"## Page {i + 1}\n\n{cleaned.strip()}")
+        formatted = pdf_service._format_plain_text(cleaned)
+        md_pages.append(f"## Page {i + 1}\n\n{formatted}")
 
     raw_text = "\n\n".join(raw_pages)
     markdown_content = "\n\n".join(md_pages)

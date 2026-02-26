@@ -2,6 +2,15 @@ import re
 import unicodedata
 import pypdf
 
+# Try to import pymupdf4llm for high-quality Markdown extraction.
+# Falls back to pypdf (plain text) when PyMuPDF is unavailable (e.g. Vercel).
+try:
+    import pymupdf4llm
+    import pymupdf
+    _HAS_PYMUPDF = True
+except ImportError:
+    _HAS_PYMUPDF = False
+
 # Explicit map for Unicode ligature characters that some PDF fonts emit instead
 # of their decomposed letter equivalents. Applied before NFKC normalisation so
 # any that survive the PDF extraction are caught regardless.
@@ -79,16 +88,70 @@ def _clean(text: str) -> str:
 
 def extract_text_and_markdown(file_path: str) -> tuple[str, str, int, str|None]:
     """
-    Opens a PDF with pypdf and extracts both:
+    Opens a PDF and extracts both:
       - raw_text         : cleaned plain text per page, for downstream Gemini
                            endpoints (quiz / flashcards / query context).
       - markdown_content : per-page Markdown with '## Page N' headers prepended
                            so the frontend splitMarkdownByPage() regex works.
 
+    Uses pymupdf4llm when available (produces excellent structured Markdown with
+    proper headings, lists, tables, bold/italic). Falls back to pypdf otherwise.
+
     Raises ValueError("empty_text") if the PDF has no extractable text at all.
     Returns (raw_text, markdown_content, page_count, new_pdf_path).
     new_pdf_path is always None (server-side PDF modification not used on Vercel).
     """
+    if _HAS_PYMUPDF:
+        return _extract_with_pymupdf(file_path)
+    return _extract_with_pypdf(file_path)
+
+
+def _clean_markdown(text: str) -> str:
+    """
+    Clean up pymupdf4llm Markdown output:
+    - Remove image references (we don't serve images)
+    - Clean ligature / encoding artifacts
+    - Collapse excessive blank lines
+    """
+    # Remove markdown image references (![alt](path)) since images aren't served
+    text = re.sub(r'!\[[^\]]*\]\([^)]*\)', '', text)
+    # Apply standard ligature/encoding cleanup
+    text = _clean(text)
+    # Collapse 3+ consecutive blank lines into 2
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
+
+
+def _extract_with_pymupdf(file_path: str) -> tuple[str, str, int, str|None]:
+    """High-quality extraction using pymupdf4llm for structured Markdown."""
+    doc = pymupdf.open(file_path)
+    page_count = len(doc)
+
+    # Get raw plain text for downstream Gemini endpoints (quiz, flashcards, etc.)
+    raw_pages: list[str] = []
+    for page in doc:
+        raw_pages.append(_clean(page.get_text()))
+    doc.close()
+
+    raw_text = "\n\n".join(raw_pages)
+    if not raw_text.strip():
+        raise ValueError("empty_text")
+
+    # Get per-page structured Markdown using pymupdf4llm.
+    # page_chunks=True returns a list of dicts, one per page.
+    chunks = pymupdf4llm.to_markdown(file_path, page_chunks=True)
+    md_pages: list[str] = []
+    for i, chunk in enumerate(chunks):
+        page_md = chunk['text'].strip() if isinstance(chunk, dict) else str(chunk).strip()
+        page_md = _clean_markdown(page_md)
+        md_pages.append(f"## Page {i + 1}\n\n{page_md}")
+
+    markdown_content = "\n\n".join(md_pages)
+    return raw_text, markdown_content, page_count, None
+
+
+def _extract_with_pypdf(file_path: str) -> tuple[str, str, int, str|None]:
+    """Fallback extraction using pypdf (plain text, less formatting)."""
     reader = pypdf.PdfReader(file_path)
     page_count = len(reader.pages)
 
@@ -99,7 +162,9 @@ def extract_text_and_markdown(file_path: str) -> tuple[str, str, int, str|None]:
         page_text = page.extract_text() or ""
         cleaned = _clean(page_text)
         raw_pages.append(cleaned)
-        md_pages.append(f"## Page {i + 1}\n\n{cleaned.strip()}")
+        # Improve plain-text formatting for better Markdown rendering
+        formatted = _format_plain_text(cleaned)
+        md_pages.append(f"## Page {i + 1}\n\n{formatted}")
 
     raw_text = "\n\n".join(raw_pages)
     markdown_content = "\n\n".join(md_pages)
@@ -108,6 +173,41 @@ def extract_text_and_markdown(file_path: str) -> tuple[str, str, int, str|None]:
         raise ValueError("empty_text")
 
     return raw_text, markdown_content, page_count, None
+
+
+def _format_plain_text(text: str) -> str:
+    """
+    Improve raw extracted plain text for Markdown rendering.
+    Detects paragraph boundaries and inserts proper double-newlines so
+    the Markdown renderer doesn't collapse everything into one paragraph.
+    """
+    lines = text.split('\n')
+    result: list[str] = []
+
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped:
+            # Preserve existing blank lines as paragraph breaks
+            if result and result[-1] != '':
+                result.append('')
+            continue
+
+        result.append(stripped)
+
+        # Heuristic: insert a paragraph break after a line ending with
+        # sentence-finalising punctuation when the next line starts with
+        # an uppercase letter (likely a new paragraph).
+        if i + 1 < len(lines):
+            next_stripped = lines[i + 1].strip()
+            if (next_stripped
+                and stripped.endswith(('.', '!', '?', ':'))
+                and next_stripped[0].isupper()):
+                result.append('')  # blank line = paragraph break
+
+    text = '\n'.join(result)
+    # Collapse 3+ newlines to 2
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
 
 
 def get_page_image_base64(pdf_id: str, page_index: int) -> str | None:

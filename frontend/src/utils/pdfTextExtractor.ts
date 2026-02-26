@@ -40,16 +40,35 @@ export async function extractPdfPagesText(file: File): Promise<string[]> {
 
         // Join text items — preserve line breaks where the PDF signals them
         // (items with a large `transform[5]` delta indicate a new line).
+        // Larger Y-gaps (> 1.8× the average line height) are treated as
+        // paragraph breaks (double newlines) for better Markdown rendering.
         let pageText = ''
         let lastY: number | null = null
+        let lineHeightSum = 0
+        let lineCount = 0
 
         for (const item of textContent.items) {
             // TextItem has a `transform` array; TextMarkedContent does not.
             if (!('str' in item)) continue
 
             const y = (item as TextItem).transform[5]
-            if (lastY !== null && Math.abs(y - lastY) > 2) {
-                pageText += '\n'
+            if (lastY !== null) {
+                const yDiff = Math.abs(y - lastY)
+                if (yDiff > 2) {
+                    // Track running average of line spacing for paragraph detection
+                    if (yDiff < 80) {
+                        lineHeightSum += yDiff
+                        lineCount++
+                    }
+                    const avgLineHeight = lineCount > 0 ? lineHeightSum / lineCount : 0
+                    // A gap significantly larger than the average line height
+                    // likely indicates a paragraph break
+                    if (avgLineHeight > 0 && yDiff > avgLineHeight * 1.8) {
+                        pageText += '\n\n'
+                    } else {
+                        pageText += '\n'
+                    }
+                }
             }
             pageText += (item as TextItem).str
             lastY = y

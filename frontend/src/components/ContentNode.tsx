@@ -1,5 +1,5 @@
 import { useMemo, useCallback, useState, useEffect, useRef } from 'react'
-import { Handle, Position, useReactFlow } from '@xyflow/react'
+import { Handle, Position, useReactFlow, useUpdateNodeInternals } from '@xyflow/react'
 import type { NodeProps } from '@xyflow/react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -69,6 +69,7 @@ type ContentNodeProps = NodeProps & { data: ExtendedContentNodeData }
 
 export default function ContentNode({ id, data }: ContentNodeProps) {
     const { setCenter } = useReactFlow()
+    const updateNodeInternals = useUpdateNodeInternals()
     const highlights = useCanvasStore((s) => s.highlights)
     const nodes = useCanvasStore((s) => s.nodes)
     const currentPage = useCanvasStore((s) => s.currentPage)
@@ -76,16 +77,15 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
     const updateScrollPosition = useCanvasStore((s) => s.updateScrollPosition)
     const setCurrentPage = useCanvasStore((s) => s.setCurrentPage)
     const persistToLocalStorage = useCanvasStore((s) => s.persistToLocalStorage)
-    // ── Resize state (width and height are independent) ─────────────────────
+    const setNodes = useCanvasStore((s) => s.setNodes)
+    // ── Resize state ────────────────────────────────────────────────────────
     const [nodeWidth, setNodeWidth] = useState(550)
-    // pdfViewerHeight: null = auto (PDFViewer controls via fitViewerHeight)
-    //                  number = user-overridden height
-    const [pdfViewerHeight, setPdfViewerHeight] = useState<number | null>(null)
-    // Tracked via onFitHeightChange so we always know the auto height
+    // Auto fit height: the exact viewer height that shows one full PDF page
+    // at the current fit-to-width scale. Updated by PDFViewer whenever the
+    // container width changes.
     const [autoFitHeight, setAutoFitHeight] = useState<number>(600)
-    // Hard minimums set on PDF load
+    // Hard minimum width set on PDF load
     const minNodeWidthRef = useRef(550)
-    const minViewerHeightRef = useRef(200)
     // true = full-page (no scroll), false = compact scrollable view
     const [isExpanded, setIsExpanded] = useState(true)
     // 'pdf' = PDF view, 'markdown' = Markdown view
@@ -175,11 +175,8 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
         // fitH = natural page height at the fit scale that just fills newW
         const fitH = Math.round(dimensions.height * (newW - padding) / dimensions.width + padding)
         minNodeWidthRef.current = newW
-        minViewerHeightRef.current = fitH
         setNodeWidth(newW)
         setAutoFitHeight(fitH)
-        // Set explicit height initially so the PDF displays perfectly without scrolling
-        setPdfViewerHeight(fitH)
     }, [])
 
     // Handle page change from PDF viewer - sync with canvas store
@@ -188,75 +185,57 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
         persistToLocalStorage()
     }, [setCurrentPage, persistToLocalStorage])
 
-    // Reset height when switching to text mode
+    // Switch between PDF and text mode
     const handleViewModeChange = useCallback((newMode: 'pdf' | 'markdown') => {
         setViewMode(newMode)
-        if (newMode === 'markdown') {
-            // Reset height in text mode so content determines height
-            setPdfViewerHeight(null)
-        }
     }, [])
 
     // ── Generic resize starter — used by all edge/corner handles ───────────
-    // mode: 'w' = width only, 'h' = height only, 'wh' = both
-    // cursor: optional cursor override for corner resizes
-    // In text mode, height resizing is disabled (mode 'h' and 'wh' behave as 'w')
+    // Only width is user-resizable. Height auto-tracks the PDF's fit-to-width
+    // scale so the viewer always shows exactly one page with no excess space.
     const startResize = useCallback((e: React.MouseEvent, mode: 'w' | 'h' | 'wh', cursor?: string) => {
         e.preventDefault()
         e.stopPropagation()
 
-        const startX = e.clientX
-        const startY = e.clientY
-        // Capture current values synchronously at drag start
-        const startW = nodeWidth
-        // Use current pdfViewerHeight if explicitly set, otherwise the latest autoFitHeight
-        const startH = pdfViewerHeight ?? autoFitHeight
-        const minW = minNodeWidthRef.current
-        const minH = minViewerHeightRef.current
+        // Height-only drag does nothing (height is auto)
+        if (mode === 'h') return
 
-        // In text mode, only allow width resizing
-        const isPdfMode = viewMode === 'pdf' && pdfArrayBuffer
-        const effectiveMode = isPdfMode ? mode : 'w'
+        const startX = e.clientX
+        const startW = nodeWidth
+        const minW = minNodeWidthRef.current
 
         const cursors: Record<string, string> = {
             w: 'ew-resize',
-            h: 'ns-resize',
             wh: 'nwse-resize',
-            'tl': 'nwse-resize',  // top-left
-            'tr': 'nesw-resize',  // top-right
-            'bl': 'nesw-resize',  // bottom-left
-            'br': 'nwse-resize',  // bottom-right
+            'tl': 'nwse-resize',
+            'tr': 'nesw-resize',
+            'bl': 'nesw-resize',
+            'br': 'nwse-resize',
         }
 
         // Full-screen transparent overlay captures ALL pointer events during drag
         // so that the mouse can travel over the canvas, PDF text layer, etc.
         // without losing the resize interaction.
         const overlay = document.createElement('div')
-        const cursorKey = cursor || effectiveMode
+        const cursorKey = cursor || mode
         overlay.style.cssText =
-            `position:fixed;inset:0;z-index:9999;cursor:${cursors[cursorKey] ?? 'nwse-resize'};user-select:none`
+            `position:fixed;inset:0;z-index:9999;cursor:${cursors[cursorKey] ?? 'ew-resize'};user-select:none`
         document.body.appendChild(overlay)
 
         const onMove = (mv: MouseEvent) => {
             const dx = mv.clientX - startX
-            const dy = mv.clientY - startY
-            if (effectiveMode === 'w' || effectiveMode === 'wh') {
-                setNodeWidth(Math.min(Math.max(startW + dx, minW), 1500))
-            }
-            if ((effectiveMode === 'h' || effectiveMode === 'wh') && isPdfMode) {
-                setPdfViewerHeight(Math.min(Math.max(startH + dy, minH), 3000))
-            }
+            setNodeWidth(Math.min(Math.max(startW + dx, minW), 1500))
         }
 
         const onUp = () => {
-            overlay.parentNode && document.body.removeChild(overlay)
+            if (overlay.parentNode) document.body.removeChild(overlay)
             document.removeEventListener('mousemove', onMove)
             document.removeEventListener('mouseup', onUp)
         }
 
         document.addEventListener('mousemove', onMove)
         document.addEventListener('mouseup', onUp)
-    }, [nodeWidth, pdfViewerHeight, autoFitHeight, viewMode, pdfArrayBuffer])
+    }, [nodeWidth])
 
     const handleMarkdownClick = useCallback(
         (event: React.MouseEvent) => {
@@ -283,19 +262,37 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
     )
 
     // Calculate the effective height for the node
-    // In PDF mode: use explicit height from pdfViewerHeight
+    // In PDF mode: height auto-tracks the PDF page's fit-to-width size
     // In text mode: use auto height (content determines height)
     const hasFooter = !!data.onTestMePage
     const headerHeight = 44
     const toolbarHeight = 40
     const footerHeight = hasFooter ? 44 : 0
     const isPdfMode = viewMode === 'pdf' && pdfArrayBuffer
-    const effectiveHeight = (isPdfMode && pdfViewerHeight)
-        ? headerHeight + toolbarHeight + pdfViewerHeight + footerHeight
+    const effectiveHeight = isPdfMode
+        ? headerHeight + toolbarHeight + autoFitHeight + footerHeight
         : undefined
 
     // Bottom offset for resize handles when footer is present
     const bottomOffset = hasFooter ? 44 : 0
+
+    // Sync visual dimensions to the React Flow node's `style` so the wrapper,
+    // minimap rectangle, and hit-test area always match what is rendered.
+    // Without this, the wrapper keeps the stale `style.width` from the initial
+    // node creation in UploadPanel and never updates, causing the minimap and
+    // click target to be wider/taller than the visible content.
+    useEffect(() => {
+        const w = nodeWidth
+        const h = effectiveHeight
+        setNodes((prev) => prev.map((n) => {
+            if (n.id !== id) return n
+            const cs = (n.style ?? {}) as React.CSSProperties
+            if (cs.width === w && cs.height === h) return n
+            return { ...n, style: { ...cs, width: w, height: h } }
+        }))
+        // Also refresh handle positions for edge routing
+        requestAnimationFrame(() => updateNodeInternals(id))
+    }, [nodeWidth, effectiveHeight, id, setNodes, updateNodeInternals])
 
     const renderViewModeButtons = () => (
         <div className="flex gap-1">
@@ -324,7 +321,7 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
         <div
             data-nodeid={id}
             className="bg-white rounded-lg shadow-lg border border-gray-200 relative"
-            style={{ width: nodeWidth, height: effectiveHeight }}
+            style={{ width: nodeWidth, height: effectiveHeight, overflow: 'hidden' }}
         >
             {/* Header bar — draggable, no nodrag class */}
             <div className="flex items-center gap-2 px-4 py-3 bg-indigo-600 rounded-t-lg cursor-grab">
@@ -387,13 +384,9 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
                             onTextSelection={handlePdfTextSelection}
                             onLoad={handlePdfLoad}
                             onPageChange={handlePdfPageChange}
-                            onFitHeightChange={(h) => {
-                                setAutoFitHeight(h)
-                                // Also update the hard min so height can never be dragged below natural fit
-                                minViewerHeightRef.current = h
-                            }}
+                            onFitHeightChange={(h) => setAutoFitHeight(h)}
                             containerWidth={nodeWidth}
-                            viewerHeight={pdfViewerHeight ?? undefined}
+                            viewerHeight={autoFitHeight}
                             customToolbarMiddle={renderViewModeButtons()}
                         />
                     </div>

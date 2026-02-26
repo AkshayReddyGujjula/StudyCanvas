@@ -72,6 +72,8 @@ export default function PDFViewer({
     useEffect(() => { onLoadRef.current = onLoad }, [onLoad])
     const initialPageRef = useRef(initialPage)
     useEffect(() => { initialPageRef.current = initialPage }, [initialPage])
+    const onFitHeightChangeRef = useRef(onFitHeightChange)
+    useEffect(() => { onFitHeightChangeRef.current = onFitHeightChange }, [onFitHeightChange])
 
     // ── Measure container width ──────────────────────────────────────────────
     useEffect(() => {
@@ -159,8 +161,8 @@ export default function PDFViewer({
                 pageCard!.style.width = `${viewport.width}px`
                 pageCard!.style.height = `${viewport.height}px`
 
-                // Canvas — HiDPI
-                const dpr = window.devicePixelRatio || 1
+                // Canvas — HiDPI with minimum 4x resolution for sharp text
+                const dpr = Math.max(window.devicePixelRatio || 1, 4)
                 canvas!.width = Math.floor(viewport.width * dpr)
                 canvas!.height = Math.floor(viewport.height * dpr)
                 canvas!.style.width = `${viewport.width}px`
@@ -210,15 +212,17 @@ export default function PDFViewer({
         return () => { cancelled = true }
     }, [pdfDoc, currentPage, scale])
 
-    // ── Recalculate fit scale when container width changes ───────────────────
-    // NOTE: we deliberately do NOT call setFitViewerHeight here so that a node
-    // width resize never causes the viewer height to change (independent axes).
-    // fitViewerHeight is only set at load time. If the user ↺ resets zoom the
-    // scale updates and the rendered page fills the new width correctly.
+    // ── Recalculate fit scale AND fit viewer height when container width changes ─
+    // The viewer height must track the aspect-ratio-correct page height at the
+    // current fit-to-width scale so there is never excess empty space below
+    // the rendered page.
     useEffect(() => {
         if (!pdfNaturalWidthRef.current || !containerWidth) return
         const fit = (containerWidth - 32) / pdfNaturalWidthRef.current
         fitScaleRef.current = fit
+        const fh = Math.round(pdfNaturalHeightRef.current * fit + 32)
+        setFitViewerHeight(fh)
+        onFitHeightChangeRef.current?.(fh)
     }, [containerWidth])
 
     const isSnippingMode = useCanvasStore((s) => s.isSnippingMode)
@@ -566,19 +570,25 @@ export default function PDFViewer({
                 style={{ height: `${viewerHeightProp ?? fitViewerHeight}px` }}
                 onMouseUp={handleMouseUp}
             >
-                {/* Inner centering wrapper — must be ≥ scroll-container width */}
+                {/* Inner centering wrapper — must be ≥ scroll-container width.
+                  * Uses width:fit-content + margin:0 auto on the page card instead of
+                  * justify-content:center to avoid the well-known CSS issue where
+                  * centered overflow content becomes unreachable on the start side.
+                  * minWidth is computed declaratively from scale so the scroll range
+                  * is correct even before the render useEffect updates the page card.
+                  */}
                 <div style={{
-                    minWidth: '100%',
-                    display: 'flex',
-                    justifyContent: 'center',
-                    alignItems: 'flex-start',
+                    minWidth: pdfNaturalWidthRef.current && scale
+                        ? `max(100%, ${Math.ceil(pdfNaturalWidthRef.current * scale) + 32}px)`
+                        : '100%',
+                    width: 'fit-content',
                     padding: 16,
                     boxSizing: 'border-box',
                 }}>
                     <div
                         ref={pageContainerRef}
                         className="relative shadow-lg bg-white"
-                        style={{ userSelect: 'text' }}
+                        style={{ userSelect: 'text', margin: '0 auto' }}
                     >
                         <canvas
                             ref={canvasRef}
