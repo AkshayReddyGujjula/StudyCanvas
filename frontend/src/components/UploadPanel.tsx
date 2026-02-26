@@ -26,8 +26,8 @@ export default function UploadPanel({ onUploaded }: UploadPanelProps) {
                 setError('Only PDF files are accepted.')
                 return
             }
-            if (file.size > 52428800) {
-                setError('File is too large. Maximum size is 50MB.')
+            if (file.size > 104857600) {
+                setError('File is too large. Maximum size is 100MB.')
                 return
             }
 
