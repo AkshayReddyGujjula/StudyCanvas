@@ -18,7 +18,7 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          'vendor-react': ['react', 'react-dom'],
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
           'vendor-pdfjs': ['pdfjs-dist'],
           'vendor-xyflow': ['@xyflow/react'],
           'vendor-pdfviewer': [

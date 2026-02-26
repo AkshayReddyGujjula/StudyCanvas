@@ -15,7 +15,11 @@ export interface PDFViewerProps {
     onFitHeightChange?: (h: number) => void
     /** Called when the page changes in the PDF viewer (for syncing with canvas store). */
     onPageChange?: (page: number) => void
+    /** Called when the zoom scale changes (for persisting viewer state). */
+    onZoomChange?: (scale: number) => void
     initialPage?: number
+    /** Optional initial zoom scale to restore (overrides fit-to-width). */
+    initialScale?: number
     scrollPositions?: Record<number, number>
     onScrollPositionChange?: (page: number, position: number) => void
     className?: string
@@ -33,10 +37,11 @@ export default function PDFViewer({
     onLoad,
     onFitHeightChange,
     onPageChange,
+    onZoomChange,
     initialPage = 1,
+    initialScale,
     className = '',
     containerWidth: initialContainerWidth,
-    viewerHeight: viewerHeightProp,
     customToolbarMiddle,
 }: PDFViewerProps) {
     const outerRef = useRef<HTMLDivElement>(null)       // scroll container
@@ -74,6 +79,10 @@ export default function PDFViewer({
     useEffect(() => { initialPageRef.current = initialPage }, [initialPage])
     const onFitHeightChangeRef = useRef(onFitHeightChange)
     useEffect(() => { onFitHeightChangeRef.current = onFitHeightChange }, [onFitHeightChange])
+    const initialScaleRef = useRef(initialScale)
+    useEffect(() => { initialScaleRef.current = initialScale }, [initialScale])
+    const onZoomChangeRef = useRef(onZoomChange)
+    useEffect(() => { onZoomChangeRef.current = onZoomChange }, [onZoomChange])
 
     // ── Measure container width ──────────────────────────────────────────────
     useEffect(() => {
@@ -116,7 +125,9 @@ export default function PDFViewer({
                 setFitViewerHeight(fh)
                 onLoadRef.current?.({ width: vp.width, height: vp.height })
                 onFitHeightChange?.(fh)
-                setScale(fit)
+                // Use restored scale if provided, otherwise fit-to-width
+                const startScale = initialScaleRef.current ?? fit
+                setScale(startScale)
             } catch (e) {
                 if (!cancelled) setError('Failed to load PDF. Please try again.')
             } finally {
@@ -132,6 +143,21 @@ export default function PDFViewer({
     useEffect(() => {
         setCurrentPage(initialPage)
     }, [initialPage])
+
+    // ── Block wheel events from reaching React Flow ───────────────────────────
+    // React synthetic `onWheel` fires at the #root delegate (after all native
+    // bubble handlers), so by then React Flow has already processed the event.
+    // Attaching a native listener on the scroll container stops propagation
+    // before the event reaches any ancestor listener.
+    useEffect(() => {
+        const el = outerRef.current
+        if (!el) return
+        const handler = (e: WheelEvent) => {
+            e.stopPropagation()
+        }
+        el.addEventListener('wheel', handler)
+        return () => el.removeEventListener('wheel', handler)
+    }, [])
 
     // ── Render current page (canvas + text layer) ────────────────────────────
     useEffect(() => {
@@ -361,7 +387,10 @@ export default function PDFViewer({
         const y = Math.min(snipStart.y, snipCurrent.y)
         const width = Math.max(10, Math.abs(snipStart.x - snipCurrent.x))
         const height = Math.max(10, Math.abs(snipStart.y - snipCurrent.y))
-        const dpr = window.devicePixelRatio || 1
+
+        // Derive the actual pixel ratio used when rendering the canvas, so
+        // CSS-pixel snip coordinates map to the correct canvas-buffer region.
+        const renderDpr = canvasRef.current.width / parseFloat(canvasRef.current.style.width || '1')
 
         setSnipStart(null)
         setSnipCurrent(null)
@@ -373,15 +402,15 @@ export default function PDFViewer({
         try {
             // Create a temporary canvas to crop the image
             const tempCanvas = document.createElement('canvas')
-            tempCanvas.width = Math.floor(width * dpr)
-            tempCanvas.height = Math.floor(height * dpr)
+            tempCanvas.width = Math.floor(width * renderDpr)
+            tempCanvas.height = Math.floor(height * renderDpr)
             const ctx = tempCanvas.getContext('2d')
             if (!ctx) return
 
             // Draw the cropped portion from the main PDF canvas
             ctx.drawImage(
                 canvasRef.current,
-                x * dpr, y * dpr, width * dpr, height * dpr, // Source rect
+                x * renderDpr, y * renderDpr, width * renderDpr, height * renderDpr, // Source rect
                 0, 0, tempCanvas.width, tempCanvas.height  // Destination rect
             )
 
@@ -479,6 +508,7 @@ export default function PDFViewer({
                             const newScale = parseInt(e.target.value, 10) / 100
                             if (scale !== null) scheduleZoomScroll(scale, newScale)
                             setScale(newScale)
+                            onZoomChangeRef.current?.(newScale)
                         }}
                         className="w-20 h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer"
                     />
@@ -492,6 +522,7 @@ export default function PDFViewer({
                                 outerRef.current.scrollTop = 0
                             }
                             setScale(fitScaleRef.current)
+                            onZoomChangeRef.current?.(fitScaleRef.current)
                         }}
                         className="text-xs text-indigo-500 hover:text-indigo-700 px-1 leading-none"
                         title="Reset zoom to fit width"
@@ -566,10 +597,8 @@ export default function PDFViewer({
               */}
             <div
                 ref={outerRef}
-                className="overflow-auto bg-gray-100 nopan flex-shrink-0"
-                style={{ height: `${viewerHeightProp ?? fitViewerHeight}px` }}
+                className="overflow-auto bg-gray-100 nopan flex-1 min-h-0"
                 onMouseUp={handleMouseUp}
-                onWheel={(e) => e.stopPropagation()}
             >
                 {/* Inner centering wrapper — must be ≥ scroll-container width.
                   * Uses width:fit-content + margin:0 auto on the page card instead of

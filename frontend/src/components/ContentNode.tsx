@@ -25,6 +25,14 @@ interface ExtendedContentNodeData extends ContentNodeData {
     onTestMePage?: () => void
     onManualSelection?: (result: { selectedText: string, sourceNodeId: string, rect: DOMRect, mousePos: { x: number; y: number }, autoAsk?: boolean } | null) => void
     pdf_id?: string
+    /** Persisted PDF viewer state — restored on canvas reopen */
+    pdfViewerState?: {
+        nodeWidth?: number
+        userNodeHeight?: number | null
+        viewMode?: 'pdf' | 'markdown'
+        isExpanded?: boolean
+        zoomScale?: number
+    }
 }
 
 // Identify code block ranges to protect from highlight injection
@@ -78,24 +86,30 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
     const setCurrentPage = useCanvasStore((s) => s.setCurrentPage)
     const persistToLocalStorage = useCanvasStore((s) => s.persistToLocalStorage)
     const setNodes = useCanvasStore((s) => s.setNodes)
+    const updateNodeData = useCanvasStore((s) => s.updateNodeData)
+
+    // ── Restore persisted PDF viewer state from node data ───────────────────
+    const savedState = data.pdfViewerState
     // ── Resize state ────────────────────────────────────────────────────────
-    const [nodeWidth, setNodeWidth] = useState(550)
+    const [nodeWidth, setNodeWidth] = useState(savedState?.nodeWidth ?? 550)
     // Auto fit height: the exact viewer height that shows one full PDF page
     // at the current fit-to-width scale. Updated by PDFViewer whenever the
     // container width changes.
     const [autoFitHeight, setAutoFitHeight] = useState<number>(600)
     // Explicit user-controlled node height (null = auto from autoFitHeight).
     // Once set via resize drag, the height is locked and won't auto-track width.
-    const [userNodeHeight, setUserNodeHeight] = useState<number | null>(null)
+    const [userNodeHeight, setUserNodeHeight] = useState<number | null>(savedState?.userNodeHeight ?? null)
     // Hard minimum width set on PDF load
-    const minNodeWidthRef = useRef(550)
+    const minNodeWidthRef = useRef(savedState?.nodeWidth ?? 550)
     // Tracks whether the initial PDF size has been set (prevents re-mount resets)
-    const hasInitializedSizeRef = useRef(false)
+    const hasInitializedSizeRef = useRef(!!savedState?.nodeWidth)
     // true = full-page (no scroll), false = compact scrollable view
-    const [isExpanded, setIsExpanded] = useState(true)
+    const [isExpanded, setIsExpanded] = useState(savedState?.isExpanded ?? true)
     // 'pdf' = PDF view, 'markdown' = Markdown view
-    // Start with markdown, switch to pdf after loading if successful
-    const [viewMode, setViewMode] = useState<'pdf' | 'markdown'>('markdown')
+    // Start with saved mode or markdown; switch to pdf after loading if successful
+    const [viewMode, setViewMode] = useState<'pdf' | 'markdown'>(savedState?.viewMode ?? 'markdown')
+    // Persisted zoom scale from previous session (passed to PDFViewer as initial)
+    const savedZoomScaleRef = useRef<number | undefined>(savedState?.zoomScale)
     // PDF data buffer — sourced from the Zustand store (backed by IndexedDB)
     const pdfArrayBuffer = useCanvasStore((s) => s.pdfArrayBuffer)
     const loadPdfFromStorage = useCanvasStore((s) => s.loadPdfFromStorage)
@@ -199,6 +213,34 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
     const handleViewModeChange = useCallback((newMode: 'pdf' | 'markdown') => {
         setViewMode(newMode)
     }, [])
+
+    // Track the current zoom scale from PDFViewer
+    const currentZoomRef = useRef<number | undefined>(savedZoomScaleRef.current)
+    const handleZoomChange = useCallback((newScale: number) => {
+        currentZoomRef.current = newScale
+    }, [])
+
+    // ── Persist PDF viewer state to node data (debounced) ───────────────────
+    // This writes nodeWidth, userNodeHeight, viewMode, isExpanded, and zoom scale
+    // into the node's data so it's saved with state.json.
+    const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    useEffect(() => {
+        if (persistTimerRef.current) clearTimeout(persistTimerRef.current)
+        persistTimerRef.current = setTimeout(() => {
+            updateNodeData(id, {
+                pdfViewerState: {
+                    nodeWidth,
+                    userNodeHeight,
+                    viewMode,
+                    isExpanded,
+                    zoomScale: currentZoomRef.current,
+                },
+            })
+        }, 500) // debounce 500ms
+        return () => {
+            if (persistTimerRef.current) clearTimeout(persistTimerRef.current)
+        }
+    }, [nodeWidth, userNodeHeight, viewMode, isExpanded, id, updateNodeData])
 
     // ── Generic resize starter — used by all edge/corner handles ───────────
     // Width and height are independently resizable. Edges resize one axis;
@@ -410,16 +452,19 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
             {/* Content - PDF view or Markdown view - hide when loading */}
             {!isLoadingPdf && (
                 viewMode === 'pdf' && pdfArrayBuffer ? (
-                    <div className="nodrag nopan" onWheel={(e) => e.stopPropagation()}>
+                    <div className="nodrag nopan flex-1 min-h-0 flex flex-col">
                         <PDFViewer
+                            className="flex-1 min-h-0"
                             pdfData={pdfArrayBuffer}
                             initialPage={currentPage}
+                            initialScale={savedZoomScaleRef.current}
                             scrollPositions={scrollPositions}
                             onScrollPositionChange={(page, position) => updateScrollPosition(page, position)}
                             onTextSelection={handlePdfTextSelection}
                             onLoad={handlePdfLoad}
                             onPageChange={handlePdfPageChange}
                             onFitHeightChange={(h) => setAutoFitHeight(h)}
+                            onZoomChange={handleZoomChange}
                             containerWidth={nodeWidth}
                             viewerHeight={pdfViewerHeight}
                             customToolbarMiddle={renderViewModeButtons()}
@@ -447,7 +492,7 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
             {/* "Test me on this page" pill button — absolutely pinned to bottom so it is never clipped */}
             {data.onTestMePage && (
                 <div
-                    className="nodrag absolute bottom-0 left-0 right-0 z-10 border-t border-gray-100 flex justify-center items-center bg-gray-50 rounded-b-lg"
+                    className="nodrag flex-shrink-0 z-10 border-t border-gray-100 flex justify-center items-center bg-gray-50 rounded-b-lg"
                     style={{ height: footerHeight }}
                 >
                     <button

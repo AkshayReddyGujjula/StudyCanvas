@@ -40,6 +40,8 @@ interface CanvasState {
     zoomLevel: number
     /** Per-page scroll positions for PDF viewer */
     scrollPositions: Record<number, number>
+    /** React Flow viewport (x, y, zoom) for canvas pan/zoom persistence */
+    canvasViewport: { x: number; y: number; zoom: number } | null
     /** Whether the user is currently in image snipping mode */
     isSnippingMode: boolean
     /** Raw PDF ArrayBuffer stored in-memory (loaded from IndexedDB) */
@@ -55,6 +57,8 @@ interface CanvasActions {
     updateNodeData: (nodeId: string, data: Partial<Record<string, unknown>>) => void
     setActiveAbortController: (controller: AbortController | null) => void
     resetCanvas: () => void
+    /** Clear store state without deleting any persisted files (used when navigating away). */
+    clearForNewCanvas: () => void
     persistToLocalStorage: () => void
     setUserDetails: (details: UserDetails) => void
     setCurrentPage: (page: number) => void
@@ -63,6 +67,8 @@ interface CanvasActions {
     setZoomLevel: (zoom: number) => void
     /** Update scroll position for a specific page */
     updateScrollPosition: (page: number, position: number) => void
+    /** Set the React Flow canvas viewport (x, y, zoom) */
+    setCanvasViewport: (vp: { x: number; y: number; zoom: number } | null) => void
     /** Merge a partial data patch into a quiz question node */
     updateQuizNodeData: (nodeId: string, data: Partial<Record<string, unknown>>) => void
     /** Append a chat message to a quiz question node's chatHistory */
@@ -90,6 +96,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
     pageMarkdowns: [],
     zoomLevel: 1.0,
     scrollPositions: {},
+    canvasViewport: null,
     isSnippingMode: false,
     pdfArrayBuffer: null,
 
@@ -141,6 +148,8 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
             scrollPositions: { ...state.scrollPositions, [page]: position },
         })),
 
+    setCanvasViewport: (vp) => set({ canvasViewport: vp }),
+
     resetCanvas: () => {
         const { activeAbortController, fileData } = get()
         activeAbortController?.abort()
@@ -158,16 +167,36 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
             pageMarkdowns: [],
             zoomLevel: 1.0,
             scrollPositions: {},
+            canvasViewport: null,
             isSnippingMode: false,
             pdfArrayBuffer: null,
         })
         localStorage.removeItem(STORAGE_KEY)
     },
 
+    clearForNewCanvas: () => {
+        const { activeAbortController } = get()
+        activeAbortController?.abort()
+        set({
+            nodes: [],
+            edges: [],
+            fileData: null,
+            highlights: [],
+            activeAbortController: null,
+            currentPage: 1,
+            pageMarkdowns: [],
+            zoomLevel: 1.0,
+            scrollPositions: {},
+            canvasViewport: null,
+            isSnippingMode: false,
+            pdfArrayBuffer: null,
+        })
+    },
+
     persistToLocalStorage: () => {
-        const { nodes, edges, fileData, highlights, userDetails, currentPage, pageMarkdowns, zoomLevel, scrollPositions } = get()
+        const { nodes, edges, fileData, highlights, userDetails, currentPage, pageMarkdowns, zoomLevel, scrollPositions, canvasViewport } = get()
         // Never persist activeAbortController — it is a transient runtime field
-        const state = { nodes, edges, fileData, highlights, userDetails, currentPage, pageMarkdowns, zoomLevel, scrollPositions }
+        const state = { nodes, edges, fileData, highlights, userDetails, currentPage, pageMarkdowns, zoomLevel, scrollPositions, canvasViewport }
         localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
     },
 

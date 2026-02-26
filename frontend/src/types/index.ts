@@ -97,3 +97,34 @@ export interface QuizQuestionNodeData {
     /** If true, only the question header is shown */
     isMinimized?: boolean
 }
+
+// ─── Multi-canvas / Homepage types ───────────────────────────────────────────
+
+/** Metadata for a single canvas entry stored in manifest.json */
+export interface CanvasMeta {
+    id: string
+    title: string
+    createdAt: string
+    modifiedAt: string
+    pdfFilename?: string
+    pageCount?: number
+    /** ID of the parent folder (null/undefined = root level) */
+    parentFolderId?: string | null
+}
+
+/** Metadata for a folder entry stored in manifest.json */
+export interface FolderMeta {
+    id: string
+    name: string
+    /** ID of the parent folder (null/undefined = root level) */
+    parentFolderId?: string | null
+    createdAt: string
+}
+
+/** Root manifest stored in the local StudyCanvas folder */
+export interface Manifest {
+    version: number
+    user: { name: string }
+    canvases: CanvasMeta[]
+    folders?: FolderMeta[]
+}

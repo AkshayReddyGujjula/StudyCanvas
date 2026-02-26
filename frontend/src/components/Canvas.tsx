@@ -14,6 +14,7 @@ import {
     type Edge,
     type Connection,
     type EdgeChange,
+    type Viewport,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 
@@ -25,6 +26,7 @@ import AskGeminiPopup from './AskGeminiPopup'
 import QuestionModal from './QuestionModal'
 import RevisionModal from './RevisionModal'
 import ToolsModal from './ToolsModal'
+import PdfUploadPopup from './PdfUploadPopup'
 import { useTextSelection } from '../hooks/useTextSelection'
 import { useCanvasStore } from '../store/canvasStore'
 import { extractPageImageBase64 } from '../utils/pdfImageExtractor'
@@ -66,7 +68,7 @@ interface ModalState {
 
 let toastTimeout: ReturnType<typeof setTimeout> | null = null
 
-export default function Canvas({ onReset }: { onReset?: () => void }) {
+export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; onSave?: () => Promise<void> }) {
     const { setCenter, getZoom, fitView, setViewport, getViewport } = useReactFlow()
     const [selection, setSelection] = useState<SelectionState | null>(null)
     const [modal, setModal] = useState<ModalState | null>(null)
@@ -76,6 +78,8 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
     const [revisionSource, setRevisionSource] = useState<{ sourceType: 'struggling' | 'page'; pageIndex: number; pageContent?: string } | null>(null)
     const [isGeneratingFlashcards, setIsGeneratingFlashcards] = useState(false)
     const [showTools, setShowTools] = useState(false)
+    const [showUploadPopup, setShowUploadPopup] = useState(false)
+    const [isSaving, setIsSaving] = useState(false)
     const [toast, setToast] = useState<string | null>(null)
     const [isGeneratingPDF, setIsGeneratingPDF] = useState(false)
     const [isDarkMode, setIsDarkMode] = useState(false)
@@ -92,6 +96,31 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
     const updateNodeData = useCanvasStore((s) => s.updateNodeData)
     const setActiveAbortController = useCanvasStore((s) => s.setActiveAbortController)
     const persistToLocalStorage = useCanvasStore((s) => s.persistToLocalStorage)
+    const canvasViewport = useCanvasStore((s) => s.canvasViewport)
+    const setCanvasViewport = useCanvasStore((s) => s.setCanvasViewport)
+
+    // ── Debounced viewport sync to store (for persistence) ─────────────────
+    const vpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const handleViewportChange = useCallback((vp: Viewport) => {
+        if (vpTimerRef.current) clearTimeout(vpTimerRef.current)
+        vpTimerRef.current = setTimeout(() => {
+            setCanvasViewport({ x: vp.x, y: vp.y, zoom: vp.zoom })
+        }, 300)
+    }, [setCanvasViewport])
+
+    // Flush viewport to store synchronously before any save operation
+    const flushViewport = useCallback(() => {
+        if (vpTimerRef.current) clearTimeout(vpTimerRef.current)
+        const vp = getViewport()
+        setCanvasViewport({ x: vp.x, y: vp.y, zoom: vp.zoom })
+    }, [getViewport, setCanvasViewport])
+
+    // Wrap onSave so viewport is always flushed first
+    const wrappedSave = useCallback(async () => {
+        if (!onSave) return
+        flushViewport()
+        await onSave()
+    }, [onSave, flushViewport])
 
     const onConnect = useCallback((connection: Connection) => {
         const newEdge: Edge = {
@@ -393,6 +422,22 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
             if (e.key === 'F' && tag !== 'INPUT' && tag !== 'TEXTAREA') {
                 fitView({ duration: 400 })
             }
+            // Ctrl+S (no Shift) — save canvas
+            if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 's') {
+                e.preventDefault()
+                if (onSave) {
+                    wrappedSave().then(() => {
+                        setToast('Saved!')
+                        if (toastTimeout) clearTimeout(toastTimeout)
+                        toastTimeout = setTimeout(() => setToast(null), 2500)
+                    }).catch(() => {
+                        setToast('Save failed.')
+                        if (toastTimeout) clearTimeout(toastTimeout)
+                        toastTimeout = setTimeout(() => setToast(null), 3500)
+                    })
+                }
+                return
+            }
             if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 's') {
                 // Always prevent the browser "Save As" dialog.
                 e.preventDefault()
@@ -423,7 +468,7 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
         }
         document.addEventListener('keydown', handleKeyDown)
         return () => document.removeEventListener('keydown', handleKeyDown)
-    }, [fitView])
+    }, [fitView, onSave, wrappedSave])
 
     // Safety net: always remove rf-connecting on mouseup so stale text-selection
     // suppression can't get stuck if onConnectEnd doesn't fire (e.g. drag released
@@ -1008,6 +1053,8 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
                 nodes={visibleNodes}
                 edges={visibleEdges}
                 nodeTypes={NODE_TYPES}
+                defaultViewport={canvasViewport ?? { x: 0, y: 0, zoom: 1 }}
+                onViewportChange={handleViewportChange}
                 onNodesChange={(changes) => {
                     // Apply position/selection changes without overriding our state
                     setNodes((prev) => {
@@ -1139,6 +1186,14 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
                 <ToolsModal onClose={() => setShowTools(false)} />
             )}
 
+            {/* Upload PDF popup */}
+            {showUploadPopup && (
+                <PdfUploadPopup
+                    onClose={() => setShowUploadPopup(false)}
+                    onUploaded={() => { /* popup closes itself; node is already created */ }}
+                />
+            )}
+
             {/* Top Left Menu */}
             <div className="fixed top-4 left-4 z-40">
                 <button
@@ -1154,12 +1209,95 @@ export default function Canvas({ onReset }: { onReset?: () => void }) {
                 </button>
                 {showMenu && (
                     <div className="absolute top-full left-0 mt-2 flex flex-col gap-1 w-48 bg-white border border-gray-200 shadow-lg rounded-lg p-2">
-                        {onReset && (
+                        {onGoHome && onSave && (
                             <button
-                                onClick={() => { setShowMenu(false); onReset(); }}
+                                onClick={async () => {
+                                    setShowMenu(false)
+                                    setIsSaving(true)
+                                    try {
+                                        await wrappedSave()
+                                        setToast('Saved!')
+                                        if (toastTimeout) clearTimeout(toastTimeout)
+                                        toastTimeout = setTimeout(() => { setToast(null); onGoHome() }, 800)
+                                    } catch {
+                                        setToast('Save failed.')
+                                        if (toastTimeout) clearTimeout(toastTimeout)
+                                        toastTimeout = setTimeout(() => setToast(null), 3500)
+                                    } finally {
+                                        setIsSaving(false)
+                                    }
+                                }}
+                                disabled={isSaving}
+                                className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors disabled:opacity-50"
+                            >
+                                <span className="flex items-center gap-1.5">
+                                    {isSaving ? (
+                                        <svg className="animate-spin h-4 w-4 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                                        </svg>
+                                    ) : (
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                                            <polyline points="9 22 9 12 15 12 15 22" />
+                                        </svg>
+                                    )}
+                                    {isSaving ? 'Saving…' : 'Save & Home'}
+                                </span>
+                            </button>
+                        )}
+                        {!fileData && (
+                            <button
+                                onClick={() => { setShowMenu(false); setShowUploadPopup(true); }}
                                 className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors"
                             >
-                                ↩ Upload new PDF
+                                <span className="flex items-center gap-1.5">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                        <polyline points="14 2 14 8 20 8" />
+                                        <line x1="12" y1="18" x2="12" y2="12" />
+                                        <line x1="9" y1="15" x2="15" y2="15" />
+                                    </svg>
+                                    Upload PDF
+                                </span>
+                            </button>
+                        )}
+                        {onSave && (
+                            <button
+                                onClick={async () => {
+                                    setShowMenu(false)
+                                    setIsSaving(true)
+                                    try {
+                                        await wrappedSave()
+                                        setToast('Saved!')
+                                        if (toastTimeout) clearTimeout(toastTimeout)
+                                        toastTimeout = setTimeout(() => setToast(null), 2500)
+                                    } catch {
+                                        setToast('Save failed.')
+                                        if (toastTimeout) clearTimeout(toastTimeout)
+                                        toastTimeout = setTimeout(() => setToast(null), 3500)
+                                    } finally {
+                                        setIsSaving(false)
+                                    }
+                                }}
+                                disabled={isSaving}
+                                className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors disabled:opacity-50"
+                            >
+                                <span className="flex items-center gap-1.5">
+                                    {isSaving ? (
+                                        <svg className="animate-spin h-4 w-4 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                                        </svg>
+                                    ) : (
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                                            <polyline points="17 21 17 13 7 13 7 21" />
+                                            <polyline points="7 3 7 8 15 8" />
+                                        </svg>
+                                    )}
+                                    {isSaving ? 'Saving…' : 'Save'}
+                                </span>
                             </button>
                         )}
                         <button

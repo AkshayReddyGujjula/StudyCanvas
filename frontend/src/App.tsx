@@ -1,91 +1,99 @@
-import { useState, useEffect } from 'react'
-import { ReactFlowProvider } from '@xyflow/react'
+import { useEffect, useState } from 'react'
+import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom'
 import { Analytics } from '@vercel/analytics/react'
 import { SpeedInsights } from '@vercel/speed-insights/react'
-import Canvas from './components/Canvas'
-import UploadPanel from './components/UploadPanel'
-import { useCanvasStore, STORAGE_KEY } from './store/canvasStore'
+import HomePage from './components/HomePage'
+import CanvasPage from './components/CanvasPage'
+import OnboardingModal from './components/OnboardingModal'
+import { useAppStore } from './store/appStore'
 import './index.css'
+
+/** Returns true when the browser supports the APIs StudyCanvas requires. */
+function isBrowserCompatible(): boolean {
+  return 'showDirectoryPicker' in window
+}
+
+function BrowserWarning() {
+  const [dismissed, setDismissed] = useState(false)
+  if (dismissed) return null
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full mx-4 text-center">
+        <div className="w-14 h-14 rounded-full bg-amber-100 flex items-center justify-center mx-auto mb-4">
+          <svg className="w-7 h-7 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+        </div>
+        <h2 className="text-xl font-bold text-gray-900 mb-2">Unsupported Browser</h2>
+        <p className="text-sm text-gray-600 mb-4">
+          StudyCanvas requires the <strong>File System Access API</strong>, which is only available in Chromium-based browsers.
+        </p>
+        <p className="text-sm text-gray-500 mb-6">
+          Please switch to one of the following browsers for the best experience:
+        </p>
+        <div className="flex justify-center gap-6 mb-6">
+          <a href="https://www.google.com/chrome/" target="_blank" rel="noopener noreferrer" className="flex flex-col items-center gap-1.5 text-xs text-gray-600 hover:text-indigo-600 transition-colors">
+            <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center font-bold text-lg">G</div>
+            Google Chrome
+          </a>
+          <a href="https://brave.com/" target="_blank" rel="noopener noreferrer" className="flex flex-col items-center gap-1.5 text-xs text-gray-600 hover:text-indigo-600 transition-colors">
+            <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center font-bold text-lg">B</div>
+            Brave
+          </a>
+          <a href="https://www.microsoft.com/edge" target="_blank" rel="noopener noreferrer" className="flex flex-col items-center gap-1.5 text-xs text-gray-600 hover:text-indigo-600 transition-colors">
+            <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center font-bold text-lg">E</div>
+            Microsoft Edge
+          </a>
+        </div>
+        <button
+          onClick={() => setDismissed(true)}
+          className="px-5 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+        >
+          Continue anyway
+        </button>
+      </div>
+    </div>
+  )
+}
+
+
+function AppGate() {
+  const isOnboarded = useAppStore((s) => s.isOnboarded)
+  const isLoading = useAppStore((s) => s.isLoading)
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-100 to-indigo-50 flex items-center justify-center">
+        <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+      </div>
+    )
+  }
+
+  if (!isOnboarded) {
+    return <OnboardingModal />
+  }
+
+  return <HomePage />
+}
+
+const router = createBrowserRouter([
+  { path: '/', element: <AppGate /> },
+  { path: '/canvas/:canvasId', element: <CanvasPage /> },
+  { path: '*', element: <Navigate to="/" replace /> },
+])
 
 
 export default function App() {
-  const setNodes = useCanvasStore((s) => s.setNodes)
-  const setEdges = useCanvasStore((s) => s.setEdges)
-  const setFileData = useCanvasStore((s) => s.setFileData)
-  const resetCanvas = useCanvasStore((s) => s.resetCanvas)
-  const setUserDetails = useCanvasStore((s) => s.setUserDetails)
-
-  const loadPdfFromStorage = useCanvasStore((s) => s.loadPdfFromStorage)
-
-  // Determine initial state: has canvas or needs upload
-  const [hasCanvas, setHasCanvas] = useState(false)
-  const [initialized, setInitialized] = useState(false)
+  const initialize = useAppStore((s) => s.initialize)
 
   useEffect(() => {
-    // On mount: check localStorage
-    const saved = localStorage.getItem(STORAGE_KEY)
-    if (saved) {
-      try {
-        const state = JSON.parse(saved)
-        if (state.nodes) setNodes(state.nodes)
-        if (state.edges) {
-          // Migrate old edges that used the non-existent 'right-target' handle id.
-          // That handle was never defined on AnswerNode — the correct id is 'right'.
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const migratedEdges = (state.edges as any[]).map((e: any) =>
-            e.targetHandle === 'right-target' ? { ...e, targetHandle: 'right' } : e
-          )
-          setEdges(migratedEdges)
-        }
-        // setFileData resets currentPage to 1 and recalculates pageMarkdowns —
-        // we override currentPage afterwards with the persisted value.
-        if (state.fileData) setFileData(state.fileData)
-        if (state.userDetails) setUserDetails(state.userDetails)
-        // highlights are already in store default [] — restore them
-        // note: activeAbortController is always null on load (transient field)
-        if (state.highlights && state.highlights.length > 0) {
-          // re-hydrate highlights
-          const store = useCanvasStore.getState()
-          state.highlights.forEach((h: { id: string; text: string; nodeId: string }) =>
-            store.addHighlight(h)
-          )
-        }
-        // Restore saved page — must come AFTER setFileData (which resets to page 1)
-        if (typeof state.currentPage === 'number' && state.currentPage > 1) {
-          useCanvasStore.getState().setCurrentPage(state.currentPage)
-        }
-        if (state.nodes && state.nodes.length > 0) {
-          setHasCanvas(true)
-        }
-        // Load the PDF ArrayBuffer from IndexedDB (async, non-blocking)
-        if (state.fileData) {
-          loadPdfFromStorage()
-        }
-      } catch (e) {
-        console.error('Failed to restore canvas from localStorage', e)
-      }
-    }
-    setInitialized(true)
-  }, [setNodes, setEdges, setFileData, setUserDetails, loadPdfFromStorage])
-
-  const handleUploaded = () => setHasCanvas(true)
-
-  const handleReset = () => {
-    resetCanvas()
-    setHasCanvas(false)
-  }
-
-  if (!initialized) return null
+    initialize()
+  }, [initialize])
 
   return (
     <>
-      {hasCanvas ? (
-        <ReactFlowProvider>
-          <Canvas onReset={handleReset} />
-        </ReactFlowProvider>
-      ) : (
-        <UploadPanel onUploaded={handleUploaded} />
-      )}
+      {!isBrowserCompatible() && <BrowserWarning />}
+      <RouterProvider router={router} />
       <Analytics />
       <SpeedInsights />
     </>
