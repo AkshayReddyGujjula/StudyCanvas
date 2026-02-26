@@ -1,5 +1,6 @@
 import axios from 'axios'
 import type { UploadResponse, QuizQuestion, QuizNodeInput, ValidateAnswerResponse } from '../types'
+import { extractPdfPagesText } from '../utils/pdfTextExtractor'
 
 // In production (Vercel) VITE_API_BASE_URL is not set → '' → relative same-origin calls.
 // In local dev it is set via .env.development → 'http://localhost:8000'.
@@ -9,11 +10,31 @@ const api = axios.create({
     baseURL: API_BASE,
 })
 
+/**
+ * Vercel serverless functions reject request bodies larger than ~4.5 MB.
+ * For PDFs under this threshold we POST the raw binary (existing behaviour).
+ * For larger PDFs we extract text client-side with pdf.js and POST the text
+ * as JSON to /api/upload-text, which applies the same server-side cleanup and
+ * returns an identical UploadResponse — no other code needs to change.
+ */
+const VERCEL_PAYLOAD_LIMIT_BYTES = 4 * 1024 * 1024 // 4 MB — safe margin below 4.5 MB cap
+
 export const uploadPdf = async (file: File): Promise<UploadResponse> => {
-    const formData = new FormData()
-    formData.append('file', file)
-    const response = await api.post<UploadResponse>('/api/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+    if (file.size <= VERCEL_PAYLOAD_LIMIT_BYTES) {
+        // Small file — use the standard binary upload (fastest path).
+        const formData = new FormData()
+        formData.append('file', file)
+        const response = await api.post<UploadResponse>('/api/upload', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+        })
+        return response.data
+    }
+
+    // Large file — extract text in the browser to stay under the payload limit.
+    const pages = await extractPdfPagesText(file)
+    const response = await api.post<UploadResponse>('/api/upload-text', {
+        pages,
+        filename: file.name,
     })
     return response.data
 }

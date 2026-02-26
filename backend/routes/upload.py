@@ -1,10 +1,10 @@
 import asyncio
 import logging
+import uuid
 from fastapi import APIRouter, UploadFile, HTTPException, Request
-from fastapi.responses import FileResponse
 from rate_limiter import limiter
 from services import pdf_service, file_service
-from models.schemas import UploadResponse
+from models.schemas import UploadResponse, UploadTextRequest
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -49,7 +49,6 @@ async def upload_pdf(request: Request, file: UploadFile):
     finally:
         file_service.delete_file(tmp_path)
 
-    import uuid
     pdf_id = str(uuid.uuid4())
 
     return UploadResponse(
@@ -57,5 +56,48 @@ async def upload_pdf(request: Request, file: UploadFile):
         raw_text=raw_text,
         filename=file.filename or "upload.pdf",
         page_count=page_count,
+        pdf_id=pdf_id,
+    )
+
+
+@router.post("/upload-text", response_model=UploadResponse)
+@limiter.limit("5/minute; 50/hour; 200/day")
+async def upload_pdf_text(request: Request, body: UploadTextRequest):
+    """
+    Alternative upload path for large PDFs.
+
+    When the raw PDF would exceed Vercel's 4.5 MB serverless payload limit the
+    frontend extracts page text client-side with pdf.js and POSTs the plain text
+    here as JSON instead.  The server applies the same ligature/encoding cleanup
+    and builds the identical markdown structure that /api/upload would return,
+    so all downstream routes (quiz, flashcards, query …) work unchanged.
+    """
+    if not body.pages:
+        raise HTTPException(status_code=400, detail="No page text provided.")
+
+    raw_pages: list[str] = []
+    md_pages: list[str] = []
+
+    for i, page_text in enumerate(body.pages):
+        cleaned = pdf_service._clean(page_text)
+        raw_pages.append(cleaned)
+        md_pages.append(f"## Page {i + 1}\n\n{cleaned.strip()}")
+
+    raw_text = "\n\n".join(raw_pages)
+    markdown_content = "\n\n".join(md_pages)
+
+    if not raw_text.strip():
+        raise HTTPException(
+            status_code=422,
+            detail="empty_text: No extractable text found. This PDF may be image-only or scanned. Please use a text-based PDF."
+        )
+
+    pdf_id = str(uuid.uuid4())
+
+    return UploadResponse(
+        markdown_content=markdown_content,
+        raw_text=raw_text,
+        filename=body.filename,
+        page_count=len(body.pages),
         pdf_id=pdf_id,
     )

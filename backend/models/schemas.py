@@ -22,6 +22,16 @@ class ChatMessage(BaseModel):
     content: str
 
 
+class UploadTextRequest(BaseModel):
+    """
+    Payload for /api/upload-text — used when the client has already extracted
+    text from the PDF locally (e.g. to avoid Vercel's 4.5 MB payload limit).
+    `pages` is a list of raw strings, one per PDF page (0-indexed).
+    """
+    pages: List[str] = Field(..., max_length=2000, description="Extracted text per page")
+    filename: str = Field(..., max_length=255, description="Original file name")
+
+
 class GenerateTitleRequest(BaseModel):
     raw_text: str = Field(..., max_length=500000, description="The raw document text")
 
