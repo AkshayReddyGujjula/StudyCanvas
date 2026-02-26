@@ -569,6 +569,7 @@ export default function PDFViewer({
                 className="overflow-auto bg-gray-100 nopan flex-shrink-0"
                 style={{ height: `${viewerHeightProp ?? fitViewerHeight}px` }}
                 onMouseUp={handleMouseUp}
+                onWheel={(e) => e.stopPropagation()}
             >
                 {/* Inner centering wrapper — must be ≥ scroll-container width.
                   * Uses width:fit-content + margin:0 auto on the page card instead of

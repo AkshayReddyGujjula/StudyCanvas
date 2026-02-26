@@ -84,8 +84,13 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
     // at the current fit-to-width scale. Updated by PDFViewer whenever the
     // container width changes.
     const [autoFitHeight, setAutoFitHeight] = useState<number>(600)
+    // Explicit user-controlled node height (null = auto from autoFitHeight).
+    // Once set via resize drag, the height is locked and won't auto-track width.
+    const [userNodeHeight, setUserNodeHeight] = useState<number | null>(null)
     // Hard minimum width set on PDF load
     const minNodeWidthRef = useRef(550)
+    // Tracks whether the initial PDF size has been set (prevents re-mount resets)
+    const hasInitializedSizeRef = useRef(false)
     // true = full-page (no scroll), false = compact scrollable view
     const [isExpanded, setIsExpanded] = useState(true)
     // 'pdf' = PDF view, 'markdown' = Markdown view
@@ -175,8 +180,13 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
         // fitH = natural page height at the fit scale that just fills newW
         const fitH = Math.round(dimensions.height * (newW - padding) / dimensions.width + padding)
         minNodeWidthRef.current = newW
-        setNodeWidth(newW)
+        // Always update autoFitHeight (serves as default when userNodeHeight is null)
         setAutoFitHeight(fitH)
+        // Only set nodeWidth on first load — preserve user-resized width across mode switches
+        if (!hasInitializedSizeRef.current) {
+            setNodeWidth(newW)
+            hasInitializedSizeRef.current = true
+        }
     }, [])
 
     // Handle page change from PDF viewer - sync with canvas store
@@ -191,21 +201,31 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
     }, [])
 
     // ── Generic resize starter — used by all edge/corner handles ───────────
-    // Only width is user-resizable. Height auto-tracks the PDF's fit-to-width
-    // scale so the viewer always shows exactly one page with no excess space.
+    // Width and height are independently resizable. Edges resize one axis;
+    // corners resize both. Height is locked once the user manually drags.
     const startResize = useCallback((e: React.MouseEvent, mode: 'w' | 'h' | 'wh', cursor?: string) => {
         e.preventDefault()
         e.stopPropagation()
 
-        // Height-only drag does nothing (height is auto)
-        if (mode === 'h') return
-
         const startX = e.clientX
+        const startY = e.clientY
         const startW = nodeWidth
         const minW = minNodeWidthRef.current
+        const minH = 200
+
+        // Read current rendered height from the DOM for an accurate starting point
+        const nodeEl = (e.currentTarget as HTMLElement).closest('[data-nodeid]') as HTMLElement | null
+        const currentRenderedH = nodeEl ? nodeEl.getBoundingClientRect().height : 600
+        const startH = userNodeHeight ?? currentRenderedH
+
+        // Lock height on width-only or corner resize so height doesn't auto-track
+        if (userNodeHeight === null && (mode === 'w' || mode === 'wh')) {
+            setUserNodeHeight(currentRenderedH)
+        }
 
         const cursors: Record<string, string> = {
             w: 'ew-resize',
+            h: 'ns-resize',
             wh: 'nwse-resize',
             'tl': 'nwse-resize',
             'tr': 'nesw-resize',
@@ -219,12 +239,21 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
         const overlay = document.createElement('div')
         const cursorKey = cursor || mode
         overlay.style.cssText =
-            `position:fixed;inset:0;z-index:9999;cursor:${cursors[cursorKey] ?? 'ew-resize'};user-select:none`
+            `position:fixed;inset:0;z-index:9999;cursor:${cursors[cursorKey] ?? 'default'};user-select:none`
         document.body.appendChild(overlay)
 
         const onMove = (mv: MouseEvent) => {
             const dx = mv.clientX - startX
-            setNodeWidth(Math.min(Math.max(startW + dx, minW), 1500))
+            const dy = mv.clientY - startY
+
+            // Width: only for 'w' (right edge) and 'wh' (corners)
+            if (mode === 'w' || mode === 'wh') {
+                setNodeWidth(Math.min(Math.max(startW + dx, minW), 1500))
+            }
+            // Height: only for 'h' (bottom edge) and 'wh' (corners)
+            if (mode === 'h' || mode === 'wh') {
+                setUserNodeHeight(Math.max(startH + dy, minH))
+            }
         }
 
         const onUp = () => {
@@ -235,7 +264,7 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
 
         document.addEventListener('mousemove', onMove)
         document.addEventListener('mouseup', onUp)
-    }, [nodeWidth])
+    }, [nodeWidth, userNodeHeight])
 
     const handleMarkdownClick = useCallback(
         (event: React.MouseEvent) => {
@@ -263,18 +292,24 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
 
     // Calculate the effective height for the node
     // In PDF mode: height auto-tracks the PDF page's fit-to-width size
+    // unless the user has manually resized (userNodeHeight).
     // In text mode: use auto height (content determines height)
     const hasFooter = !!data.onTestMePage
     const headerHeight = 44
     const toolbarHeight = 40
-    const footerHeight = hasFooter ? 44 : 0
+    const footerHeight = hasFooter ? 36 : 0
     const isPdfMode = viewMode === 'pdf' && pdfArrayBuffer
     const effectiveHeight = isPdfMode
-        ? headerHeight + toolbarHeight + autoFitHeight + footerHeight
+        ? (userNodeHeight ?? (headerHeight + toolbarHeight + autoFitHeight + footerHeight))
         : undefined
 
+    // Compute the viewer-area height to pass to PDFViewer
+    const pdfViewerHeight = userNodeHeight
+        ? Math.max(userNodeHeight - headerHeight - toolbarHeight - footerHeight, 100)
+        : autoFitHeight
+
     // Bottom offset for resize handles when footer is present
-    const bottomOffset = hasFooter ? 44 : 0
+    const bottomOffset = hasFooter ? 36 : 0
 
     // Sync visual dimensions to the React Flow node's `style` so the wrapper,
     // minimap rectangle, and hit-test area always match what is rendered.
@@ -320,7 +355,7 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
     return (
         <div
             data-nodeid={id}
-            className="bg-white rounded-lg shadow-lg border border-gray-200 relative"
+            className="bg-white rounded-lg shadow-lg border border-gray-200 relative flex flex-col"
             style={{ width: nodeWidth, height: effectiveHeight, overflow: 'hidden' }}
         >
             {/* Header bar — draggable, no nodrag class */}
@@ -375,7 +410,7 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
             {/* Content - PDF view or Markdown view - hide when loading */}
             {!isLoadingPdf && (
                 viewMode === 'pdf' && pdfArrayBuffer ? (
-                    <div className="nodrag nopan">
+                    <div className="nodrag nopan" onWheel={(e) => e.stopPropagation()}>
                         <PDFViewer
                             pdfData={pdfArrayBuffer}
                             initialPage={currentPage}
@@ -386,7 +421,7 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
                             onPageChange={handlePdfPageChange}
                             onFitHeightChange={(h) => setAutoFitHeight(h)}
                             containerWidth={nodeWidth}
-                            viewerHeight={autoFitHeight}
+                            viewerHeight={pdfViewerHeight}
                             customToolbarMiddle={renderViewModeButtons()}
                         />
                     </div>
@@ -409,14 +444,17 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
                 )
             )}
 
-            {/* "Test me on this page" pill button */}
+            {/* "Test me on this page" pill button — absolutely pinned to bottom so it is never clipped */}
             {data.onTestMePage && (
-                <div className="nodrag px-4 py-2 border-t border-gray-100 flex justify-center bg-gray-50 rounded-b-lg">
+                <div
+                    className="nodrag absolute bottom-0 left-0 right-0 z-10 border-t border-gray-100 flex justify-center items-center bg-gray-50 rounded-b-lg"
+                    style={{ height: footerHeight }}
+                >
                     <button
                         onClick={(e) => { e.stopPropagation(); data.onTestMePage!() }}
-                        className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-violet-600 hover:bg-violet-700 active:bg-violet-800 text-white text-xs font-semibold rounded-full shadow-sm transition-colors select-none"
+                        className="inline-flex items-center gap-1 px-3 py-1 bg-violet-600 hover:bg-violet-700 active:bg-violet-800 text-white text-[11px] font-semibold rounded-full shadow-sm transition-colors select-none"
                     >
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                         </svg>
                         Test me on this page
