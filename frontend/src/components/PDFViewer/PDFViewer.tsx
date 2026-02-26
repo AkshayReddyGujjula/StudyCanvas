@@ -62,7 +62,7 @@ export default function PDFViewer({
     const fitScaleRef = useRef<number>(1.0)
     // Fixed height of the scroll viewport at fit scale. Locked so zooming never
     // resizes the panel. viewerHeightProp overrides this when ContentNode controls height.
-    const [fitViewerHeight, setFitViewerHeight] = useState<number>(600)
+    const [, setFitViewerHeight] = useState<number>(600)
     // Natural (unscaled) PDF page dimensions — needed for accurate zoom-to-center math.
     const pdfNaturalWidthRef = useRef<number>(0)
     const pdfNaturalHeightRef = useRef<number>(0)
@@ -351,25 +351,32 @@ export default function PDFViewer({
 
     // ── Snipping Tool Handlers ───────────────────────────────────────────────
     const handleSnipMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
-        const rect = pageContainerRef.current?.getBoundingClientRect()
-        if (!rect) return
-        setSnipStart({
-            x: e.clientX - rect.left,
-            y: e.clientY - rect.top
-        })
-        setSnipCurrent({
-            x: e.clientX - rect.left,
-            y: Math.max(0, e.clientY - rect.top) // constrain to page
-        })
+        const el = pageContainerRef.current
+        if (!el) return
+        const rect = el.getBoundingClientRect()
+        // Convert screen-pixel offset to the element's LOCAL coordinate space.
+        // getBoundingClientRect() returns visual (post-CSS-transform) dimensions,
+        // but CSS left/top positioning uses the untransformed local space.
+        // When this component is inside a React Flow node with viewport zoom,
+        // the two spaces differ by the effective scale factor.
+        const scaleX = rect.width > 0 ? el.offsetWidth / rect.width : 1
+        const scaleY = rect.height > 0 ? el.offsetHeight / rect.height : 1
+        const localX = (e.clientX - rect.left) * scaleX
+        const localY = (e.clientY - rect.top) * scaleY
+        setSnipStart({ x: localX, y: localY })
+        setSnipCurrent({ x: localX, y: Math.max(0, localY) })
     }
 
     const handleSnipMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
         if (!snipStart) return
-        const rect = pageContainerRef.current?.getBoundingClientRect()
-        if (!rect) return
+        const el = pageContainerRef.current
+        if (!el) return
+        const rect = el.getBoundingClientRect()
+        const scaleX = rect.width > 0 ? el.offsetWidth / rect.width : 1
+        const scaleY = rect.height > 0 ? el.offsetHeight / rect.height : 1
         setSnipCurrent({
-            x: e.clientX - rect.left,
-            y: Math.max(0, e.clientY - rect.top) // constrain to page
+            x: (e.clientX - rect.left) * scaleX,
+            y: Math.max(0, (e.clientY - rect.top) * scaleY)
         })
     }
 
@@ -437,11 +444,15 @@ export default function PDFViewer({
                 setIsSnippingMode(false)
 
                 const pgRect = pageContainerRef.current?.getBoundingClientRect()
+                const el = pageContainerRef.current
+                // Convert local coordinates back to screen coordinates for the popup
+                const toScreenX = (el && el.offsetWidth > 0 && pgRect) ? pgRect.width / el.offsetWidth : 1
+                const toScreenY = (el && el.offsetHeight > 0 && pgRect) ? pgRect.height / el.offsetHeight : 1
                 const domRect = new DOMRect(
-                    (pgRect?.left ?? 0) + x,
-                    (pgRect?.top ?? 0) + y,
-                    width,
-                    height
+                    (pgRect?.left ?? 0) + x * toScreenX,
+                    (pgRect?.top ?? 0) + y * toScreenY,
+                    width * toScreenX,
+                    height * toScreenY
                 )
 
                 onTextSelection?.(data.text.trim(), domRect, { x: clientX, y: clientY }, true)

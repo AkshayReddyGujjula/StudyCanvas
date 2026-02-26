@@ -178,11 +178,46 @@ The app will be available at `http://localhost:5173`.
 
 ---
 
+## Deploying to Vercel
+
+The project is pre-configured for one-click Vercel deployment. The frontend (React/Vite) is built as static files and the backend (FastAPI) runs as a Python serverless function.
+
+### 1. Import the repository
+
+1. Go to [vercel.com/new](https://vercel.com/new) and import the GitHub repository.
+2. Vercel will auto-detect the `vercel.json` configuration — no framework preset changes needed.
+
+### 2. Set environment variables
+
+In the Vercel project dashboard navigate to **Settings → Environment Variables** and add:
+
+| Variable | Value | Notes |
+|---|---|---|
+| `GEMINI_API_KEY` | Your Google Gemini API key | **Required** — the backend will not work without it |
+| `ALLOWED_ORIGINS` | Your production URL (e.g. `https://your-app.vercel.app`) | Optional — defaults to `http://localhost:5173`. The CORS regex already allows `*.vercel.app` subdomains, but setting this explicitly is recommended for custom domains. |
+
+### 3. Deploy
+
+Click **Deploy**. Vercel will:
+- Install frontend dependencies and build the React app (`cd frontend && npm install && npm run build`)
+- Bundle the Python serverless function from `api/index.py` with `requirements.txt`
+- Route `/api/*` requests to the serverless function and everything else to the SPA
+
+### Architecture notes
+
+- **PDF extraction** uses `pypdf` (pure Python) on Vercel. The higher-quality `pymupdf4llm` library exceeds the 250 MB serverless bundle limit, so it is excluded from `requirements.txt`. Install it locally for development if desired.
+- **Large PDF uploads** (> 4 MB) are handled client-side: the frontend extracts text via `pdf.js` and POSTs it as JSON to `/api/upload-text`, staying under Vercel's 4.5 MB body limit.
+- **Streaming AI responses** work via FastAPI's `StreamingResponse` over the ASGI protocol.
+- **Rate limiting** uses `slowapi` with in-memory storage. On serverless, rate state resets per cold start — this still provides basic flood protection per container lifetime.
+
+---
+
 ## Environment Variables
 
 | Variable | Location | Description |
 |---|---|---|
-| `GEMINI_API_KEY` | `backend/.env` | Your Google Gemini API key (required) |
+| `GEMINI_API_KEY` | `backend/.env` (local) · Vercel dashboard (production) | Your Google Gemini API key (required) |
+| `ALLOWED_ORIGINS` | Vercel dashboard (production only) | Comma-separated allowed CORS origins (optional) |
 
 ---
 

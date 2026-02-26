@@ -13,6 +13,9 @@ pypdf>=5.0.0
 # pdf_service.py detects its presence at runtime and uses it automatically.
 
 # AI / LLM
+# NOTE: google-generativeai is deprecated in favour of google-genai.
+# The deprecated package still works but will not receive updates.
+# Migration guide: https://github.com/google-gemini/deprecated-generative-ai-python
 google-generativeai>=0.8.4
 
 # FastAPI file-upload support

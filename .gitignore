@@ -98,6 +98,9 @@ $RECYCLE.BIN/
 .project
 .classpath
 
+# ─── Planning & Documentation (dev-only) ──────────────────────────────────────
+plans/
+
 # ─── Build Outputs & Vercel ───────────────────────────────────────────────────
 *.tsbuildinfo
 frontend/dist/

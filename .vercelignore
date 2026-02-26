@@ -25,6 +25,8 @@ __pycache__/
 .git/
 .gitignore
 .vscode/
+.env
+backend/.env
 
 # Local node_modules (Vercel runs npm install during build)
 node_modules/
@@ -33,3 +35,4 @@ frontend/node_modules/
 # Documentation & planning (not needed for build or runtime)
 plans/
 LICENSE
+README.md
