@@ -3,7 +3,6 @@
   "outputDirectory": "frontend/dist",
   "functions": {
     "api/index.py": {
-      "runtime": "python3.12",
       "maxDuration": 60,
       "memory": 1024,
       "excludeFiles": "{frontend/**,node_modules/**,**/venv/**,**/.venv/**,**/__pycache__/**,**/*.pyc,**/.git/**,**/.vercel/**,plans/**,README.md,LICENSE}"
