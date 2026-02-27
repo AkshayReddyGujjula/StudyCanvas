@@ -79,6 +79,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
     const [isGeneratingFlashcards, setIsGeneratingFlashcards] = useState(false)
     const [showTools, setShowTools] = useState(false)
     const [showUploadPopup, setShowUploadPopup] = useState(false)
+    const [showUploadHint, setShowUploadHint] = useState(true)
     const [isSaving, setIsSaving] = useState(false)
     const [toast, setToast] = useState<string | null>(null)
     const [isGeneratingPDF, setIsGeneratingPDF] = useState(false)
@@ -98,6 +99,11 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
     const persistToLocalStorage = useCanvasStore((s) => s.persistToLocalStorage)
     const canvasViewport = useCanvasStore((s) => s.canvasViewport)
     const setCanvasViewport = useCanvasStore((s) => s.setCanvasViewport)
+
+    // Auto-dismiss the upload hint once a PDF is loaded
+    useEffect(() => {
+        if (fileData) setShowUploadHint(false)
+    }, [fileData])
 
     // ── Debounced viewport sync to store (for persistence) ─────────────────
     const vpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1459,6 +1465,35 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                         className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                     >
                         Forward →
+                    </button>
+                </div>
+            )}
+
+            {/* Upload hint pill — shown on fresh canvases with no PDF */}
+            {!fileData && showUploadHint && (
+                <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 pl-4 pr-2 py-2 bg-white border border-indigo-200 shadow-lg rounded-full text-sm text-gray-700 select-none">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-indigo-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                        <polyline points="14 2 14 8 20 8" />
+                        <line x1="12" y1="18" x2="12" y2="12" />
+                        <line x1="9" y1="15" x2="15" y2="15" />
+                    </svg>
+                    <span className="text-gray-600">Upload a PDF to get started</span>
+                    <button
+                        onClick={() => { setShowUploadHint(false); setShowUploadPopup(true) }}
+                        className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium rounded-full transition-colors"
+                    >
+                        Upload PDF
+                    </button>
+                    <button
+                        onClick={() => setShowUploadHint(false)}
+                        className="p-1 rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+                        title="Dismiss"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18" />
+                            <line x1="6" y1="6" x2="18" y2="18" />
+                        </svg>
                     </button>
                 </div>
             )}
