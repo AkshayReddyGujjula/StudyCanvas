@@ -36,16 +36,12 @@ async def upload_pdf(request: Request, file: UploadFile):
     try:
         # Run CPU-bound extraction in a thread pool so the event loop stays
         # free to handle other requests while processing.
-        try:
-            raw_text, markdown_content, page_count, new_pdf_path = await asyncio.to_thread(
-                pdf_service.extract_text_and_markdown, tmp_path
-            )
-            
-            if new_pdf_path:
-                file_service.delete_file(new_pdf_path)
-                
-        except ValueError as e:
-            raise
+        raw_text, markdown_content, page_count, new_pdf_path = await asyncio.to_thread(
+            pdf_service.extract_text_and_markdown, tmp_path
+        )
+        
+        if new_pdf_path:
+            file_service.delete_file(new_pdf_path)
     finally:
         file_service.delete_file(tmp_path)
 
@@ -86,12 +82,6 @@ async def upload_pdf_text(request: Request, body: UploadTextRequest):
 
     raw_text = "\n\n".join(raw_pages)
     markdown_content = "\n\n".join(md_pages)
-
-    if not raw_text.strip():
-        raise HTTPException(
-            status_code=422,
-            detail="empty_text: No extractable text found. This PDF may be image-only or scanned. Please use a text-based PDF."
-        )
 
     pdf_id = str(uuid.uuid4())
 

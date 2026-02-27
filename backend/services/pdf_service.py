@@ -134,8 +134,6 @@ def _extract_with_pymupdf(file_path: str) -> tuple[str, str, int, str|None]:
     doc.close()
 
     raw_text = "\n\n".join(raw_pages)
-    if not raw_text.strip():
-        raise ValueError("empty_text")
 
     # Get per-page structured Markdown using pymupdf4llm.
     # page_chunks=True returns a list of dicts, one per page.
@@ -168,9 +166,6 @@ def _extract_with_pypdf(file_path: str) -> tuple[str, str, int, str|None]:
 
     raw_text = "\n\n".join(raw_pages)
     markdown_content = "\n\n".join(md_pages)
-
-    if not raw_text.strip():
-        raise ValueError("empty_text")
 
     return raw_text, markdown_content, page_count, None
 
