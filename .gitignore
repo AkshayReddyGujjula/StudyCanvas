@@ -42,7 +42,8 @@ venv/
 env/
 ENV/
 .venv/
-.python-version
+# NOTE: .python-version is intentionally tracked (Vercel reads it to pin Python 3.12)
+# Do NOT add .python-version back here.
 
 # ─── Testing & Coverage ───────────────────────────────────────────────────────
 .pytest_cache/

@@ -1,6 +1,6 @@
 # ─── Vercel CLI upload exclusions ─────────────────────────────────────────────
-# These patterns only apply when deploying via `vercel` CLI.
-# Git-integration deployments ignore this file entirely.
+# These patterns apply when deploying via `vercel` CLI.
+# Git-integration deployments use .gitignore instead.
 #
 # IMPORTANT: Do NOT exclude any frontend source / config files here — they are
 # required by the buildCommand ("cd frontend && npm install && npm run build").
