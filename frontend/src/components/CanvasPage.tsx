@@ -90,7 +90,7 @@ export default function CanvasPage() {
                     const dataUrl = await toPng(target, {
                         quality: 0.85,
                         pixelRatio: 0.5,  // Half native pixel ratio for reasonable file size
-                        backgroundColor: '#f1f5f9',  // slate-100 background
+                        backgroundColor: '#ffffff',  // keep canvas thumbnail background white
                         filter: (node) => {
                             // Exclude minimap, controls, and panels from thumbnail
                             const el = node as HTMLElement

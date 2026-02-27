@@ -515,7 +515,7 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
                     position={Position.Right}
                     id={`right-${i}`}
                     style={{
-                        background: '#6366f1',
+                        background: '#1E3A5F',
                         width: 8,
                         height: 8,
                         border: '2px solid white',
@@ -531,7 +531,7 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
                     position={Position.Left}
                     id={`left-${i}`}
                     style={{
-                        background: '#6366f1',
+                        background: '#1E3A5F',
                         width: 8,
                         height: 8,
                         border: '2px solid white',
@@ -587,8 +587,8 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
                     top: 0,
                     left: 0,
                     cursor: 'nwse-resize',
-                    borderTop: '3px solid #6366f1',
-                    borderLeft: '3px solid #6366f1',
+                    borderTop: '3px solid #1E3A5F',
+                    borderLeft: '3px solid #1E3A5F',
                     borderTopLeftRadius: 4,
                 }}
                 onMouseDown={(e) => startResize(e, 'wh', 'tl')}
@@ -602,8 +602,8 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
                     top: 0,
                     right: 0,
                     cursor: 'nesw-resize',
-                    borderTop: '3px solid #6366f1',
-                    borderRight: '3px solid #6366f1',
+                    borderTop: '3px solid #1E3A5F',
+                    borderRight: '3px solid #1E3A5F',
                     borderTopRightRadius: 4,
                 }}
                 onMouseDown={(e) => startResize(e, 'wh', 'tr')}
@@ -617,8 +617,8 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
                     bottom: 0,
                     left: 0,
                     cursor: 'nesw-resize',
-                    borderBottom: '3px solid #6366f1',
-                    borderLeft: '3px solid #6366f1',
+                    borderBottom: '3px solid #1E3A5F',
+                    borderLeft: '3px solid #1E3A5F',
                     borderBottomLeftRadius: 4,
                 }}
                 onMouseDown={(e) => startResize(e, 'wh', 'bl')}
@@ -632,8 +632,8 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
                     bottom: 0,
                     right: 0,
                     cursor: 'nwse-resize',
-                    borderBottom: '3px solid #6366f1',
-                    borderRight: '3px solid #6366f1',
+                    borderBottom: '3px solid #1E3A5F',
+                    borderRight: '3px solid #1E3A5F',
                     borderBottomRightRadius: 4,
                 }}
                 onMouseDown={(e) => startResize(e, 'wh', 'br')}

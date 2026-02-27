@@ -89,19 +89,19 @@ export default function FolderCard({ folder, onOpen, onDragStart, onDropItem }: 
                 onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragOver(false); onDropItem(e) }}
                 className={`group relative bg-white rounded-xl border shadow-sm hover:shadow-md transition-all cursor-pointer ${
                     isDragOver
-                        ? 'border-indigo-400 bg-indigo-50 ring-2 ring-indigo-200'
+                        ? 'border-primary-400 bg-primary-50 ring-2 ring-primary-200'
                         : 'border-gray-200'
                 }`}
                 onDoubleClick={() => !isRenaming && onOpen()}
                 onClick={() => !isRenaming && onOpen()}
             >
                 {/* Folder icon area */}
-                <div className="h-36 bg-amber-50 flex items-center justify-center rounded-t-xl">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-16 w-16 text-amber-400" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="0.5" strokeLinecap="round" strokeLinejoin="round">
+                <div className="h-36 bg-primary-50 flex items-center justify-center rounded-t-xl">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-16 w-16 text-primary-400" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="0.5" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
                     </svg>
                     {folderItemCount > 0 && (
-                        <span className="absolute top-3 right-3 bg-amber-100 text-amber-700 text-xs font-medium px-2 py-0.5 rounded-full">
+                        <span className="absolute top-3 right-3 bg-primary-100 text-primary-700 text-xs font-medium px-2 py-0.5 rounded-full">
                             {folderItemCount} item{folderItemCount !== 1 ? 's' : ''}
                         </span>
                     )}

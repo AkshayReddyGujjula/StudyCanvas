@@ -20,10 +20,10 @@ const customSchema: SanitizeOptions = {
 }
 
 const STATUS_BORDER_CLASSES: Record<string, string> = {
-    loading: 'border-gray-400 animate-pulse',
-    unread: 'border-blue-500',
-    understood: 'border-green-500',
-    struggling: 'border-red-500',
+    loading: 'border-neutral-400 animate-pulse',
+    unread: 'border-secondary-500',   // Soft Teal - default for Answer Nodes
+    understood: 'border-success-500', // Sage Green
+    struggling: 'border-accent-500',  // Warm Coral
 }
 
 type AnswerNodeProps = NodeProps & { data: AnswerNodeData }
@@ -52,7 +52,14 @@ export default function AnswerNode({ id, data }: AnswerNodeProps) {
         persistToLocalStorage()
     }, [confirmDelete, id, setNodes, setEdges, removeHighlight, persistToLocalStorage])
 
-    const borderClass = STATUS_BORDER_CLASSES[data.status] || 'border-blue-500'
+    const borderClass = STATUS_BORDER_CLASSES[data.status] || 'border-secondary-500'
+
+    // Header background changes based on status
+    const headerBgStyle = data.status === 'struggling' 
+        ? { backgroundColor: '#FCEEEE' }  // Light red/coral
+        : data.status === 'understood' 
+            ? { backgroundColor: '#E8F5EC' }  // Light green
+            : { backgroundColor: '#F3F4F6' }  // Light gray
 
     const handleStatusClick = (clickedStatus: 'understood' | 'struggling') => {
         const newStatus = data.status === clickedStatus ? 'unread' : clickedStatus
@@ -142,7 +149,7 @@ export default function AnswerNode({ id, data }: AnswerNodeProps) {
             style={{ width: 360, minHeight: data.isMinimized ? 'auto' : 160 }}
         >
             {/* Top Action Bar */}
-            <div className="px-2 py-1.5 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
+            <div className="px-2 py-1.5 border-b border-gray-100 flex items-center justify-between" style={headerBgStyle}>
                 <div className="flex gap-1.5">
                     <button
                         onClick={() => handleStatusClick('understood')}
@@ -158,8 +165,8 @@ export default function AnswerNode({ id, data }: AnswerNodeProps) {
                         onClick={() => handleStatusClick('struggling')}
                         title="Struggling"
                         className={`p-1 rounded-full transition-all border ${data.status === 'struggling'
-                            ? 'bg-red-500 text-white border-red-500 shadow-sm'
-                            : 'bg-white text-gray-500 border-gray-200 hover:border-red-300 hover:text-red-600'
+                            ? 'bg-accent-500 text-white border-accent-500 shadow-sm'
+                            : 'bg-white text-gray-500 border-gray-200 hover:border-accent-300 hover:text-accent-600'
                             }`}
                     >
                         <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
@@ -173,11 +180,11 @@ export default function AnswerNode({ id, data }: AnswerNodeProps) {
                             className="flex items-center gap-1"
                             onMouseLeave={() => setConfirmDelete(false)}
                         >
-                            <span className="text-[10px] text-red-600 font-semibold whitespace-nowrap">Delete?</span>
+                            <span className="text-[10px] text-accent-600 font-semibold whitespace-nowrap">Delete?</span>
                             <button
                                 title="Confirm delete"
                                 onClick={handleDeleteClick}
-                                className="p-1 text-white bg-red-500 hover:bg-red-600 rounded-md transition-colors"
+                                className="p-1 text-white bg-accent-500 hover:bg-accent-600 rounded-md transition-colors"
                             >
                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -237,8 +244,8 @@ export default function AnswerNode({ id, data }: AnswerNodeProps) {
                             persistToLocalStorage()
                         }}
                         className={`p-1 rounded-md transition-colors ${data.isPinned
-                                ? 'text-indigo-600 bg-indigo-50 hover:bg-indigo-100'
-                                : 'text-gray-400 hover:text-indigo-500 hover:bg-indigo-50'
+                                ? 'text-primary-600 bg-primary-50 hover:bg-primary-100'
+                                : 'text-gray-400 hover:text-primary-500 hover:bg-primary-50'
                             }`}
                     >
                         <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill={data.isPinned ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
@@ -291,8 +298,8 @@ export default function AnswerNode({ id, data }: AnswerNodeProps) {
 
                         {/* Chat History / Follow ups */}
                         {data.chatHistory && data.chatHistory.map((msg, idx) => (
-                            <div key={idx} className={`space-y-1 ${msg.role === 'user' ? 'bg-blue-50/50 -mx-3 px-3 py-2 border-y border-blue-100' : ''}`}>
-                                {msg.role === 'user' && <p className="text-[10px] font-bold text-blue-600 uppercase tracking-wider">Follow-up</p>}
+                            <div key={idx} className={`space-y-1 ${msg.role === 'user' ? 'bg-secondary-50/50 -mx-3 px-3 py-2 border-y border-secondary-100' : ''}`}>
+                                {msg.role === 'user' && <p className="text-[10px] font-bold text-secondary-600 uppercase tracking-wider">Follow-up</p>}
                                 <div className={`text-sm ${msg.role === 'user' ? 'text-blue-900 font-medium' : 'text-gray-700 prose prose-sm max-w-none'}`}>
                                     {msg.role === 'user' ? msg.content : (
                                         <ReactMarkdown
@@ -321,7 +328,7 @@ export default function AnswerNode({ id, data }: AnswerNodeProps) {
                         onChange={(e) => setFollowUp(e.target.value)}
                         placeholder="Ask follow up..."
                         disabled={isFollowUpLoading}
-                        className="flex-1 bg-white border border-gray-200 rounded-md px-3 py-1.5 text-xs focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all disabled:opacity-50"
+                        className="flex-1 bg-white border border-gray-200 rounded-md px-3 py-1.5 text-xs focus:ring-1 focus:ring-secondary-500 focus:border-secondary-500 outline-none transition-all disabled:opacity-50"
                     />
                     <button
                         type="submit"
@@ -339,11 +346,11 @@ export default function AnswerNode({ id, data }: AnswerNodeProps) {
                 </form>
             )}
 
-            {/* Handles */}
-            <Handle type="source" position={Position.Top} id="top" className="!w-3 !h-3 !bg-indigo-500 !border-2 !border-white hover:!scale-125 !transition-transform" />
-            <Handle type="source" position={Position.Bottom} id="bottom" className="!w-3 !h-3 !bg-indigo-500 !border-2 !border-white hover:!scale-125 !transition-transform" />
-            <Handle type="source" position={Position.Left} id="left" className="!w-3 !h-3 !bg-indigo-500 !border-2 !border-white hover:!scale-125 !transition-transform" />
-            <Handle type="source" position={Position.Right} id="right" className="!w-3 !h-3 !bg-indigo-500 !border-2 !border-white hover:!scale-125 !transition-transform" />
+            {/* Handles - Soft Teal for Answer Nodes */}
+            <Handle type="source" position={Position.Top} id="top" className="!w-3 !h-3 !bg-secondary-500 !border-2 !border-white hover:!scale-125 !transition-transform" />
+            <Handle type="source" position={Position.Bottom} id="bottom" className="!w-3 !h-3 !bg-secondary-500 !border-2 !border-white hover:!scale-125 !transition-transform" />
+            <Handle type="source" position={Position.Left} id="left" className="!w-3 !h-3 !bg-secondary-500 !border-2 !border-white hover:!scale-125 !transition-transform" />
+            <Handle type="source" position={Position.Right} id="right" className="!w-3 !h-3 !bg-secondary-500 !border-2 !border-white hover:!scale-125 !transition-transform" />
         </div>
     )
 }

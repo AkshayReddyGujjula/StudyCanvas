@@ -16,21 +16,22 @@ import type { ChatMessage, QuizQuestionNodeData } from '../types'
 Font.registerHyphenationCallback((w) => [w])
 
 // ─── Palette ────────────────────────────────────────────────────────────────
+// Aligned with Tailwind config - StudyCanvas Minimalist Palette
 const C = {
-    text: '#1e293b',
-    muted: '#64748b',
-    accent: '#4f46e5',
-    teal: '#0f766e',
-    blue: '#0369a1',
-    childAccent: '#7c3aed',
-    quoteText: '#374151',
-    quoteBg: '#f1f5f9',
-    quoteBorder: '#94a3b8',
-    divider: '#e2e8f0',
+    text: '#1E3A5F',        // primary-500 (Deep Navy)
+    muted: '#6B7280',       // neutral-400 (Slate)
+    accent: '#1E3A5F',      // primary-500
+    teal: '#2D9CDB',        // secondary-500 (Soft Teal)
+    blue: '#2D9CDB',        // secondary-500
+    childAccent: '#2D9CDB', // secondary-500
+    quoteText: '#1E3A5F',   // primary-500
+    quoteBg: '#E8EEF4',     // primary-50
+    quoteBorder: '#A3BBD3', // primary-200
+    divider: '#D1D5DB',     // gray-200
     white: '#ffffff',
-    coverBg: '#f8fafc',
-    tagBg: '#ede9fe',
-    tagText: '#5b21b6',
+    coverBg: '#E8EEF4',     // primary-50
+    tagBg: '#E6F4FA',       // secondary-50
+    tagText: '#1E3A5F',     // primary-500
 }
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
@@ -92,9 +93,11 @@ const s = StyleSheet.create({
     },
     coverTitle: {
         fontFamily: 'Helvetica-Bold',
-        fontSize: 32,
+        fontSize: 28,
+        fontWeight: 'bold' as const,
         color: C.accent,
-        marginBottom: 16,
+        paddingVertical: 8,
+        lineHeight: 1.4,
     },
     coverSubtitle: {
         fontSize: 14,
@@ -209,7 +212,7 @@ const s = StyleSheet.create({
         marginTop: 8,
         marginLeft: 24,
         borderLeftWidth: 2,
-        borderLeftColor: '#bfdbfe',
+        borderLeftColor: '#A3BBD3',
         paddingLeft: 10,
     },
     followUpHeader: {
@@ -248,7 +251,7 @@ const s = StyleSheet.create({
     followUpALabel: {
         fontSize: 9,
         fontFamily: 'Helvetica-Bold',
-        color: '#0f766e',
+        color: C.teal,
         minWidth: 20,
     },
     followUpABody: {
@@ -260,11 +263,11 @@ const s = StyleSheet.create({
         marginTop: 10,
         marginLeft: 20,
         borderLeftWidth: 2,
-        borderLeftColor: '#ddd6fe',
+        borderLeftColor: '#A3BBD3',
         paddingLeft: 12,
         paddingTop: 8,
         paddingBottom: 4,
-        backgroundColor: '#faf5ff',
+        backgroundColor: '#E8EEF4',
         borderRadius: 4,
     },
     childLabel: {
@@ -314,17 +317,17 @@ const s = StyleSheet.create({
     quizSectionHeader: {
         fontFamily: 'Helvetica-Bold',
         fontSize: 13,
-        color: '#6d28d9',
+        color: C.accent,
         marginBottom: 10,
         marginTop: 16,
         paddingBottom: 6,
         borderBottomWidth: 1.5,
-        borderBottomColor: '#ddd6fe',
+        borderBottomColor: '#A3BBD3',
     },
     quizPageHeader: {
         fontFamily: 'Helvetica-Bold',
         fontSize: 10,
-        color: '#7c3aed',
+        color: C.accent,
         marginBottom: 6,
         marginTop: 10,
         letterSpacing: 0.6,
@@ -343,7 +346,7 @@ const s = StyleSheet.create({
     quizQLabel: {
         fontSize: 10,
         fontFamily: 'Helvetica-Bold',
-        color: '#7c3aed',
+        color: C.accent,
         minWidth: 22,
     },
     quizQText: {
@@ -356,9 +359,9 @@ const s = StyleSheet.create({
     quizAnswerBlock: {
         marginLeft: 22,
         marginBottom: 4,
-        backgroundColor: '#f5f3ff',
+        backgroundColor: '#E8EEF4',
         borderLeftWidth: 3,
-        borderLeftColor: '#8b5cf6',
+        borderLeftColor: C.teal,
         paddingHorizontal: 8,
         paddingVertical: 5,
         borderRadius: 3,
@@ -366,7 +369,7 @@ const s = StyleSheet.create({
     quizAnswerLabel: {
         fontSize: 7.5,
         fontFamily: 'Helvetica-Bold',
-        color: '#7c3aed',
+        color: C.accent,
         letterSpacing: 0.5,
         textTransform: 'uppercase' as const,
         marginBottom: 3,
@@ -379,9 +382,9 @@ const s = StyleSheet.create({
     quizFeedbackBlock: {
         marginLeft: 22,
         marginBottom: 4,
-        backgroundColor: '#fffbeb',
+        backgroundColor: '#E8EEF4',
         borderLeftWidth: 3,
-        borderLeftColor: '#f59e0b',
+        borderLeftColor: C.teal,
         paddingHorizontal: 8,
         paddingVertical: 5,
         borderRadius: 3,
@@ -389,9 +392,9 @@ const s = StyleSheet.create({
     quizFeedbackBlockCorrect: {
         marginLeft: 22,
         marginBottom: 4,
-        backgroundColor: '#f0fdf4',
+        backgroundColor: '#E8F5EC',
         borderLeftWidth: 3,
-        borderLeftColor: '#22c55e',
+        borderLeftColor: '#27AE60',
         paddingHorizontal: 8,
         paddingVertical: 5,
         borderRadius: 3,
@@ -399,9 +402,9 @@ const s = StyleSheet.create({
     quizFeedbackBlockIncorrect: {
         marginLeft: 22,
         marginBottom: 4,
-        backgroundColor: '#fef2f2',
+        backgroundColor: '#FCEEEE',
         borderLeftWidth: 3,
-        borderLeftColor: '#ef4444',
+        borderLeftColor: '#EB5757',
         paddingHorizontal: 8,
         paddingVertical: 5,
         borderRadius: 3,
@@ -409,7 +412,7 @@ const s = StyleSheet.create({
     quizFeedbackLabel: {
         fontSize: 7.5,
         fontFamily: 'Helvetica-Bold',
-        color: '#d97706',
+        color: C.accent,
         letterSpacing: 0.5,
         textTransform: 'uppercase' as const,
         marginBottom: 3,
@@ -417,7 +420,7 @@ const s = StyleSheet.create({
     quizFeedbackLabelCorrect: {
         fontSize: 7.5,
         fontFamily: 'Helvetica-Bold',
-        color: '#16a34a',
+        color: '#27AE60',
         letterSpacing: 0.5,
         textTransform: 'uppercase' as const,
         marginBottom: 3,
@@ -425,7 +428,7 @@ const s = StyleSheet.create({
     quizFeedbackLabelIncorrect: {
         fontSize: 7.5,
         fontFamily: 'Helvetica-Bold',
-        color: '#dc2626',
+        color: '#EB5757',
         letterSpacing: 0.5,
         textTransform: 'uppercase' as const,
         marginBottom: 3,
@@ -579,7 +582,7 @@ function MarkdownBody({
         }
         if (inCodeBlock) {
             elements.push(
-                <Text key={idx} style={[small ? s.smallPara : s.para, { fontFamily: 'Courier', color: '#374151' }]}>
+                <Text key={idx} style={[small ? s.smallPara : s.para, { fontFamily: 'Courier', color: C.text }]}>
                     {'  ' + line}
                 </Text>
             )

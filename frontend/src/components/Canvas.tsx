@@ -44,12 +44,12 @@ const NODE_TYPES = {
     flashcardNode: FlashcardNode,
 }
 
-const STATUS_COLORS: Record<string, string> = {
-    loading: '#9ca3af',
-    unread: '#3b82f6',
-    understood: '#22c55e',
-    struggling: '#ef4444',
-}
+// StudyCanvas Minimalist Colour Palette
+// Primary - Deep Navy: #1E3A5F (Content Nodes)
+// Secondary - Soft Teal: #2D9CDB (Answer Nodes)  
+// Accent - Warm Coral: #EB5757 (Quiz/Struggling status)
+// Success - Sage Green: #27AE60 (Understood status)
+// Neutral - Slate: #6B7280 (Loading/Default)
 
 interface SelectionState {
     selectedText: string
@@ -137,7 +137,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
             target: connection.target ?? '',
             type: 'smoothstep',
             animated: false,
-            style: { stroke: '#6366f1', strokeWidth: 2 },
+            style: { stroke: '#1E3A5F', strokeWidth: 2 },
         }
 
         // Use a timeout to ensure React Flow finishes its internal connection state cleanup 
@@ -283,7 +283,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                     targetHandle: 'top',
                     type: 'smoothstep',
                     animated: false,
-                    style: { stroke: '#7c3aed', strokeWidth: 2 },
+                    style: { stroke: '#2D9CDB', strokeWidth: 2 },
                 }
             }
             return {
@@ -294,7 +294,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 targetHandle: 'left',
                 type: 'smoothstep',
                 animated: false,
-                style: { stroke: '#7c3aed', strokeWidth: 2 },
+                style: { stroke: '#2D9CDB', strokeWidth: 2 },
             }
         })
 
@@ -406,11 +406,37 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
         [pageMarkdowns, contentNodeId, updateNodeData, setCurrentPage, persistToLocalStorage]
     )
 
-    // MiniMap node color function
+    // MiniMap node color function - STATUS COLOURING (green for understood, red for struggling)
+    // ContentNode: Deep Navy (#1E3A5F)
+    // AnswerNode: Soft Teal (#2D9CDB)
+    // QuizQuestionNode: Soft Teal (#2D9CDB) - neutral default
+    // FlashcardNode: Soft Teal (#2D9CDB) - neutral default
+    // Status: Understood = Green (#27AE60), Struggling = Red (#EB5757)
     const nodeColor = useCallback((node: Node) => {
-        if (node.type === 'contentNode') return '#6366f1'
-        const status = (node.data as unknown as AnswerNodeData)?.status
-        return STATUS_COLORS[status] ?? '#3b82f6'
+        const nodeType = node.type;
+        const status = (node.data as unknown as AnswerNodeData)?.status;
+        
+        // Priority 1: Status colours (green for understood, red for struggling)
+        if (status === 'understood') {
+            return '#27AE60'; // Sage Green - correct/understood
+        }
+        if (status === 'struggling') {
+            return '#EB5757'; // Warm Coral - incorrect/struggling
+        }
+        
+        // Priority 2: Node type colours (neutral default)
+        switch (nodeType) {
+            case 'contentNode':
+                return '#1E3A5F'; // Deep Navy
+            case 'answerNode':
+                return '#2D9CDB'; // Soft Teal
+            case 'quizQuestionNode':
+                return '#2D9CDB'; // Soft Teal - neutral
+            case 'flashcardNode':
+                return '#2D9CDB'; // Soft Teal - neutral
+            default:
+                return '#6B7280'; // Neutral Slate
+        }
     }, [])
 
     // Dismiss popup on mousedown outside
@@ -625,7 +651,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 targetHandle,
                 type: 'smoothstep',
                 animated: true,
-                style: { strokeDasharray: '5,5', stroke: '#6366f1', strokeWidth: 2 },
+                style: { strokeDasharray: '5,5', stroke: '#1E3A5F', strokeWidth: 2 },
             }
 
             setNodes((prev) => [...prev, newNode])
@@ -694,7 +720,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                             ? {
                                 ...e,
                                 animated: false,
-                                style: { stroke: '#6366f1', strokeWidth: 2 },
+                                style: { stroke: '#1E3A5F', strokeWidth: 2 },
                             }
                             : e
                     )
@@ -985,7 +1011,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 targetHandle: 'left',
                 type: 'smoothstep',
                 animated: true,
-                style: { stroke: '#0d9488', strokeWidth: 2 },
+                style: { stroke: '#2D9CDB', strokeWidth: 2 },
             }))
 
         setNodes((prev) => [...prev, ...flashcardNodes])
@@ -1143,7 +1169,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 onConnectEnd={() => document.body.classList.remove('rf-connecting')}
                 connectionMode={ConnectionMode.Loose}
                 connectionLineType={ConnectionLineType.SmoothStep}
-                connectionLineStyle={{ stroke: '#6366f1', strokeWidth: 2 }}
+                connectionLineStyle={{ stroke: '#1E3A5F', strokeWidth: 2 }}
                 fitView={false}
                 zoomOnScroll={false}
                 panOnScroll={false}
@@ -1417,7 +1443,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                                 Current Page
                             </span>
                         </button>
-                        <div style={{ height: 1, backgroundColor: '#e5e7eb', margin: '4px 6px' }} />
+                        <div className="h-px bg-gray-200 mx-1.5" />
                         <button
                             onClick={handleDownloadPDF}
                             disabled={!nodes.some((n) => n.type === 'answerNode' || n.type === 'quizQuestionNode') || isGeneratingPDF}

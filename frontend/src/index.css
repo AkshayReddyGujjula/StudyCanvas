@@ -2,6 +2,14 @@
 @tailwind components;
 @tailwind utilities;
 
+/* StudyCanvas Minimalist Colour Palette
+   Primary - Deep Navy: #1E3A5F (Content Nodes)
+   Secondary - Soft Teal: #2D9CDB (Answer Nodes)
+   Accent - Warm Coral: #EB5757 (Quiz/Struggling)
+   Success - Sage Green: #27AE60 (Understood/Flashcards)
+   Neutral - Slate: #6B7280 (Text/Icons)
+*/
+
 * {
   box-sizing: border-box;
 }
@@ -266,3 +274,4 @@ body.rf-connecting .react-flow__node .nodrag * {
 .dark-mode .fixed .absolute button:hover {
   background-color: #2d2d2d !important;
 }
+

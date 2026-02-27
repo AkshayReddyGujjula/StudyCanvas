@@ -19,8 +19,8 @@ function BrowserWarning() {
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm">
       <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full mx-4 text-center">
-        <div className="w-14 h-14 rounded-full bg-amber-100 flex items-center justify-center mx-auto mb-4">
-          <svg className="w-7 h-7 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div className="w-14 h-14 rounded-full bg-accent-50 flex items-center justify-center mx-auto mb-4">
+          <svg className="w-7 h-7 text-accent-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
           </svg>
         </div>
@@ -32,15 +32,15 @@ function BrowserWarning() {
           Please switch to one of the following browsers for the best experience:
         </p>
         <div className="flex justify-center gap-6 mb-6">
-          <a href="https://www.google.com/chrome/" target="_blank" rel="noopener noreferrer" className="flex flex-col items-center gap-1.5 text-xs text-gray-600 hover:text-indigo-600 transition-colors">
+          <a href="https://www.google.com/chrome/" target="_blank" rel="noopener noreferrer" className="flex flex-col items-center gap-1.5 text-xs text-gray-600 hover:text-primary-600 transition-colors">
             <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center font-bold text-lg">G</div>
             Google Chrome
           </a>
-          <a href="https://brave.com/" target="_blank" rel="noopener noreferrer" className="flex flex-col items-center gap-1.5 text-xs text-gray-600 hover:text-indigo-600 transition-colors">
+          <a href="https://brave.com/" target="_blank" rel="noopener noreferrer" className="flex flex-col items-center gap-1.5 text-xs text-gray-600 hover:text-primary-600 transition-colors">
             <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center font-bold text-lg">B</div>
             Brave
           </a>
-          <a href="https://www.microsoft.com/edge" target="_blank" rel="noopener noreferrer" className="flex flex-col items-center gap-1.5 text-xs text-gray-600 hover:text-indigo-600 transition-colors">
+          <a href="https://www.microsoft.com/edge" target="_blank" rel="noopener noreferrer" className="flex flex-col items-center gap-1.5 text-xs text-gray-600 hover:text-primary-600 transition-colors">
             <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center font-bold text-lg">E</div>
             Microsoft Edge
           </a>
@@ -63,8 +63,8 @@ function AppGate() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-100 to-indigo-50 flex items-center justify-center">
-        <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+      <div className="min-h-screen bg-gradient-to-br from-primary-50 to-secondary-50 flex items-center justify-center">
+        <div className="w-10 h-10 border-4 border-primary-500 border-t-transparent rounded-full animate-spin" />
       </div>
     )
   }

@@ -156,9 +156,16 @@ export default function QuizQuestionNode({ id, data }: QuizQuestionNodeProps) {
 
     const fs = feedbackStyles[verdict ?? 'fallback']
 
-    const borderClass = data.status === 'understood' ? 'border-green-500'
-        : data.status === 'struggling' ? 'border-red-500'
-            : 'border-violet-500'
+    const borderClass = data.status === 'understood' ? 'border-success-500'
+        : data.status === 'struggling' ? 'border-accent-500'
+            : 'border-secondary-500'
+
+    // Header background changes based on status
+    const headerBgStyle = data.status === 'struggling' 
+        ? { backgroundColor: '#FCEEEE' }  // Light red/coral
+        : data.status === 'understood' 
+            ? { backgroundColor: '#E8F5EC' }  // Light green
+            : { backgroundColor: '#E6F4FA' }  // Light secondary/teal
 
     return (
         <div
@@ -166,13 +173,13 @@ export default function QuizQuestionNode({ id, data }: QuizQuestionNodeProps) {
             className={`bg-white rounded-xl shadow-lg border-t-4 ${borderClass} border border-gray-200 flex flex-col`}
             style={{ width: 360, ...(data.isMinimized ? {} : { height: 420 }) }}
         >
-            {/* Header — violet top bar */}
-            <div className="flex-shrink-0 px-3 py-2 bg-violet-50 border-b border-violet-100 flex items-center rounded-t-xl">
+            {/* Header — dynamic background based on status */}
+            <div className="flex-shrink-0 px-3 py-2 border-b border-secondary-100 flex items-center rounded-t-xl" style={headerBgStyle}>
                 <div className="flex items-center gap-2">
-                    <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-violet-600 text-white text-[10px] font-bold flex-shrink-0">
+                    <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-secondary-600 text-white text-[10px] font-bold flex-shrink-0">
                         {data.questionNumber}
                     </span>
-                    <span className="text-[10px] font-bold text-violet-700 uppercase tracking-wider">
+                    <span className="text-[10px] font-bold text-secondary-700 uppercase tracking-wider">
                         Page Quiz
                     </span>
                 </div>
@@ -185,8 +192,8 @@ export default function QuizQuestionNode({ id, data }: QuizQuestionNodeProps) {
                         onClick={() => handleStatusClick('understood')}
                         title="Got it"
                         className={`p-1 rounded-full transition-all border ${data.status === 'understood'
-                                ? 'bg-green-500 text-white border-green-500 shadow-sm'
-                                : 'bg-white text-gray-500 border-gray-200 hover:border-green-300 hover:text-green-600'
+                                ? 'bg-success-500 text-white border-success-500 shadow-sm'
+                                : 'bg-white text-neutral-500 border-gray-200 hover:border-success-300 hover:text-success-600'
                             }`}
                     >
                         <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
@@ -195,8 +202,8 @@ export default function QuizQuestionNode({ id, data }: QuizQuestionNodeProps) {
                         onClick={() => handleStatusClick('struggling')}
                         title="Struggling"
                         className={`p-1 rounded-full transition-all border ${data.status === 'struggling'
-                                ? 'bg-red-500 text-white border-red-500 shadow-sm'
-                                : 'bg-white text-gray-500 border-gray-200 hover:border-red-300 hover:text-red-600'
+                                ? 'bg-accent-500 text-white border-accent-500 shadow-sm'
+                                : 'bg-white text-neutral-500 border-gray-200 hover:border-accent-300 hover:text-accent-600'
                             }`}
                     >
                         <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
@@ -207,11 +214,11 @@ export default function QuizQuestionNode({ id, data }: QuizQuestionNodeProps) {
                     {/* Delete — two-step confirm */}
                     {confirmDelete ? (
                         <div className="flex items-center gap-1" onMouseLeave={() => setConfirmDelete(false)}>
-                            <span className="text-[10px] text-red-600 font-semibold whitespace-nowrap">Delete?</span>
+                            <span className="text-[10px] text-accent-600 font-semibold whitespace-nowrap">Delete?</span>
                             <button
                                 title="Confirm delete"
                                 onClick={handleDelete}
-                                className="p-1 text-white bg-red-500 hover:bg-red-600 rounded-md transition-colors"
+                                className="p-1 text-white bg-accent-500 hover:bg-accent-600 rounded-md transition-colors"
                             >
                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -231,7 +238,7 @@ export default function QuizQuestionNode({ id, data }: QuizQuestionNodeProps) {
                         <button
                             title="Delete node"
                             onClick={handleDelete}
-                            className="p-1 text-gray-400 hover:text-red-500 rounded-md hover:bg-red-50 transition-colors"
+                            className="p-1 text-gray-400 hover:text-accent-500 rounded-md hover:bg-accent-50 transition-colors"
                         >
                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -261,8 +268,8 @@ export default function QuizQuestionNode({ id, data }: QuizQuestionNodeProps) {
                         title={data.isPinned ? 'Unpin from all pages' : 'Pin to all pages'}
                         onClick={handlePin}
                         className={`p-1 rounded-md transition-colors ${data.isPinned
-                                ? 'text-indigo-600 bg-indigo-50 hover:bg-indigo-100'
-                                : 'text-gray-400 hover:text-indigo-500 hover:bg-indigo-50'
+                                ? 'text-primary-600 bg-primary-50 hover:bg-primary-100'
+                                : 'text-gray-400 hover:text-primary-500 hover:bg-primary-50'
                             }`}
                     >
                         <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill={data.isPinned ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
@@ -349,7 +356,7 @@ export default function QuizQuestionNode({ id, data }: QuizQuestionNodeProps) {
                             {data.chatHistory && data.chatHistory.length > 0 && (
                                 <div className="space-y-2 nodrag nopan">
                                     {data.chatHistory.map((msg, idx) => (
-                                        <div key={idx} className={`${msg.role === 'user' ? 'bg-blue-50/60 border-y border-blue-100 -mx-3 px-3 py-2' : ''}`}>
+                                        <div key={idx} className={`${msg.role === 'user' ? 'bg-secondary-50/60 border-y border-secondary-100 -mx-3 px-3 py-2' : ''}`}>
                                             {msg.role === 'user' && (
                                                 <p className="text-[10px] font-bold text-blue-600 uppercase tracking-wider mb-0.5">Follow-up</p>
                                             )}
@@ -403,10 +410,10 @@ export default function QuizQuestionNode({ id, data }: QuizQuestionNodeProps) {
             )}
 
             {/* Handles */}
-            <Handle type="source" position={Position.Top} id="top" className="!w-3 !h-3 !bg-violet-500 !border-2 !border-white hover:!scale-125 !transition-transform" />
-            <Handle type="source" position={Position.Bottom} id="bottom" className="!w-3 !h-3 !bg-violet-500 !border-2 !border-white hover:!scale-125 !transition-transform" />
-            <Handle type="source" position={Position.Left} id="left" className="!w-3 !h-3 !bg-violet-500 !border-2 !border-white hover:!scale-125 !transition-transform" />
-            <Handle type="source" position={Position.Right} id="right" className="!w-3 !h-3 !bg-violet-500 !border-2 !border-white hover:!scale-125 !transition-transform" />
+            <Handle type="source" position={Position.Top} id="top" className="!w-3 !h-3 !bg-secondary-500 !border-2 !border-white hover:!scale-125 !transition-transform" />
+            <Handle type="source" position={Position.Bottom} id="bottom" className="!w-3 !h-3 !bg-secondary-500 !border-2 !border-white hover:!scale-125 !transition-transform" />
+            <Handle type="source" position={Position.Left} id="left" className="!w-3 !h-3 !bg-secondary-500 !border-2 !border-white hover:!scale-125 !transition-transform" />
+            <Handle type="source" position={Position.Right} id="right" className="!w-3 !h-3 !bg-secondary-500 !border-2 !border-white hover:!scale-125 !transition-transform" />
         </div>
     )
 }
