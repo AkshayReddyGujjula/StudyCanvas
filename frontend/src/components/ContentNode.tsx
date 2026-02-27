@@ -32,6 +32,8 @@ interface ExtendedContentNodeData extends ContentNodeData {
         viewMode?: 'pdf' | 'markdown'
         isExpanded?: boolean
         zoomScale?: number
+        isLocked?: boolean
+        renderDpr?: number
     }
 }
 
@@ -110,6 +112,11 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
     const [viewMode, setViewMode] = useState<'pdf' | 'markdown'>(savedState?.viewMode ?? 'markdown')
     // Persisted zoom scale from previous session (passed to PDFViewer as initial)
     const savedZoomScaleRef = useRef<number | undefined>(savedState?.zoomScale)
+    // Lock state — prevents node dragging and resizing
+    const [isLocked, setIsLocked] = useState(savedState?.isLocked ?? false)
+    // Render DPR (resolution quality) for PDF
+    const [renderDpr, setRenderDpr] = useState<number | undefined>(savedState?.renderDpr)
+    const currentRenderDprRef = useRef<number | undefined>(savedState?.renderDpr)
     // PDF data buffer — sourced from the Zustand store (backed by IndexedDB)
     const pdfArrayBuffer = useCanvasStore((s) => s.pdfArrayBuffer)
     const loadPdfFromStorage = useCanvasStore((s) => s.loadPdfFromStorage)
@@ -220,9 +227,18 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
         currentZoomRef.current = newScale
     }, [])
 
+    const handleRenderDprChange = useCallback((dpr: number) => {
+        currentRenderDprRef.current = dpr
+        setRenderDpr(dpr)
+    }, [])
+
+    const handleLockToggle = useCallback(() => {
+        setIsLocked((v) => !v)
+    }, [])
+
     // ── Persist PDF viewer state to node data (debounced) ───────────────────
-    // This writes nodeWidth, userNodeHeight, viewMode, isExpanded, and zoom scale
-    // into the node's data so it's saved with state.json.
+    // This writes nodeWidth, userNodeHeight, viewMode, isExpanded, zoom scale,
+    // lock state, and render DPR into the node's data so it's saved with state.json.
     const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     useEffect(() => {
         if (persistTimerRef.current) clearTimeout(persistTimerRef.current)
@@ -234,13 +250,15 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
                     viewMode,
                     isExpanded,
                     zoomScale: currentZoomRef.current,
+                    isLocked,
+                    renderDpr: currentRenderDprRef.current,
                 },
             })
         }, 500) // debounce 500ms
         return () => {
             if (persistTimerRef.current) clearTimeout(persistTimerRef.current)
         }
-    }, [nodeWidth, userNodeHeight, viewMode, isExpanded, id, updateNodeData])
+    }, [nodeWidth, userNodeHeight, viewMode, isExpanded, isLocked, renderDpr, id, updateNodeData])
 
     // ── Generic resize starter — used by all edge/corner handles ───────────
     // Width and height are independently resizable. Edges resize one axis;
@@ -397,14 +415,20 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
     return (
         <div
             data-nodeid={id}
-            className="bg-white rounded-lg shadow-lg border border-gray-200 relative flex flex-col"
+            className={`bg-white rounded-lg shadow-lg border relative flex flex-col ${isLocked ? 'nodrag nopan border-indigo-300 border-dashed' : 'border-gray-200'}`}
             style={{ width: nodeWidth, height: effectiveHeight, overflow: 'hidden' }}
         >
-            {/* Header bar — draggable, no nodrag class */}
-            <div className="flex items-center gap-2 px-4 py-3 bg-indigo-600 rounded-t-lg cursor-grab">
-                <svg className="w-4 h-4 text-white flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                    <path d="M9 12l-3-3m0 0l3-3m-3 3h12M3 6v12" />
-                </svg>
+            {/* Header bar — draggable when unlocked */}
+            <div className={`flex items-center gap-2 px-4 py-3 bg-indigo-600 rounded-t-lg ${isLocked ? 'cursor-default' : 'cursor-grab'}`}>
+                {isLocked ? (
+                    <svg className="w-4 h-4 text-white/70 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                    </svg>
+                ) : (
+                    <svg className="w-4 h-4 text-white flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M9 12l-3-3m0 0l3-3m-3 3h12M3 6v12" />
+                    </svg>
+                )}
                 <span className="text-white font-medium text-sm truncate flex-1">
                     {data.filename} — {data.page_count} page{data.page_count !== 1 ? 's' : ''}
                 </span>
@@ -468,6 +492,10 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
                             containerWidth={nodeWidth}
                             viewerHeight={pdfViewerHeight}
                             customToolbarMiddle={renderViewModeButtons()}
+                            isLocked={isLocked}
+                            onLockToggle={handleLockToggle}
+                            initialRenderDpr={renderDpr}
+                            onRenderDprChange={handleRenderDprChange}
                         />
                     </div>
                 ) : (
@@ -553,6 +581,7 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
               * win when the user clicks exactly on the corner.
               */}
 
+            {!isLocked && (<>
             {/* Right edge — width only (exclude corners, below header) */}
             <div
                 className="nodrag nopan absolute right-0 z-20"
@@ -639,6 +668,7 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
                 onMouseDown={(e) => startResize(e, 'wh', 'br')}
                 title="Drag to resize"
             />
+            </>)}
         </div>
     )
 }

@@ -126,6 +126,10 @@ export interface DrawingStroke {
     tool: 'pen1' | 'pen2' | 'highlighter'
     pageIndex: number
     timestamp: number
+    /** If set, points are node-relative (offset from node's top-left in flow coords) */
+    nodeId?: string
+    /** The node position when the stroke was created (fallback if node is deleted) */
+    nodeOffset?: { x: number; y: number }
 }
 
 export interface PenSettings {

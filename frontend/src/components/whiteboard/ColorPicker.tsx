@@ -12,6 +12,9 @@ export default function ColorPicker({ currentColor, onColorChange }: ColorPicker
     const removeSavedColor = useCanvasStore((s) => s.removeSavedColor)
     const [showCustom, setShowCustom] = useState(false)
     const inputRef = useRef<HTMLInputElement>(null)
+    const [isDragging, setIsDragging] = useState(false)
+    const [dragOverBin, setDragOverBin] = useState(false)
+    const dragColorRef = useRef<string | null>(null)
 
     // When native color picker opens and selects, auto-apply
     useEffect(() => {
@@ -31,29 +34,91 @@ export default function ColorPicker({ currentColor, onColorChange }: ColorPicker
         removeSavedColor(color)
     }
 
+    // ── Drag-to-bin handlers ────────────────────────────────────────────────
+    const handleDragStart = (e: React.DragEvent, color: string) => {
+        if (color.toLowerCase() === '#000000') {
+            e.preventDefault()
+            return
+        }
+        dragColorRef.current = color
+        setIsDragging(true)
+        e.dataTransfer.setData('text/plain', color)
+        e.dataTransfer.effectAllowed = 'move'
+    }
+
+    const handleDragEnd = () => {
+        setIsDragging(false)
+        setDragOverBin(false)
+        dragColorRef.current = null
+    }
+
+    const handleBinDragOver = (e: React.DragEvent) => {
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'move'
+        setDragOverBin(true)
+    }
+
+    const handleBinDragLeave = () => {
+        setDragOverBin(false)
+    }
+
+    const handleBinDrop = (e: React.DragEvent) => {
+        e.preventDefault()
+        const color = e.dataTransfer.getData('text/plain') || dragColorRef.current
+        if (color && color.toLowerCase() !== '#000000') {
+            removeSavedColor(color)
+        }
+        setDragOverBin(false)
+        setIsDragging(false)
+        dragColorRef.current = null
+    }
+
     return (
         <div className="flex flex-col gap-2">
-            {/* Saved color swatches */}
-            <div className="grid grid-cols-4 gap-1.5">
-                {savedColors.map((color) => (
-                    <button
-                        key={color}
-                        onClick={() => onColorChange(color)}
-                        onContextMenu={(e) => handleContextMenu(e, color)}
-                        className={`group relative w-6 h-6 rounded-full border-2 transition-transform hover:scale-110 ${
-                            color === currentColor ? 'border-blue-500 scale-110 ring-2 ring-blue-300' : 'border-gray-300'
-                        }`}
-                        style={{ backgroundColor: color }}
-                        title={color.toLowerCase() === '#000000' ? color : `${color} (right-click to remove)`}
+            {/* Saved color swatches + bin */}
+            <div className="grid grid-cols-5 gap-1.5">
+                {savedColors.map((color) => {
+                    const isBlack = color.toLowerCase() === '#000000'
+                    return (
+                        <button
+                            key={color}
+                            draggable={!isBlack}
+                            onClick={() => onColorChange(color)}
+                            onContextMenu={(e) => handleContextMenu(e, color)}
+                            onDragStart={(e) => handleDragStart(e, color)}
+                            onDragEnd={handleDragEnd}
+                            className={`relative w-6 h-6 rounded-full border-2 transition-all hover:scale-110 ${
+                                color === currentColor ? 'border-blue-500 scale-110 ring-2 ring-blue-300' : 'border-gray-300'
+                            } ${!isBlack ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                            style={{ backgroundColor: color }}
+                            title={isBlack ? color : `${color} — drag to bin to remove`}
+                        />
+                    )
+                })}
+
+                {/* Bin icon — always visible at end of swatch grid */}
+                <div
+                    onDragOver={handleBinDragOver}
+                    onDragLeave={handleBinDragLeave}
+                    onDrop={handleBinDrop}
+                    className={`flex items-center justify-center w-6 h-6 rounded-full border-2 border-dashed transition-all ${
+                        dragOverBin
+                            ? 'border-red-400 bg-red-50 scale-125'
+                            : isDragging
+                              ? 'border-red-300 bg-red-50/50 animate-pulse'
+                              : 'border-gray-300 bg-gray-50'
+                    }`}
+                    title="Drag a colour here to remove it"
+                >
+                    <svg
+                        className={`w-3 h-3 transition-colors ${dragOverBin ? 'text-red-500' : isDragging ? 'text-red-400' : 'text-gray-400'}`}
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
                     >
-                        {/* Delete indicator on hover (not for black) */}
-                        {color.toLowerCase() !== '#000000' && (
-                            <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 text-white rounded-full text-[8px] leading-3 font-bold hidden group-hover:flex items-center justify-center pointer-events-none">
-                                ×
-                            </span>
-                        )}
-                    </button>
-                ))}
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                </div>
             </div>
 
             {/* Add / Custom color row */}

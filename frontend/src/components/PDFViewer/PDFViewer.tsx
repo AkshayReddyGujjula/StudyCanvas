@@ -29,6 +29,14 @@ export interface PDFViewerProps {
     autoAsk?: boolean
     /** Rendered in the middle of the toolbar */
     customToolbarMiddle?: React.ReactNode
+    /** Whether the PDF viewer node is locked (no move/resize) */
+    isLocked?: boolean
+    /** Toggle lock state */
+    onLockToggle?: () => void
+    /** Initial render DPR (resolution quality) */
+    initialRenderDpr?: number
+    /** Called when render DPR changes */
+    onRenderDprChange?: (dpr: number) => void
 }
 
 export default function PDFViewer({
@@ -43,6 +51,10 @@ export default function PDFViewer({
     className = '',
     containerWidth: initialContainerWidth,
     customToolbarMiddle,
+    isLocked = false,
+    onLockToggle,
+    initialRenderDpr,
+    onRenderDprChange,
 }: PDFViewerProps) {
     const outerRef = useRef<HTMLDivElement>(null)       // scroll container
     const pageContainerRef = useRef<HTMLDivElement>(null) // white page card
@@ -67,6 +79,15 @@ export default function PDFViewer({
     const pdfNaturalWidthRef = useRef<number>(0)
     const pdfNaturalHeightRef = useRef<number>(0)
     const [containerWidth, setContainerWidth] = useState<number | undefined>(initialContainerWidth)
+
+    // ── Resolution quality (DPR) ─────────────────────────────────────────────
+    const nativeDpr = typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1
+    const minDpr = Math.max(Math.round(nativeDpr * 5) / 10, 1) // half native, min 1, rounded to 0.5
+    const maxDpr = 6
+    const defaultDpr = initialRenderDpr ?? Math.max(nativeDpr, 4)
+    const [renderDpr, setRenderDpr] = useState<number>(Math.min(Math.max(defaultDpr, minDpr), maxDpr))
+    const onRenderDprChangeRef = useRef(onRenderDprChange)
+    useEffect(() => { onRenderDprChangeRef.current = onRenderDprChange }, [onRenderDprChange])
 
     // Keep refs so load/resize effects can read latest values without being
     // re-triggered by every prop update (especially initialContainerWidth which
@@ -187,8 +208,8 @@ export default function PDFViewer({
                 pageCard!.style.width = `${viewport.width}px`
                 pageCard!.style.height = `${viewport.height}px`
 
-                // Canvas — HiDPI with minimum 4x resolution for sharp text
-                const dpr = Math.max(window.devicePixelRatio || 1, 4)
+                // Canvas — HiDPI with user-controlled resolution quality
+                const dpr = renderDpr
                 canvas!.width = Math.floor(viewport.width * dpr)
                 canvas!.height = Math.floor(viewport.height * dpr)
                 canvas!.style.width = `${viewport.width}px`
@@ -236,7 +257,7 @@ export default function PDFViewer({
 
         renderCurrentPage()
         return () => { cancelled = true }
-    }, [pdfDoc, currentPage, scale])
+    }, [pdfDoc, currentPage, scale, renderDpr])
 
     // ── Recalculate fit scale AND fit viewer height when container width changes ─
     // The viewer height must track the aspect-ratio-correct page height at the
@@ -507,9 +528,9 @@ export default function PDFViewer({
         <div className={`flex flex-col ${className}`}>
             {/* ── Toolbar ── */}
             <div className="flex items-center justify-between px-3 py-2 bg-gray-50 border-b border-gray-200 flex-shrink-0 gap-2 relative">
-                {/* Zoom */}
-                <div className="flex items-center gap-1.5 flex-1">
-                    <span className="text-xs text-gray-500">Zoom:</span>
+                {/* Zoom + Quality */}
+                <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                    <span className="text-xs text-gray-500 flex-shrink-0">Zoom:</span>
                     <input
                         type="range"
                         min="25"
@@ -521,9 +542,9 @@ export default function PDFViewer({
                             setScale(newScale)
                             onZoomChangeRef.current?.(newScale)
                         }}
-                        className="w-20 h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                        className="w-16 h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer flex-shrink-0"
                     />
-                    <span className="text-xs text-gray-500 min-w-[36px]">
+                    <span className="text-xs text-gray-500 min-w-[36px] flex-shrink-0">
                         {scale !== null ? Math.round(scale * 100) : 100}%
                     </span>
                     <button
@@ -535,9 +556,56 @@ export default function PDFViewer({
                             setScale(fitScaleRef.current)
                             onZoomChangeRef.current?.(fitScaleRef.current)
                         }}
-                        className="text-xs text-indigo-500 hover:text-indigo-700 px-1 leading-none"
+                        className="text-xs text-indigo-500 hover:text-indigo-700 px-1 leading-none flex-shrink-0"
                         title="Reset zoom to fit width"
                     >↺</button>
+
+                    {/* Separator */}
+                    <div className="w-px h-4 bg-gray-300 flex-shrink-0" />
+
+                    {/* Resolution / Quality slider */}
+                    <span className="text-xs text-gray-500 flex-shrink-0">Quality:</span>
+                    <input
+                        type="range"
+                        min={minDpr * 10}
+                        max={maxDpr * 10}
+                        step={5}
+                        value={Math.round(renderDpr * 10)}
+                        onChange={(e) => {
+                            const newDpr = parseInt(e.target.value, 10) / 10
+                            setRenderDpr(newDpr)
+                            onRenderDprChangeRef.current?.(newDpr)
+                        }}
+                        className="w-14 h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer flex-shrink-0"
+                        title={`Render quality: ${renderDpr}x DPR (${minDpr}x min – ${maxDpr}x max)`}
+                    />
+                    <span className="text-xs text-gray-500 min-w-[24px] flex-shrink-0">
+                        {renderDpr.toFixed(1)}x
+                    </span>
+
+                    {/* Separator */}
+                    <div className="w-px h-4 bg-gray-300 flex-shrink-0" />
+
+                    {/* Lock toggle */}
+                    <button
+                        onClick={onLockToggle}
+                        className={`p-1 rounded transition-colors flex-shrink-0 ${
+                            isLocked
+                                ? 'bg-indigo-100 text-indigo-600'
+                                : 'text-gray-500 hover:bg-gray-200 hover:text-gray-700'
+                        }`}
+                        title={isLocked ? 'Unlock viewer (allow move & resize)' : 'Lock viewer (prevent move & resize)'}
+                    >
+                        {isLocked ? (
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                            </svg>
+                        ) : (
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
+                            </svg>
+                        )}
+                    </button>
                 </div>
 
                 {/* Custom Toolbar Middle */}

@@ -345,6 +345,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
     areaEraseAt: (flowX, flowY, radius, pageIndex) => {
         const r2 = radius * radius
         const strokes = get().drawingStrokes
+        const nodes = get().nodes
         const newStrokes: DrawingStroke[] = []
         const removedStrokes: DrawingStroke[] = []
         let changed = false
@@ -355,13 +356,22 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
                 continue
             }
 
+            // For node-attached strokes, resolve the node offset so we compare
+            // in global flow coordinates.
+            let ox = 0, oy = 0
+            if (stroke.nodeId) {
+                const node = nodes.find((n) => n.id === stroke.nodeId)
+                if (node) { ox = node.position.x; oy = node.position.y }
+                else if (stroke.nodeOffset) { ox = stroke.nodeOffset.x; oy = stroke.nodeOffset.y }
+            }
+
             // Split this stroke: collect segments of points that are OUTSIDE the eraser radius
             const segments: StrokePoint[][] = []
             let currentSeg: StrokePoint[] = []
 
             for (const p of stroke.points) {
-                const dx = p.x - flowX
-                const dy = p.y - flowY
+                const dx = (p.x + ox) - flowX
+                const dy = (p.y + oy) - flowY
                 if (dx * dx + dy * dy <= r2) {
                     // Point is inside eraser — break the segment
                     if (currentSeg.length >= 2) {
