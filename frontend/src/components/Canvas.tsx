@@ -129,17 +129,23 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
     }, [onSave, flushViewport])
 
     const onConnect = useCallback((connection: Connection) => {
+        const newEdgeId = `user-edge-${Date.now()}`
         const newEdge: Edge = {
             ...connection,
-            id: `user-edge-${Date.now()}`,
+            id: newEdgeId,
             source: connection.source ?? '',
             target: connection.target ?? '',
             type: 'smoothstep',
             animated: false,
             style: { stroke: '#6366f1', strokeWidth: 2 },
         }
-        setEdges((prev) => [...prev.filter((e) => e.id !== newEdge.id), newEdge])
-        persistToLocalStorage()
+
+        // Use a timeout to ensure React Flow finishes its internal connection state cleanup 
+        // before we trigger a re-render by updating the edges in our store.
+        setTimeout(() => {
+            setEdges((prev) => [...prev.filter((e) => e.id !== newEdgeId), newEdge])
+            persistToLocalStorage()
+        }, 0)
     }, [setEdges, persistToLocalStorage])
 
     const currentPage = useCanvasStore((s) => s.currentPage)
@@ -1146,6 +1152,11 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 edgesFocusable
                 deleteKeyCode="Backspace"
                 onNodeDragStop={handleNodeDragStop}
+                onEdgeDoubleClick={(evt, edge) => {
+                    evt.stopPropagation()
+                    setEdges((prev) => prev.filter((e) => e.id !== edge.id))
+                    persistToLocalStorage()
+                }}
             >
                 <Background variant={BackgroundVariant.Dots} />
                 <Controls position="bottom-left">

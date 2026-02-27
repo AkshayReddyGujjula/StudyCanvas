@@ -92,23 +92,23 @@ export default function FlashcardNode({ id, data }: FlashcardNodeProps) {
                         </span>
                         <button
                             onClick={() => handleStatusClick('understood')}
-                            className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold transition-all border ${
-                                data.status === 'understood'
+                            title="Got it"
+                            className={`p-1 rounded-full transition-all border ${data.status === 'understood'
                                     ? 'bg-green-500 text-white border-green-500 shadow-sm'
                                     : 'bg-white text-gray-500 border-gray-200 hover:border-green-300 hover:text-green-600'
-                            }`}
+                                }`}
                         >
-                            got it
+                            <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
                         </button>
                         <button
                             onClick={() => handleStatusClick('struggling')}
-                            className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold transition-all border ${
-                                data.status === 'struggling'
+                            title="Struggling"
+                            className={`p-1 rounded-full transition-all border ${data.status === 'struggling'
                                     ? 'bg-red-500 text-white border-red-500 shadow-sm'
                                     : 'bg-white text-gray-500 border-gray-200 hover:border-red-300 hover:text-red-600'
-                            }`}
+                                }`}
                         >
-                            struggling
+                            <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
                         </button>
                     </div>
 
@@ -183,11 +183,10 @@ export default function FlashcardNode({ id, data }: FlashcardNodeProps) {
                                 updateNodeData(id, { isPinned: !data.isPinned })
                                 persistToLocalStorage()
                             }}
-                            className={`p-1 rounded-md transition-colors ${
-                                data.isPinned
+                            className={`p-1 rounded-md transition-colors ${data.isPinned
                                     ? 'text-indigo-600 bg-indigo-50 hover:bg-indigo-100'
                                     : 'text-gray-400 hover:text-indigo-500 hover:bg-indigo-50'
-                            }`}
+                                }`}
                         >
                             <svg
                                 className="w-3.5 h-3.5"
