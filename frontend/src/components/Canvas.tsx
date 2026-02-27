@@ -27,12 +27,13 @@ import QuestionModal from './QuestionModal'
 import RevisionModal from './RevisionModal'
 import ToolsModal from './ToolsModal'
 import PdfUploadPopup from './PdfUploadPopup'
+import { DrawingCanvas, DrawingToolbar, TextNode } from './whiteboard'
 import { useTextSelection } from '../hooks/useTextSelection'
 import { useCanvasStore } from '../store/canvasStore'
 import { extractPageImageBase64 } from '../utils/pdfImageExtractor'
 import { streamQuery, generateTitle, generatePageQuiz, gradeAnswer, generateFlashcards } from '../api/studyApi'
 import { getNewNodePosition, recalculateSiblingPositions, resolveOverlaps, isOverlapping, rerouteEdgeHandles, getQuizNodePositions } from '../utils/positioning'
-import type { AnswerNodeData, QuizQuestionNodeData, FlashcardNodeData } from '../types'
+import type { AnswerNodeData, QuizQuestionNodeData, FlashcardNodeData, TextNodeData } from '../types'
 import { pdf } from '@react-pdf/renderer'
 import { buildQATree } from '../utils/buildQATree'
 import StudyNotePDF from './StudyNotePDF'
@@ -42,6 +43,7 @@ const NODE_TYPES = {
     answerNode: AnswerNode,
     quizQuestionNode: QuizQuestionNode,
     flashcardNode: FlashcardNode,
+    textNode: TextNode,
 }
 
 // StudyCanvas Minimalist Colour Palette
@@ -69,7 +71,7 @@ interface ModalState {
 let toastTimeout: ReturnType<typeof setTimeout> | null = null
 
 export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; onSave?: () => Promise<void> }) {
-    const { setCenter, getZoom, fitView, setViewport, getViewport } = useReactFlow()
+    const { setCenter, getZoom, fitView, setViewport, getViewport, screenToFlowPosition } = useReactFlow()
     const [selection, setSelection] = useState<SelectionState | null>(null)
     const [modal, setModal] = useState<ModalState | null>(null)
     const [showRevision, setShowRevision] = useState(false)
@@ -99,6 +101,14 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
     const persistToLocalStorage = useCanvasStore((s) => s.persistToLocalStorage)
     const canvasViewport = useCanvasStore((s) => s.canvasViewport)
     const setCanvasViewport = useCanvasStore((s) => s.setCanvasViewport)
+
+    // Whiteboard state
+    const activeTool = useCanvasStore((s) => s.activeTool)
+    const toolSettings = useCanvasStore((s) => s.toolSettings)
+    const whiteboardUndo = useCanvasStore((s) => s.whiteboardUndo)
+    const whiteboardRedo = useCanvasStore((s) => s.whiteboardRedo)
+    const isCursorMode = activeTool === 'cursor'
+    const isTextMode = activeTool === 'text'
 
     // Auto-dismiss the upload hint once a PDF is loaded
     useEffect(() => {
@@ -343,6 +353,10 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
         return nodes
             .filter((n) => {
                 if (n.type === 'contentNode') return true
+                if (n.type === 'textNode') {
+                    const d = n.data as unknown as TextNodeData
+                    return d.pageIndex === currentPage
+                }
                 if (n.type === 'quizQuestionNode') {
                     const d = n.data as unknown as QuizQuestionNodeData
                     return d.isPinned === true || d.pageIndex === currentPage
@@ -849,6 +863,84 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
         [nodes, setEdges, persistToLocalStorage],
     )
 
+    // ── Whiteboard: pane click handler for text tool ────────────────────────────
+    const handlePaneClick = useCallback(
+        (event: React.MouseEvent) => {
+            if (activeTool !== 'text') return
+
+            // Don't place text if clicking on a popup / modal overlay
+            const target = event.target as HTMLElement
+            if (target.closest('.react-flow__node') || target.closest('[data-popup]') || target.closest('[role="dialog"]')) return
+
+            const flowPos = screenToFlowPosition({ x: event.clientX, y: event.clientY })
+
+            // Check overlap with existing visible nodes
+            const PADDING = 10
+            const newW = 200
+            const newH = 40
+            const overlaps = visibleNodes.some((n) => {
+                const nw = n.measured?.width ?? 300
+                const nh = n.measured?.height ?? 200
+                return (
+                    flowPos.x < n.position.x + nw + PADDING &&
+                    flowPos.x + newW > n.position.x - PADDING &&
+                    flowPos.y < n.position.y + nh + PADDING &&
+                    flowPos.y + newH > n.position.y - PADDING
+                )
+            })
+            if (overlaps) return
+
+            const newId = `text-${Date.now()}`
+            const textData: TextNodeData = {
+                text: '',
+                fontSize: toolSettings.text.fontSize,
+                color: toolSettings.text.color,
+                pageIndex: currentPage,
+            }
+            const newNode: Node = {
+                id: newId,
+                type: 'textNode',
+                position: flowPos,
+                data: textData as unknown as Record<string, unknown>,
+            }
+            setNodes((prev) => [...prev, newNode])
+
+            // Push undo action
+            useCanvasStore.getState().whiteboardUndoStack.push({ type: 'addText', nodeId: newId })
+            useCanvasStore.setState({ whiteboardRedoStack: [] })
+
+            // Switch back to cursor mode after placing text
+            useCanvasStore.getState().setActiveTool('cursor')
+
+            persistToLocalStorage()
+        },
+        [activeTool, screenToFlowPosition, visibleNodes, toolSettings, currentPage, setNodes, persistToLocalStorage],
+    )
+
+    // ── Whiteboard: undo/redo keyboard shortcuts ────────────────────────────────
+    useEffect(() => {
+        const handler = (e: KeyboardEvent) => {
+            // Don't intercept if typing in an input / textarea
+            const tag = (e.target as HTMLElement)?.tagName?.toLowerCase()
+            if (tag === 'input' || tag === 'textarea') return
+
+            if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+                e.preventDefault()
+                whiteboardUndo()
+            }
+            if ((e.ctrlKey || e.metaKey) && e.key === 'z' && e.shiftKey) {
+                e.preventDefault()
+                whiteboardRedo()
+            }
+            if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
+                e.preventDefault()
+                whiteboardRedo()
+            }
+        }
+        window.addEventListener('keydown', handler)
+        return () => window.removeEventListener('keydown', handler)
+    }, [whiteboardUndo, whiteboardRedo])
+
     // Revision mode
     const handleRevisionMode = useCallback((sourceType: 'struggling' | 'page' = 'struggling') => {
         setShowRevisionMenu(false)
@@ -1096,6 +1188,9 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
 
     return (
         <div ref={containerRef} style={{ width: '100vw', height: '100vh' }} className={isDarkMode ? 'dark-mode' : ''}>
+            {/* Whiteboard drawing overlay */}
+            <DrawingCanvas />
+
             <ReactFlow
                 nodes={visibleNodes}
                 edges={visibleEdges}
@@ -1103,6 +1198,45 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 defaultViewport={canvasViewport ?? { x: 0, y: 0, zoom: 1 }}
                 onViewportChange={handleViewportChange}
                 onNodesChange={(changes) => {
+                    // Handle text node removal (via Backspace / Delete deleteKeyCode)
+                    const removeIds = changes
+                        .filter((c): c is Extract<typeof c, { type: 'remove' }> => c.type === 'remove')
+                        .filter((c) => c.id.startsWith('text-'))
+                        .map((c) => c.id)
+                    if (removeIds.length > 0) {
+                        removeIds.forEach((id) => {
+                            const node = nodes.find((n) => n.id === id)
+                            if (node) {
+                                useCanvasStore.getState().whiteboardUndoStack.push({
+                                    type: 'removeText',
+                                    nodeId: id,
+                                    nodeSnapshot: { ...node, data: { ...node.data } } as unknown as Record<string, unknown>,
+                                })
+                                useCanvasStore.setState({ whiteboardRedoStack: [] })
+                            }
+                        })
+                        setNodes((prev) => prev.filter((n) => !removeIds.includes(n.id)))
+                        persistToLocalStorage()
+                        return
+                    }
+
+                    // Handle selection changes so text nodes can be selected/deselected
+                    const selectChanges = changes.filter((c) => c.type === 'select')
+                    if (selectChanges.length > 0) {
+                        setNodes((prev) => {
+                            let next = [...prev]
+                            for (const change of selectChanges) {
+                                if (change.type === 'select') {
+                                    const idx = next.findIndex((n) => n.id === change.id)
+                                    if (idx !== -1) {
+                                        next[idx] = { ...next[idx], selected: change.selected }
+                                    }
+                                }
+                            }
+                            return next
+                        })
+                    }
+
                     // Apply position/selection changes without overriding our state
                     setNodes((prev) => {
                         let next = [...prev]
@@ -1173,11 +1307,14 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 fitView={false}
                 zoomOnScroll={false}
                 panOnScroll={false}
-                nodesDraggable
-                nodesConnectable
-                edgesFocusable
-                deleteKeyCode="Backspace"
+                panOnDrag={isCursorMode}
+                nodesDraggable={isCursorMode}
+                nodesConnectable={isCursorMode}
+                elementsSelectable={isCursorMode || isTextMode}
+                edgesFocusable={isCursorMode}
+                deleteKeyCode={isCursorMode ? ['Backspace', 'Delete'] : null}
                 onNodeDragStop={handleNodeDragStop}
+                onPaneClick={handlePaneClick}
                 onEdgeDoubleClick={(evt, edge) => {
                     evt.stopPropagation()
                     setEdges((prev) => prev.filter((e) => e.id !== edge.id))
@@ -1203,6 +1340,9 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 </Controls>
                 <MiniMap nodeColor={nodeColor} position="bottom-right" />
             </ReactFlow>
+
+            {/* Whiteboard toolbar */}
+            <DrawingToolbar />
 
             {/* Ask Gemini popup */}
             {selection && (

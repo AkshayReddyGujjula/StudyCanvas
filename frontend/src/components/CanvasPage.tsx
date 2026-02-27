@@ -57,10 +57,11 @@ export default function CanvasPage() {
             const {
                 nodes, edges, fileData, highlights, userDetails,
                 currentPage, pageMarkdowns, zoomLevel, scrollPositions, canvasViewport,
+                drawingStrokes, savedColors, toolSettings,
             } = store
 
             // 1. Save state.json
-            const stateObj = { nodes, edges, fileData, highlights, userDetails, currentPage, pageMarkdowns, zoomLevel, scrollPositions, canvasViewport }
+            const stateObj = { nodes, edges, fileData, highlights, userDetails, currentPage, pageMarkdowns, zoomLevel, scrollPositions, canvasViewport, drawingStrokes, savedColors, toolSettings }
             await saveCanvasState(parentHandle, canvasId, stateObj)
 
             // 2. Save PDF to the local folder (if we have it in memory or IndexedDB)
@@ -177,6 +178,9 @@ export default function CanvasPage() {
                             store.updateScrollPosition(Number(page), pos as number)
                         })
                     }
+                    if (stateObj.drawingStrokes) store.setDrawingStrokes(stateObj.drawingStrokes)
+                    if (stateObj.savedColors) store.setSavedColors(stateObj.savedColors)
+                    if (stateObj.toolSettings) store.setToolSettings(stateObj.toolSettings)
                 }
 
                 // Always hydrate canvasStore.userDetails from the global user context

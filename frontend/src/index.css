@@ -275,3 +275,66 @@ body.rf-connecting .react-flow__node .nodrag * {
   background-color: #2d2d2d !important;
 }
 
+/* ── Whiteboard / Drawing ─────────────────────────────────────────────────── */
+
+/* Text node styles */
+.text-node-container {
+  min-width: 60px;
+  min-height: 24px;
+  cursor: text;
+}
+
+.text-node-container textarea {
+  background: transparent;
+  resize: none;
+  outline: none;
+  border: 1.5px dashed #93c5fd;
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-family: inherit;
+}
+
+.text-node-container .text-display {
+  padding: 4px 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Selected text node highlight */
+.react-flow__node-textNode.selected .text-node-container {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Drawing toolbar dark mode */
+.dark-mode .drawing-toolbar {
+  background-color: #1e1e1e !important;
+  border-color: #3a3a3a !important;
+}
+
+.dark-mode .drawing-toolbar button {
+  color: #d4d4d4 !important;
+}
+
+.dark-mode .drawing-toolbar button:hover {
+  background-color: #2d2d2d !important;
+}
+
+.dark-mode .drawing-toolbar .tool-panel {
+  background-color: #1e1e1e !important;
+  border-color: #3a3a3a !important;
+}
+
+/* Cursor styles when drawing tools are active */
+.drawing-tool-pen {
+  cursor: crosshair !important;
+}
+
+.drawing-tool-highlighter {
+  cursor: crosshair !important;
+}
+
+.drawing-tool-text {
+  cursor: text !important;
+}

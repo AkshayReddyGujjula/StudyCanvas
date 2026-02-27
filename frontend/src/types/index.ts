@@ -105,6 +105,88 @@ export interface QuizQuestionNodeData {
     modelUsed?: string
 }
 
+// ─── Whiteboard / Drawing types ──────────────────────────────────────────────
+
+export type WhiteboardTool = 'cursor' | 'pen1' | 'pen2' | 'highlighter' | 'eraser' | 'text'
+
+export type EraserMode = 'stroke' | 'area'
+
+export interface StrokePoint {
+    x: number
+    y: number
+    pressure?: number
+}
+
+export interface DrawingStroke {
+    id: string
+    points: StrokePoint[]
+    color: string
+    width: number
+    opacity: number
+    tool: 'pen1' | 'pen2' | 'highlighter'
+    pageIndex: number
+    timestamp: number
+}
+
+export interface PenSettings {
+    color: string
+    width: number
+}
+
+export interface HighlighterSettings {
+    color: string
+    width: number
+    opacity: number
+}
+
+export interface EraserSettings {
+    width: number
+    mode: EraserMode
+}
+
+export interface TextToolSettings {
+    fontSize: number
+    color: string
+}
+
+export interface ToolSettings {
+    pen1: PenSettings
+    pen2: PenSettings
+    highlighter: HighlighterSettings
+    eraser: EraserSettings
+    text: TextToolSettings
+}
+
+export interface TextNodeData {
+    text: string
+    fontSize: number
+    color: string
+    pageIndex: number
+    isPinned?: boolean
+    width?: number
+    height?: number
+}
+
+export type WhiteboardUndoAction =
+    | { type: 'addStroke'; stroke: DrawingStroke }
+    | { type: 'removeStroke'; stroke: DrawingStroke }
+    | { type: 'removeStrokes'; strokes: DrawingStroke[] }
+    | { type: 'addText'; nodeId: string }
+    | { type: 'removeText'; nodeId: string; nodeSnapshot: Record<string, unknown> }
+
+export const DEFAULT_TOOL_SETTINGS: ToolSettings = {
+    pen1: { color: '#000000', width: 3 },
+    pen2: { color: '#2D9CDB', width: 3 },
+    highlighter: { color: '#FFE066', width: 20, opacity: 0.4 },
+    eraser: { width: 20, mode: 'stroke' },
+    text: { fontSize: 16, color: '#000000' },
+}
+
+export const DEFAULT_SAVED_COLORS: string[] = [
+    '#000000', '#FFFFFF', '#EB5757', '#2D9CDB',
+    '#27AE60', '#FFE066', '#F2994A', '#9B51E0',
+]
+
 // ─── Multi-canvas / Homepage types ───────────────────────────────────────────
 
 /** Metadata for a single canvas entry stored in manifest.json */
