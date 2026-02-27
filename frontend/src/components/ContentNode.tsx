@@ -122,6 +122,16 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
     const loadPdfFromStorage = useCanvasStore((s) => s.loadPdfFromStorage)
     const [isLoadingPdf, setIsLoadingPdf] = useState(false)
 
+    // ── Resize warning state ────────────────────────────────────────────────
+    // When the user attempts to resize a node that has drawing annotations,
+    // show a warning popup. Store the pending resize event params so we can
+    // proceed after confirmation.
+    const drawingStrokes = useCanvasStore((s) => s.drawingStrokes)
+    const [showResizeWarning, setShowResizeWarning] = useState(false)
+    const pendingResizeRef = useRef<{ startX: number; startY: number; mode: 'w' | 'h' | 'wh'; cursor?: string; startW: number; startH: number; minW: number } | null>(null)
+    // Track whether the user already acknowledged the warning for this resize session
+    const resizeWarningAckedRef = useRef(false)
+
     const isMac = useMemo(() => {
         if (typeof window !== 'undefined') {
             return navigator.platform.toUpperCase().indexOf('MAC') >= 0 || navigator.userAgent.toUpperCase().indexOf('MAC') >= 0
@@ -260,27 +270,13 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
         }
     }, [nodeWidth, userNodeHeight, viewMode, isExpanded, isLocked, renderDpr, id, updateNodeData])
 
-    // ── Generic resize starter — used by all edge/corner handles ───────────
-    // Width and height are independently resizable. Edges resize one axis;
-    // corners resize both. Height is locked once the user manually drags.
-    const startResize = useCallback((e: React.MouseEvent, mode: 'w' | 'h' | 'wh', cursor?: string) => {
-        e.preventDefault()
-        e.stopPropagation()
-
-        const startX = e.clientX
-        const startY = e.clientY
-        const startW = nodeWidth
-        const minW = minNodeWidthRef.current
+    // ── Core resize logic (called directly or after warning confirmation) ──
+    const executeResize = useCallback((startX: number, startY: number, startW: number, startH: number, minW: number, mode: 'w' | 'h' | 'wh', cursor?: string) => {
         const minH = 200
-
-        // Read current rendered height from the DOM for an accurate starting point
-        const nodeEl = (e.currentTarget as HTMLElement).closest('[data-nodeid]') as HTMLElement | null
-        const currentRenderedH = nodeEl ? nodeEl.getBoundingClientRect().height : 600
-        const startH = userNodeHeight ?? currentRenderedH
 
         // Lock height on width-only or corner resize so height doesn't auto-track
         if (userNodeHeight === null && (mode === 'w' || mode === 'wh')) {
-            setUserNodeHeight(currentRenderedH)
+            setUserNodeHeight(startH)
         }
 
         const cursors: Record<string, string> = {
@@ -294,8 +290,6 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
         }
 
         // Full-screen transparent overlay captures ALL pointer events during drag
-        // so that the mouse can travel over the canvas, PDF text layer, etc.
-        // without losing the resize interaction.
         const overlay = document.createElement('div')
         const cursorKey = cursor || mode
         overlay.style.cssText =
@@ -306,11 +300,9 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
             const dx = mv.clientX - startX
             const dy = mv.clientY - startY
 
-            // Width: only for 'w' (right edge) and 'wh' (corners)
             if (mode === 'w' || mode === 'wh') {
                 setNodeWidth(Math.min(Math.max(startW + dx, minW), 1500))
             }
-            // Height: only for 'h' (bottom edge) and 'wh' (corners)
             if (mode === 'h' || mode === 'wh') {
                 setUserNodeHeight(Math.max(startH + dy, minH))
             }
@@ -324,7 +316,52 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
 
         document.addEventListener('mousemove', onMove)
         document.addEventListener('mouseup', onUp)
-    }, [nodeWidth, userNodeHeight])
+    }, [userNodeHeight])
+
+    // ── Generic resize starter — used by all edge/corner handles ───────────
+    // If the node has drawing annotations attached, show a warning first.
+    const startResize = useCallback((e: React.MouseEvent, mode: 'w' | 'h' | 'wh', cursor?: string) => {
+        e.preventDefault()
+        e.stopPropagation()
+
+        const startX = e.clientX
+        const startY = e.clientY
+        const startW = nodeWidth
+        const minW = minNodeWidthRef.current
+
+        const nodeEl = (e.currentTarget as HTMLElement).closest('[data-nodeid]') as HTMLElement | null
+        const currentRenderedH = nodeEl ? nodeEl.getBoundingClientRect().height : 600
+        const startH = userNodeHeight ?? currentRenderedH
+
+        // Check if there are any drawing strokes attached to this node
+        const hasAttachedStrokes = drawingStrokes.some((s) => s.nodeId === id)
+
+        if (hasAttachedStrokes && !resizeWarningAckedRef.current) {
+            // Store pending resize params and show warning
+            pendingResizeRef.current = { startX, startY, mode, cursor, startW, startH, minW }
+            setShowResizeWarning(true)
+            return
+        }
+
+        // No annotations or already acknowledged — proceed directly
+        executeResize(startX, startY, startW, startH, minW, mode, cursor)
+    }, [nodeWidth, userNodeHeight, drawingStrokes, id, executeResize])
+
+    // ── Warning popup handlers ──────────────────────────────────────────────
+    const handleResizeWarningConfirm = useCallback(() => {
+        setShowResizeWarning(false)
+        resizeWarningAckedRef.current = true
+        if (pendingResizeRef.current) {
+            const { startX, startY, startW, startH, minW, mode, cursor } = pendingResizeRef.current
+            executeResize(startX, startY, startW, startH, minW, mode, cursor)
+            pendingResizeRef.current = null
+        }
+    }, [executeResize])
+
+    const handleResizeWarningCancel = useCallback(() => {
+        setShowResizeWarning(false)
+        pendingResizeRef.current = null
+    }, [])
 
     const handleMarkdownClick = useCallback(
         (event: React.MouseEvent) => {
@@ -669,6 +706,45 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
                 title="Drag to resize"
             />
             </>)}
+
+            {/* ── Resize warning popup ──────────────────────────────────── */}
+            {showResizeWarning && (
+                <div
+                    className="absolute inset-0 z-50 flex items-center justify-center"
+                    style={{ background: 'rgba(0, 0, 0, 0.4)', borderRadius: 'inherit' }}
+                    onClick={(e) => { e.stopPropagation(); handleResizeWarningCancel() }}
+                >
+                    <div
+                        className="bg-white rounded-lg shadow-xl p-5 mx-4"
+                        style={{ maxWidth: 340 }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="flex items-center gap-2 mb-3">
+                            <svg className="w-5 h-5 text-amber-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86l-8.5 14.14A1.5 1.5 0 003.07 20h17.86a1.5 1.5 0 001.28-2l-8.5-14.14a1.5 1.5 0 00-2.56 0z" />
+                            </svg>
+                            <h3 className="text-sm font-semibold text-gray-800">Resize Warning</h3>
+                        </div>
+                        <p className="text-xs text-gray-600 mb-4 leading-relaxed">
+                            Resizing this viewer may move or change the position of your annotations (drawings/highlights). This cannot be undone automatically.
+                        </p>
+                        <div className="flex justify-end gap-2">
+                            <button
+                                className="px-3 py-1.5 text-xs rounded-md border border-gray-300 text-gray-600 hover:bg-gray-100 transition-colors"
+                                onClick={handleResizeWarningCancel}
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                className="px-3 py-1.5 text-xs rounded-md bg-[#1E3A5F] text-white hover:bg-[#2a4e7a] transition-colors"
+                                onClick={handleResizeWarningConfirm}
+                            >
+                                Resize Anyway
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }

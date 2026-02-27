@@ -356,12 +356,14 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
                 continue
             }
 
-            // For node-attached strokes, resolve the node offset so we compare
-            // in global flow coordinates.
+            // For node-attached strokes, resolve the node offset
+            // so we compare in global flow coordinates.
             let ox = 0, oy = 0
             if (stroke.nodeId) {
                 const node = nodes.find((n) => n.id === stroke.nodeId)
-                if (node) { ox = node.position.x; oy = node.position.y }
+                if (node) {
+                    ox = node.position.x; oy = node.position.y
+                }
                 else if (stroke.nodeOffset) { ox = stroke.nodeOffset.x; oy = stroke.nodeOffset.y }
             }
 

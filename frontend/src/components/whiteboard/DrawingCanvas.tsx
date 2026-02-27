@@ -40,30 +40,35 @@ export default function DrawingCanvas() {
         [drawingStrokes, currentPage]
     )
 
-    // ── Helper: get the current offset for a node-attached stroke ────────────
-    // Returns the node's current position, or the stored fallback if the node
-    // was deleted, or {0,0} for global strokes.
-    const getStrokeOffset = useCallback((stroke: DrawingStroke): { x: number; y: number } => {
-        if (!stroke.nodeId) return { x: 0, y: 0 }
+    // ── Helper: get the current transform for a node-attached stroke ───────
+    // Returns offset (node position) for node-attached strokes.
+    // For global (non-attached) strokes: offset {0,0}.
+    const getStrokeTransform = useCallback((stroke: DrawingStroke): { ox: number; oy: number } => {
+        if (!stroke.nodeId) return { ox: 0, oy: 0 }
         const nodes = useCanvasStore.getState().nodes
         const node = nodes.find((n) => n.id === stroke.nodeId)
-        if (node) return { x: node.position.x, y: node.position.y }
-        // Fallback: node was deleted, use stored offset so stroke doesn't vanish
-        return stroke.nodeOffset ?? { x: 0, y: 0 }
+        if (node) {
+            return { ox: node.position.x, oy: node.position.y }
+        }
+        // Fallback: node was deleted, use stored offset
+        return { ox: stroke.nodeOffset?.x ?? 0, oy: stroke.nodeOffset?.y ?? 0 }
     }, [])
 
     // ── Draw a single stroke onto a canvas context ──────────────────────────
-    // nodeOffset is added to each point — for global strokes it's {0,0};
-    // for node-attached strokes it's the node's current position.
+    // transform.ox/oy is the node position offset (or 0,0 for global strokes).
     const drawStroke = useCallback((
         ctx: CanvasRenderingContext2D,
         stroke: DrawingStroke,
         vp: { x: number; y: number; zoom: number },
-        nodeOffset: { x: number; y: number } = { x: 0, y: 0 },
+        transform: { ox: number; oy: number } = { ox: 0, oy: 0 },
     ) => {
         if (stroke.points.length < 2) return
-        const ox = nodeOffset.x
-        const oy = nodeOffset.y
+        const { ox, oy } = transform
+
+        // Transform a node-relative point to screen coordinates
+        const txX = (px: number) => (px + ox) * vp.zoom + vp.x
+        const txY = (py: number) => (py + oy) * vp.zoom + vp.y
+
         ctx.save()
         ctx.globalAlpha = stroke.opacity
         if (stroke.tool === 'highlighter') {
@@ -76,29 +81,25 @@ export default function DrawingCanvas() {
 
         ctx.beginPath()
         const p0 = stroke.points[0]
-        const sx = (p0.x + ox) * vp.zoom + vp.x
-        const sy = (p0.y + oy) * vp.zoom + vp.y
-        ctx.moveTo(sx, sy)
+        ctx.moveTo(txX(p0.x), txY(p0.y))
 
         if (stroke.points.length === 2) {
             const p1 = stroke.points[1]
-            ctx.lineTo((p1.x + ox) * vp.zoom + vp.x, (p1.y + oy) * vp.zoom + vp.y)
+            ctx.lineTo(txX(p1.x), txY(p1.y))
         } else {
             // Quadratic Bezier smoothing
             for (let i = 1; i < stroke.points.length - 1; i++) {
                 const p1 = stroke.points[i]
                 const p2 = stroke.points[i + 1]
-                const mx = ((p1.x + ox + p2.x + ox) / 2) * vp.zoom + vp.x
-                const my = ((p1.y + oy + p2.y + oy) / 2) * vp.zoom + vp.y
+                // Midpoint of two transformed points = transform of their average
                 ctx.quadraticCurveTo(
-                    (p1.x + ox) * vp.zoom + vp.x,
-                    (p1.y + oy) * vp.zoom + vp.y,
-                    mx, my
+                    txX(p1.x), txY(p1.y),
+                    txX((p1.x + p2.x) / 2), txY((p1.y + p2.y) / 2)
                 )
             }
             // Last point
             const last = stroke.points[stroke.points.length - 1]
-            ctx.lineTo((last.x + ox) * vp.zoom + vp.x, (last.y + oy) * vp.zoom + vp.y)
+            ctx.lineTo(txX(last.x), txY(last.y))
         }
         ctx.stroke()
         ctx.restore()
@@ -115,10 +116,10 @@ export default function DrawingCanvas() {
         const vp = getViewport()
 
         for (const stroke of pageStrokes) {
-            const offset = getStrokeOffset(stroke)
-            drawStroke(ctx, stroke, vp, offset)
+            const transform = getStrokeTransform(stroke)
+            drawStroke(ctx, stroke, vp, transform)
         }
-    }, [pageStrokes, getViewport, drawStroke, getStrokeOffset])
+    }, [pageStrokes, getViewport, drawStroke, getStrokeTransform])
 
     // ── Resize canvases to match container ──────────────────────────────────
     useEffect(() => {
@@ -187,14 +188,16 @@ export default function DrawingCanvas() {
             if (s.nodeId) attachedNodeIds.add(s.nodeId)
         }
 
-        // Build a position fingerprint for attached nodes
+        // Build a position+size fingerprint for attached nodes
         const getPositionKey = () => {
             if (attachedNodeIds.size === 0) return ''
             const nodes = useCanvasStore.getState().nodes
             const parts: string[] = []
             for (const id of attachedNodeIds) {
                 const n = nodes.find((nd) => nd.id === id)
-                if (n) parts.push(`${id}:${n.position.x},${n.position.y}`)
+                if (n) {
+                    parts.push(`${id}:${n.position.x},${n.position.y}`)
+                }
             }
             return parts.join('|')
         }
@@ -250,17 +253,19 @@ export default function DrawingCanvas() {
     }, [getViewport, activeTool, toolSettings, currentPage, drawStroke])
 
     // ── Hit-test: check if a point (in flow coords) is near any stroke ──────
-    // For node-attached strokes, the node offset is added to each point before
-    // comparing so the hit-test works in global flow coordinates.
+    // For node-attached strokes, the offset is applied to each point before
+    // comparing so the hit-test works in global flow coords.
     const hitTestStrokes = useCallback((flowX: number, flowY: number, radius: number): DrawingStroke[] => {
         const hits: DrawingStroke[] = []
         const r2 = radius * radius
 
         for (const stroke of pageStrokes) {
-            const offset = getStrokeOffset(stroke)
+            const { ox, oy } = getStrokeTransform(stroke)
             for (const p of stroke.points) {
-                const dx = (p.x + offset.x) - flowX
-                const dy = (p.y + offset.y) - flowY
+                const gx = p.x + ox
+                const gy = p.y + oy
+                const dx = gx - flowX
+                const dy = gy - flowY
                 if (dx * dx + dy * dy <= r2) {
                     hits.push(stroke)
                     break
@@ -268,7 +273,7 @@ export default function DrawingCanvas() {
             }
         }
         return hits
-    }, [pageStrokes, getStrokeOffset])
+    }, [pageStrokes, getStrokeTransform])
 
     // ── Helper: find which node (if any) a flow-coordinate point is inside ──
     const findNodeAtPoint = useCallback((flowX: number, flowY: number): { id: string; x: number; y: number } | null => {
@@ -294,7 +299,8 @@ export default function DrawingCanvas() {
             }
         }
 
-        return bestNode ? { id: bestNode.id, x: bestNode.x, y: bestNode.y } : null
+        if (!bestNode) return null
+        return { id: bestNode.id, x: bestNode.x, y: bestNode.y }
     }, [])
 
     // ── Pointer handlers ────────────────────────────────────────────────────

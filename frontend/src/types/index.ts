@@ -130,6 +130,13 @@ export interface DrawingStroke {
     nodeId?: string
     /** The node position when the stroke was created (fallback if node is deleted) */
     nodeOffset?: { x: number; y: number }
+    /** The node width (flow units) when the stroke was created — used to scale
+     *  strokes proportionally when the node is resized. */
+    nodeWidth?: number
+    /** The Y offset from the node's top to the start of the scalable content
+     *  area (header + toolbar height in flow units). Only the content below
+     *  this offset scales; the offset itself stays fixed. */
+    nodeContentOriginY?: number
 }
 
 export interface PenSettings {

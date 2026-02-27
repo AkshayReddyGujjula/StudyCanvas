@@ -528,8 +528,8 @@ export default function PDFViewer({
         <div className={`flex flex-col ${className}`}>
             {/* ── Toolbar ── */}
             <div className="flex items-center justify-between px-3 py-2 bg-gray-50 border-b border-gray-200 flex-shrink-0 gap-2 relative">
-                {/* Zoom + Quality */}
-                <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                {/* Left: Zoom controls */}
+                <div className="flex items-center gap-1.5 min-w-0">
                     <span className="text-xs text-gray-500 flex-shrink-0">Zoom:</span>
                     <input
                         type="range"
@@ -559,10 +559,17 @@ export default function PDFViewer({
                         className="text-xs text-indigo-500 hover:text-indigo-700 px-1 leading-none flex-shrink-0"
                         title="Reset zoom to fit width"
                     >↺</button>
+                </div>
 
-                    {/* Separator */}
-                    <div className="w-px h-4 bg-gray-300 flex-shrink-0" />
+                {/* Centre: View Mode buttons */}
+                {customToolbarMiddle && (
+                    <div className="flex-shrink-0 flex justify-center">
+                        {customToolbarMiddle}
+                    </div>
+                )}
 
+                {/* Right: Quality + Lock + Page nav */}
+                <div className="flex items-center justify-end gap-1.5 min-w-0">
                     {/* Resolution / Quality slider */}
                     <span className="text-xs text-gray-500 flex-shrink-0">Quality:</span>
                     <input
@@ -606,17 +613,11 @@ export default function PDFViewer({
                             </svg>
                         )}
                     </button>
-                </div>
 
-                {/* Custom Toolbar Middle */}
-                {customToolbarMiddle && (
-                    <div className="flex-shrink-0 flex justify-center">
-                        {customToolbarMiddle}
-                    </div>
-                )}
+                    {/* Separator */}
+                    <div className="w-px h-4 bg-gray-300 flex-shrink-0" />
 
-                {/* Page navigation */}
-                <div className="flex items-center justify-end gap-1 flex-1">
+                    {/* Page navigation */}
                     <button
                         onClick={() => goToPage(currentPage - 1)}
                         disabled={currentPage <= 1}
