@@ -3,6 +3,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from rate_limiter import limiter
 from services import gemini_service
+from services.gemini_service import MODEL_FLASH
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -17,6 +18,7 @@ class PageQuizRequest(BaseModel):
 
 class PageQuizResponse(BaseModel):
     questions: list[str]
+    model_used: str = MODEL_FLASH
 
 
 class GradeAnswerRequest(BaseModel):
@@ -31,6 +33,7 @@ class GradeAnswerRequest(BaseModel):
 
 class GradeAnswerResponse(BaseModel):
     feedback: str
+    model_used: str = MODEL_FLASH
 
 
 @router.post("/page-quiz", response_model=PageQuizResponse)
@@ -41,7 +44,7 @@ async def generate_page_quiz(request: Request, payload: PageQuizRequest):
         questions = await gemini_service.generate_page_quiz(
             payload.page_content, pdf_id=payload.pdf_id, page_index=payload.page_index, image_base64=payload.image_base64
         )
-        return PageQuizResponse(questions=questions)
+        return PageQuizResponse(questions=questions, model_used=MODEL_FLASH)
     except HTTPException:
         raise  # Re-raise 422 errors as-is
     except Exception as e:
@@ -62,4 +65,4 @@ async def grade_answer(request: Request, payload: GradeAnswerRequest):
         page_index=payload.page_index,
         image_base64=payload.image_base64,
     )
-    return GradeAnswerResponse(feedback=feedback)
+    return GradeAnswerResponse(feedback=feedback, model_used=MODEL_FLASH)

@@ -33,6 +33,8 @@ export interface AnswerNodeData {
     pageIndex?: number
     /** If true, this node is shown on every page regardless of pageIndex */
     isPinned?: boolean
+    /** Which Gemini model produced the answer */
+    modelUsed?: string
 }
 
 export interface UploadResponse {
@@ -53,6 +55,7 @@ export interface QuizQuestion {
 export interface ValidateAnswerResponse {
     status: 'correct' | 'incorrect' | 'partial'
     explanation: string
+    model_used?: string
 }
 
 export interface QuizNodeInput {
@@ -73,6 +76,8 @@ export interface FlashcardNodeData {
     /** Which PDF page this card belongs to (1-based) */
     pageIndex?: number
     isLoading: boolean
+    /** Which Gemini model produced this flashcard */
+    modelUsed?: string
 }
 
 export interface QuizQuestionNodeData {
@@ -96,6 +101,8 @@ export interface QuizQuestionNodeData {
     status?: NodeStatus
     /** If true, only the question header is shown */
     isMinimized?: boolean
+    /** Which Gemini model produced the grading feedback */
+    modelUsed?: string
 }
 
 // ─── Multi-canvas / Homepage types ───────────────────────────────────────────

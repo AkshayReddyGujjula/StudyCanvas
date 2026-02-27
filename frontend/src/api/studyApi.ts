@@ -47,8 +47,8 @@ export const generateQuiz = async (
     page_index?: number,
     page_content?: string,
     image_base64?: string
-): Promise<QuizQuestion[]> => {
-    const response = await api.post<QuizQuestion[]>('/api/quiz', {
+): Promise<{ questions: QuizQuestion[]; model_used: string }> => {
+    const response = await api.post<{ questions: QuizQuestion[]; model_used: string }>('/api/quiz', {
         struggling_nodes,
         raw_text,
         pdf_id,
@@ -67,7 +67,7 @@ export const validateAnswer = async (
     question_type: 'short_answer' | 'mcq' = 'short_answer',
     correct_option?: number
 ): Promise<ValidateAnswerResponse> => {
-    const response = await api.post<ValidateAnswerResponse>('/api/validate', {
+    const response = await api.post<ValidateAnswerResponse & { model_used?: string }>('/api/validate', {
         question,
         student_answer,
         raw_text,
@@ -88,8 +88,8 @@ export const generateTitle = async (raw_text: string): Promise<string> => {
 /**
  * Generate 3-5 short-answer quiz questions for a single page's content.
  */
-export const generatePageQuiz = async (page_content: string, pdf_id?: string, page_index?: number, image_base64?: string): Promise<{ questions: string[] }> => {
-    const response = await api.post<{ questions: string[] }>('/api/page-quiz', { page_content, pdf_id, page_index, image_base64 })
+export const generatePageQuiz = async (page_content: string, pdf_id?: string, page_index?: number, image_base64?: string): Promise<{ questions: string[]; model_used: string }> => {
+    const response = await api.post<{ questions: string[]; model_used: string }>('/api/page-quiz', { page_content, pdf_id, page_index, image_base64 })
     return response.data
 }
 
@@ -104,8 +104,8 @@ export const gradeAnswer = async (
     pdf_id?: string,
     page_index?: number,
     image_base64?: string
-): Promise<{ feedback: string }> => {
-    const response = await api.post<{ feedback: string }>('/api/grade-answer', {
+): Promise<{ feedback: string; model_used: string }> => {
+    const response = await api.post<{ feedback: string; model_used: string }>('/api/grade-answer', {
         question,
         student_answer,
         page_content,
@@ -129,8 +129,8 @@ export const generateFlashcards = async (
     page_content?: string,
     existing_flashcards?: string[],
     image_base64?: string
-): Promise<{ question: string; answer: string }[]> => {
-    const response = await api.post<{ question: string; answer: string }[]>('/api/flashcards', {
+): Promise<{ flashcards: { question: string; answer: string }[]; model_used: string }> => {
+    const response = await api.post<{ flashcards: { question: string; answer: string }[]; model_used: string }>('/api/flashcards', {
         struggling_nodes,
         raw_text,
         pdf_id,

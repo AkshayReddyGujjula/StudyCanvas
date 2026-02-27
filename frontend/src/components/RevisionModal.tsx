@@ -4,6 +4,7 @@ import { useCanvasStore } from '../store/canvasStore'
 import { extractPageImageBase64 } from '../utils/pdfImageExtractor'
 import { generateQuiz, validateAnswer } from '../api/studyApi'
 import type { AnswerNodeData, QuizQuestion, ValidateAnswerResponse } from '../types'
+import ModelIndicator from './ModelIndicator'
 
 interface RevisionModalProps {
     nodes: Node[]
@@ -49,6 +50,10 @@ export default function RevisionModal({
 
     const [showScore, setShowScore] = useState(false)
 
+    // Track which model was used for quiz generation and validation
+    const [quizModelUsed, setQuizModelUsed] = useState<string | undefined>(undefined)
+    const [validationModelUsed, setValidationModelUsed] = useState<string | undefined>(undefined)
+
     // Guard: only generate the quiz once on mount, never re-fetch if canvas updates.
     const hasFetchedRef = useRef(false)
 
@@ -83,9 +88,10 @@ export default function RevisionModal({
             }
 
             try {
-                const qs = await generateQuiz(input, rawText, pdfId, sourceType, pageIndex, pageContent, imageBase64)
-                setQuestions(qs)
-                setQuestionStates(qs.map(() => emptyQuestionState()))
+                const quizResult = await generateQuiz(input, rawText, pdfId, sourceType, pageIndex, pageContent, imageBase64)
+                setQuestions(quizResult.questions)
+                setQuizModelUsed(quizResult.model_used)
+                setQuestionStates(quizResult.questions.map(() => emptyQuestionState()))
                 setLoading(false)
             } catch (err: unknown) {
                 console.error('Revision quiz generation error:', err)
@@ -158,6 +164,7 @@ export default function RevisionModal({
                 rawText,
                 'short_answer',
             )
+            setValidationModelUsed(res.model_used)
             updateCurrentState({ validationResult: res })
         } catch (err) {
             console.error(err)
@@ -378,6 +385,7 @@ export default function RevisionModal({
                                     )}
                                 </div>
                                 <strong className="opacity-75">Explanation:</strong> {validationResult.explanation}
+                                <ModelIndicator model={validationModelUsed || quizModelUsed} />
                             </div>
                         )}
 

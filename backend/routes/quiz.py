@@ -3,6 +3,7 @@ from fastapi import APIRouter, HTTPException, Request
 from models.schemas import QuizRequest, QuizQuestion, ValidateAnswerRequest, ValidateAnswerResponse
 from rate_limiter import limiter
 from services import gemini_service
+from services.gemini_service import MODEL_FLASH, MODEL_LITE
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -31,7 +32,7 @@ async def generate_quiz(request: Request, payload: QuizRequest):
             image_base64=payload.image_base64
         )
         _validate_quiz(result)
-        return result
+        return {"questions": result, "model_used": MODEL_FLASH}
     except Exception as e:
         logger.warning("Quiz generation attempt 1 failed: %s — retrying...", e)
 
@@ -46,7 +47,7 @@ async def generate_quiz(request: Request, payload: QuizRequest):
             image_base64=payload.image_base64
         )
         _validate_quiz(result)
-        return result
+        return {"questions": result, "model_used": MODEL_FLASH}
     except Exception as e:
         logger.error("Quiz generation attempt 2 failed: %s", e)
         raise HTTPException(status_code=500, detail="Quiz generation failed after retry due to an internal error.")
@@ -79,7 +80,9 @@ async def validate_answer(request: Request, payload: ValidateAnswerRequest):
             question_type=payload.question_type or "short_answer",
             correct_option=payload.correct_option,
         )
-        return result
+        # MCQ uses no LLM; short_answer uses Lite
+        used_model = MODEL_LITE if (payload.question_type or "short_answer") == "short_answer" else "none"
+        return {**result, "model_used": used_model}
     except Exception as e:
         logger.error("Answer validation failed: %s", e)
         raise HTTPException(status_code=500, detail="Answer validation failed.")

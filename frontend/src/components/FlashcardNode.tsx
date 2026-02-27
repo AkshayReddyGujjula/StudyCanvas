@@ -5,6 +5,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { FlashcardNodeData } from '../types'
 import { useCanvasStore } from '../store/canvasStore'
+import ModelIndicator from './ModelIndicator'
 
 const STATUS_BORDER_CLASSES: Record<string, string> = {
     loading: 'border-gray-400 animate-pulse',
@@ -250,7 +251,10 @@ export default function FlashcardNode({ id, data }: FlashcardNodeProps) {
                                                 {data.answer}
                                             </ReactMarkdown>
                                         </div>
-                                        <p className="mt-1.5 text-[10px] text-gray-400 italic self-end flex-shrink-0">Click to flip back ↩</p>
+                                        <div className="flex items-center justify-between mt-1.5 flex-shrink-0">
+                                            <ModelIndicator model={data.modelUsed} />
+                                            <p className="text-[10px] text-gray-400 italic">Click to flip back ↩</p>
+                                        </div>
                                     </div>
                                 </div>
                             </div>

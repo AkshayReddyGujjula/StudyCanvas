@@ -8,6 +8,7 @@ import rehypeSanitize, { defaultSchema, type Options as SanitizeOptions } from '
 import type { QuizQuestionNodeData, ChatMessage, NodeStatus } from '../types'
 import { useCanvasStore } from '../store/canvasStore'
 import { streamQuery } from '../api/studyApi'
+import ModelIndicator from './ModelIndicator'
 
 const customSchema: SanitizeOptions = {
     ...defaultSchema,
@@ -104,6 +105,13 @@ export default function QuizQuestionNode({ id, data }: QuizQuestionNodeProps) {
                 },
                 controller.signal
             )
+
+            // Capture which model was used for this follow-up
+            const followUpModel = response.headers.get('X-Model-Used') || undefined
+            if (followUpModel) {
+                updateQuizNodeData(id, { modelUsed: followUpModel })
+            }
+
             if (!response.body) throw new Error('No response body')
             const reader = response.body.getReader()
             const decoder = new TextDecoder()
@@ -332,6 +340,9 @@ export default function QuizQuestionNode({ id, data }: QuizQuestionNodeProps) {
                                 <p className="text-xs text-gray-800 leading-relaxed" style={{ userSelect: 'text', cursor: 'text' }}>
                                     {data.feedback}
                                 </p>
+                                <div className="flex justify-start mt-1">
+                                    <ModelIndicator model={data.modelUsed} />
+                                </div>
                             </div>
                         ) : null}
 

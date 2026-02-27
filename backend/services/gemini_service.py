@@ -11,6 +11,55 @@ logger = logging.getLogger(__name__)
 # Initialise the Gemini client once at module level
 genai.configure(api_key=os.environ.get("GEMINI_API_KEY", ""))
 
+# ── Model tier constants ──────────────────────────────────────────────────────
+# Lite: cheaper & faster — ideal for simple tasks (OCR, titles, simple Q&A)
+# Flash: smarter — for complex analysis, quiz generation, grading with nuance
+MODEL_LITE = "gemini-2.5-flash-lite"
+MODEL_FLASH = "gemini-2.5-flash"
+
+
+def classify_query_complexity(
+    question: str,
+    highlighted_text: str,
+    chat_history: list | None = None,
+) -> str:
+    """
+    Zero-latency heuristic that decides whether a student query warrants the
+    more capable (and expensive) Flash model or can be handled by Flash Lite.
+
+    Returns MODEL_FLASH for analytical / deep questions, MODEL_LITE otherwise.
+    """
+    q_lower = question.lower().strip()
+
+    # Deep conversations benefit from the smarter model
+    if chat_history and len(chat_history) >= 4:
+        return MODEL_FLASH
+
+    # Complexity keywords that signal analytical / higher-order thinking
+    complexity_keywords = [
+        "compare", "contrast", "analyze", "analyse", "evaluate", "discuss",
+        "implications", "explain why", "explain how", "critically",
+        "in detail", "elaborate", "relationship between", "pros and cons",
+        "advantages and disadvantages", "differentiate", "distinguish",
+        "justify", "to what extent", "assess", "synthesize", "synthesise",
+        "what are the effects", "what are the causes", "how does .* affect",
+        "what would happen if", "predict", "hypothesize",
+    ]
+    if any(kw in q_lower for kw in complexity_keywords):
+        return MODEL_FLASH
+
+    # Long questions tend to be more complex / multi-part
+    if len(question) > 200:
+        return MODEL_FLASH
+
+    # Long highlighted text means the student selected a big passage — likely
+    # needs deeper understanding to answer well
+    if len(highlighted_text) > 500:
+        return MODEL_FLASH
+
+    # Default: simple factual / definitional questions
+    return MODEL_LITE
+
 
 async def generate_title(raw_text: str) -> str:
     """
@@ -18,7 +67,7 @@ async def generate_title(raw_text: str) -> str:
     Receives the cleaned Markdown content (not raw PDF extraction) for accuracy.
     Returns plain text with no markdown, punctuation, or explanation.
     """
-    model = genai.GenerativeModel("gemini-2.5-flash")
+    model = genai.GenerativeModel(MODEL_LITE)
     # Use up to 6000 chars of the (already-clean) markdown content
     excerpt = raw_text[:6000]
     prompt = (
@@ -117,6 +166,7 @@ async def stream_query(
     parent_response: str | None,
     user_details=None,
     chat_history: list = None,
+    model_name: str | None = None,
 ):
     """
     Asynchronous generator that streams the Gemini response for a student query.
@@ -127,7 +177,7 @@ async def stream_query(
     needs_context = _needs_pdf_context(question, highlighted_text)
 
     model = genai.GenerativeModel(
-        model_name="gemini-2.5-flash",
+        model_name=model_name or MODEL_LITE,
     )
 
     if parent_response is None:
@@ -215,7 +265,7 @@ async def extract_text_from_image_b64(img_b64: str) -> str:
     Uses Gemini Vision to read substantive educational text from an image,
     ignoring page numbers and footers.
     """
-    model = genai.GenerativeModel("gemini-2.5-flash")
+    model = genai.GenerativeModel(MODEL_LITE)
     prompt = (
         "You are an OCR system. Extract ALL educational text, headings, bullet points, and "
         "substantive content visible in this image. "
@@ -247,7 +297,7 @@ async def generate_quiz(
     or the provided page content, depending on source_type.
     """
     model = genai.GenerativeModel(
-        "gemini-2.5-flash",
+        MODEL_FLASH,
         generation_config=genai.GenerationConfig(
             response_mime_type="application/json",
         ),
@@ -388,7 +438,7 @@ async def generate_flashcards(
     Generates flashcards based on struggling topics or page context depending on source_type.
     """
     model = genai.GenerativeModel(
-        "gemini-2.5-flash",
+        MODEL_FLASH,
         generation_config=genai.GenerationConfig(
             response_mime_type="application/json",
         ),
@@ -511,7 +561,7 @@ async def generate_page_quiz(page_content: str, pdf_id: str | None = None, page_
     Returns a plain JSON array of question strings.
     """
     model = genai.GenerativeModel(
-        "gemini-2.5-flash",
+        MODEL_FLASH,
         generation_config=genai.GenerationConfig(
             response_mime_type="application/json",
         ),
@@ -588,7 +638,7 @@ async def grade_answer(
     Grades a student's answer to a page-quiz question and returns direct, personalised
     feedback as a plain text string (not JSON).
     """
-    model = genai.GenerativeModel("gemini-2.5-flash")
+    model = genai.GenerativeModel(MODEL_FLASH)
 
     personalisation = ""
     if user_details:
@@ -679,7 +729,7 @@ async def validate_answer(
 
     # ── Short answer: ask Gemini ────────────────────────────────────────────
     model = genai.GenerativeModel(
-        "gemini-2.5-flash",
+        MODEL_LITE,
         generation_config=genai.GenerationConfig(
             response_mime_type="application/json",
         ),
@@ -719,7 +769,7 @@ async def image_to_text(base64_image: str) -> str:
     if "base64," in base64_image:
         base64_image = base64_image.split("base64,")[1]
         
-    model = genai.GenerativeModel("gemini-2.5-flash")
+    model = genai.GenerativeModel(MODEL_LITE)
     
     prompt = (
         "You are an expert Optical Character Recognition (OCR) assistant.\n"

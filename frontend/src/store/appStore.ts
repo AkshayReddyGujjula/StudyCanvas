@@ -20,6 +20,28 @@ import {
 
 // ─── App store — global state for multi-canvas homepage ──────────────────────
 
+/** Global user context persisted in localStorage and passed into every query. */
+export interface UserContext {
+    name: string
+    age: string
+    status: string
+    educationLevel: string
+}
+
+const USER_CONTEXT_KEY = 'studycanvas_user_context'
+
+function loadUserContext(): UserContext {
+    try {
+        const raw = localStorage.getItem(USER_CONTEXT_KEY)
+        if (raw) return JSON.parse(raw) as UserContext
+    } catch { /* ignore */ }
+    return { name: '', age: '', status: '', educationLevel: '' }
+}
+
+function persistUserContext(ctx: UserContext) {
+    localStorage.setItem(USER_CONTEXT_KEY, JSON.stringify(ctx))
+}
+
 interface AppState {
     /** User display name (from onboarding) */
     userName: string
@@ -43,6 +65,8 @@ interface AppState {
     needsPermission: boolean
     /** Auto-save interval in milliseconds (default 30000 = 30s) */
     autoSaveInterval: number
+    /** Global user context (name, age, status, educationLevel). Persisted in localStorage. */
+    userContext: UserContext
 }
 
 interface AppActions {
@@ -69,8 +93,8 @@ interface AppActions {
     /** Restore from an existing StudyCanvas folder (validates + loads manifest). */
     restoreFromExisting: () => Promise<void>
     /** Set the auto-save interval (ms). Persisted in localStorage. */
-    setAutoSaveInterval: (ms: number) => void
-
+    setAutoSaveInterval: (ms: number) => void    /** Update the global user context (persisted to localStorage). */
+    setUserContext: (ctx: UserContext) => void
     // ─── Folder actions ──────────────────────────────────────────────────
     /** Create a new folder. */
     addFolder: (name: string, parentFolderId?: string | null) => Promise<void>
@@ -96,6 +120,7 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
     isDirty: false,
     needsPermission: false,
     autoSaveInterval: parseInt(localStorage.getItem('studycanvas_autosave') || '30000', 10),
+    userContext: loadUserContext(),
 
     initialize: async () => {
         set({ isLoading: true })
@@ -116,6 +141,10 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
                 return
             }
             const manifest = await readManifest(handle)
+            // Sync the name from manifest into the persisted user context
+            const prevCtx = loadUserContext()
+            const updatedCtx = { ...prevCtx, name: manifest.user.name }
+            persistUserContext(updatedCtx)
             set({
                 isOnboarded: true,
                 directoryHandle: handle,
@@ -125,6 +154,7 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
                 canvasList: manifest.canvases,
                 folderList: manifest.folders ?? [],
                 isLoading: false,
+                userContext: updatedCtx,
             })
         } catch (err) {
             console.error('[appStore] initialize failed:', err)
@@ -136,6 +166,10 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
         await storeDirectoryHandle(handle)
         const manifest: Manifest = { version: 1, user: { name }, canvases: [], folders: [] }
         await writeManifest(handle, manifest)
+        // Initialise global user context with the name
+        const prevCtx = loadUserContext()
+        const updatedCtx = { ...prevCtx, name }
+        persistUserContext(updatedCtx)
         set({
             userName: name,
             isOnboarded: true,
@@ -144,6 +178,7 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
             needsPermission: false,
             canvasList: [],
             folderList: [],
+            userContext: updatedCtx,
         })
     },
 
@@ -223,11 +258,15 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
         const { directoryHandle } = get()
         if (!directoryHandle) return
         const manifest = await readManifest(directoryHandle)
-        set({ canvasList: manifest.canvases, folderList: manifest.folders ?? [], userName: manifest.user.name })
+        const prevCtx = get().userContext
+        const updatedCtx = { ...prevCtx, name: manifest.user.name }
+        persistUserContext(updatedCtx)
+        set({ canvasList: manifest.canvases, folderList: manifest.folders ?? [], userName: manifest.user.name, userContext: updatedCtx })
     },
 
     resetApp: async () => {
         await clearDirectoryHandle()
+        // Keep userContext in localStorage so it persists across logout/login
         set({
             userName: '',
             isOnboarded: false,
@@ -244,6 +283,10 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
     restoreFromExisting: async () => {
         const { handle, manifest } = await openExistingFolder()
         await storeDirectoryHandle(handle)
+        // Sync name from restored manifest into global user context
+        const prevCtx = loadUserContext()
+        const updatedCtx = { ...prevCtx, name: manifest.user.name }
+        persistUserContext(updatedCtx)
         set({
             userName: manifest.user.name,
             isOnboarded: true,
@@ -252,12 +295,19 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
             needsPermission: false,
             canvasList: manifest.canvases,
             folderList: manifest.folders ?? [],
+            userContext: updatedCtx,
         })
     },
 
     setAutoSaveInterval: (ms) => {
         localStorage.setItem('studycanvas_autosave', String(ms))
         set({ autoSaveInterval: ms })
+    },
+
+    setUserContext: (ctx) => {
+        persistUserContext(ctx)
+        // Keep userName in sync with context name
+        set({ userContext: ctx, userName: ctx.name || get().userName })
     },
 
     // ─── Folder actions ──────────────────────────────────────────────────

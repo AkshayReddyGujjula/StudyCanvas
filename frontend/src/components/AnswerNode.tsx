@@ -8,6 +8,7 @@ import rehypeSanitize, { defaultSchema, type Options as SanitizeOptions } from '
 import type { AnswerNodeData, ChatMessage } from '../types'
 import { useCanvasStore } from '../store/canvasStore'
 import { streamQuery } from '../api/studyApi'
+import ModelIndicator from './ModelIndicator'
 
 const customSchema: SanitizeOptions = {
     ...defaultSchema,
@@ -95,6 +96,12 @@ export default function AnswerNode({ id, data }: AnswerNodeProps) {
                 chat_history: fullHistoryForApi,
                 user_details: userDetails
             }, controller.signal)
+
+            // Capture which model was used for this follow-up
+            const followUpModel = response.headers.get('X-Model-Used') || undefined
+            if (followUpModel) {
+                updateNodeData(id, { modelUsed: followUpModel })
+            }
 
             if (!response.body) throw new Error('No response body')
             const reader = response.body.getReader()
@@ -273,6 +280,13 @@ export default function AnswerNode({ id, data }: AnswerNodeProps) {
                                 </ReactMarkdown>
                             )}
                         </div>
+
+                        {/* Model indicator — shown after initial response */}
+                        {!data.isLoading && !data.isStreaming && data.answer && (
+                            <div className="flex justify-start -mt-2">
+                                <ModelIndicator model={data.modelUsed} />
+                            </div>
+                        )}
 
                         {/* Chat History / Follow ups */}
                         {data.chatHistory && data.chatHistory.map((msg, idx) => (

@@ -1,12 +1,12 @@
 from fastapi import APIRouter, HTTPException, Request
 from models.schemas import FlashcardsRequest, Flashcard
 from rate_limiter import limiter
-from services.gemini_service import generate_flashcards
+from services.gemini_service import generate_flashcards, MODEL_FLASH
 
 router = APIRouter()
 
 
-@router.post("/flashcards", response_model=list[Flashcard])
+@router.post("/flashcards")
 @limiter.limit("10/minute; 100/hour; 500/day")
 async def create_flashcards(request: Request, payload: FlashcardsRequest):
     """
@@ -37,7 +37,7 @@ async def create_flashcards(request: Request, payload: FlashcardsRequest):
             existing_flashcards=payload.existing_flashcards,
             image_base64=payload.image_base64
         )
-        return cards
+        return {"flashcards": cards, "model_used": MODEL_FLASH}
     except Exception as e:
         import logging
         logging.error(f"Flash card generation failed: {e}")

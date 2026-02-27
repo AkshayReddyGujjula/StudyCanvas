@@ -179,6 +179,13 @@ export default function CanvasPage() {
                     }
                 }
 
+                // Always hydrate canvasStore.userDetails from the global user context
+                // so every canvas query uses the latest context
+                const globalCtx = useAppStore.getState().userContext
+                if (globalCtx.name || globalCtx.age || globalCtx.status || globalCtx.educationLevel) {
+                    store.setUserDetails(globalCtx)
+                }
+
                 // Load PDF: try local folder first, fall back to IndexedDB
                 const pdfBuf = await fsLoadPdf(parentHandle, canvasId)
                 if (pdfBuf) {

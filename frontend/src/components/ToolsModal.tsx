@@ -1,17 +1,17 @@
 import { useState } from 'react'
-import { useCanvasStore } from '../store/canvasStore'
+import { useAppStore } from '../store/appStore'
 
 export default function ToolsModal({ onClose }: { onClose: () => void }) {
-    const userDetails = useCanvasStore(s => s.userDetails)
-    const setUserDetails = useCanvasStore(s => s.setUserDetails)
+    const userContext = useAppStore(s => s.userContext)
+    const setUserContext = useAppStore(s => s.setUserContext)
 
-    const [name, setName] = useState(userDetails.name)
-    const [age, setAge] = useState(userDetails.age)
-    const [status, setStatus] = useState(userDetails.status)
-    const [educationLevel, setEducationLevel] = useState(userDetails.educationLevel)
+    const [name, setName] = useState(userContext.name)
+    const [age, setAge] = useState(userContext.age)
+    const [status, setStatus] = useState(userContext.status)
+    const [educationLevel, setEducationLevel] = useState(userContext.educationLevel)
 
     const handleSave = () => {
-        setUserDetails({ name, age, status, educationLevel })
+        setUserContext({ name, age, status, educationLevel })
         onClose()
     }
 

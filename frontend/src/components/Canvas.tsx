@@ -171,7 +171,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 nodePageIndex - 1,
                 imageBase64
             )
-            updateQuizNodeData(nodeId, { isGrading: false, feedback: result.feedback })
+            updateQuizNodeData(nodeId, { isGrading: false, feedback: result.feedback, modelUsed: result.model_used })
         } catch (err) {
             console.error('Grade answer error:', err)
             updateQuizNodeData(nodeId, { isGrading: false, feedback: 'Unable to grade your answer at this time. Please try again.' })
@@ -646,6 +646,9 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                     controller.signal
                 )
 
+                // Capture which model was used from the response header
+                const modelUsed = response.headers.get('X-Model-Used') || undefined
+
                 if (!response.body) throw new Error('No response body')
 
                 const reader = response.body.getReader()
@@ -661,6 +664,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                         answer: fullText,
                         isLoading: false,
                         isStreaming: true,
+                        modelUsed,
                     })
                 }
 
@@ -668,6 +672,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 updateNodeData(preGeneratedNodeId, {
                     isStreaming: false,
                     status: 'unread',
+                    modelUsed,
                 })
 
                 // Update edge to solid
@@ -865,6 +870,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
             .map((n) => (n.data as unknown as FlashcardNodeData).question)
 
         let cards: { question: string; answer: string }[]
+        let flashcardModelUsed: string | undefined
         try {
             let imageBase64: string | undefined
             // If the source is the current page and it has very little text, send the image instead
@@ -876,7 +882,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 }
             }
 
-            cards = await generateFlashcards(
+            const fcResult = await generateFlashcards(
                 payload,
                 fileData.raw_text,
                 fileData.pdf_id,
@@ -886,6 +892,8 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 currentFlashcards.length > 0 ? currentFlashcards : undefined,
                 imageBase64
             )
+            cards = fcResult.flashcards
+            flashcardModelUsed = fcResult.model_used
             console.log('FLASHCARD API RETURNED:', cards)
         } catch (err: unknown) {
             console.error('Flashcard generation error:', err)
@@ -948,6 +956,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                     isPinned: false,
                     pageIndex: currentPage,
                     isLoading: false,
+                    modelUsed: flashcardModelUsed,
                 } as unknown as Record<string, unknown>,
                 style: { width: cardWidth },
             }

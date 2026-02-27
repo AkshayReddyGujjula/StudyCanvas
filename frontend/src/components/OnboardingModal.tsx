@@ -4,9 +4,8 @@ import { useAppStore } from '../store/appStore'
 
 /**
  * Two-step onboarding modal shown to first-time users.
- *   Step 1 — Ask for their name.
- *   Step 2 — Pick a local folder where StudyCanvas data will be stored.
- *   OR — Restore from an existing StudyCanvas folder.
+ *   Step 1 — Choose workspace: create new or restore existing.
+ *   Step 2 — Ask for their name (only when creating a new workspace).
  */
 export default function OnboardingModal() {
     const completeOnboarding = useAppStore((s) => s.completeOnboarding)
@@ -16,22 +15,17 @@ export default function OnboardingModal() {
     const [error, setError] = useState<string | null>(null)
     const [isSelecting, setIsSelecting] = useState(false)
     const [isRestoring, setIsRestoring] = useState(false)
+    /** Handle selected during "Create New Workspace" — held until name is entered. */
+    const [pendingHandle, setPendingHandle] = useState<FileSystemDirectoryHandle | null>(null)
 
-    const handleNameSubmit = () => {
-        if (!name.trim()) {
-            setError('Please enter your name.')
-            return
-        }
-        setError(null)
-        setStep(2)
-    }
-
+    /** Step 1: User clicks "Create New Workspace" — pick folder, then advance to name step. */
     const handleFolderSelect = async () => {
         setError(null)
         setIsSelecting(true)
         try {
             const handle = await selectAndCreateRootFolder()
-            await completeOnboarding(name.trim(), handle)
+            setPendingHandle(handle)
+            setStep(2) // now ask for name
         } catch (err) {
             console.error('[OnboardingModal] folder select failed', err)
             if (err instanceof FolderValidationError) {
@@ -46,6 +40,26 @@ export default function OnboardingModal() {
         }
     }
 
+    /** Step 2: User enters name and confirms — finish onboarding. */
+    const handleNameSubmit = async () => {
+        if (!name.trim()) {
+            setError('Please enter your name.')
+            return
+        }
+        if (!pendingHandle) {
+            setError('Something went wrong. Please go back and select a folder.')
+            return
+        }
+        setError(null)
+        try {
+            await completeOnboarding(name.trim(), pendingHandle)
+        } catch (err) {
+            console.error('[OnboardingModal] completeOnboarding failed', err)
+            setError('Failed to set up workspace. Please try again.')
+        }
+    }
+
+    /** Step 1: User clicks "Restore Existing Workspace" — name comes from manifest. */
     const handleRestore = async () => {
         setError(null)
         setIsRestoring(true)
@@ -81,37 +95,12 @@ export default function OnboardingModal() {
                     <p className="text-sm text-gray-500 mt-1">Let's set up your workspace</p>
                 </div>
 
+                {/* Step 1: Choose workspace — Create New or Restore Existing */}
                 {step === 1 && (
-                    <div className="flex flex-col gap-4">
-                        <div className="flex flex-col gap-1">
-                            <label className="text-sm font-medium text-gray-700">What's your name?</label>
-                            <input
-                                autoFocus
-                                type="text"
-                                value={name}
-                                onChange={(e) => setName(e.target.value)}
-                                onKeyDown={(e) => e.key === 'Enter' && handleNameSubmit()}
-                                placeholder="e.g. Akshay"
-                                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-gray-800"
-                            />
-                        </div>
-                        {error && (
-                            <p className="text-sm text-red-600">{error}</p>
-                        )}
-                        <button
-                            onClick={handleNameSubmit}
-                            className="w-full px-4 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg transition-colors"
-                        >
-                            Continue
-                        </button>
-                    </div>
-                )}
-
-                {step === 2 && (
                     <div className="flex flex-col gap-4">
                         <div className="text-center">
                             <p className="text-sm text-gray-600 mb-1">
-                                Hi <span className="font-semibold text-gray-800">{name}</span>! Choose where to store your canvases.
+                                Choose where to store your canvases.
                             </p>
                             <p className="text-xs text-gray-400">
                                 A <code className="bg-gray-100 px-1 rounded">StudyCanvas</code> folder will be created at the location you pick.
@@ -177,9 +166,35 @@ export default function OnboardingModal() {
                         {error && (
                             <p className="text-sm text-red-600 text-center">{error}</p>
                         )}
+                    </div>
+                )}
 
+                {/* Step 2: Enter name (only for new workspace) */}
+                {step === 2 && (
+                    <div className="flex flex-col gap-4">
+                        <div className="flex flex-col gap-1">
+                            <label className="text-sm font-medium text-gray-700">What's your name?</label>
+                            <input
+                                autoFocus
+                                type="text"
+                                value={name}
+                                onChange={(e) => setName(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleNameSubmit()}
+                                placeholder="e.g. Akshay"
+                                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-gray-800"
+                            />
+                        </div>
+                        {error && (
+                            <p className="text-sm text-red-600">{error}</p>
+                        )}
                         <button
-                            onClick={() => { setStep(1); setError(null) }}
+                            onClick={handleNameSubmit}
+                            className="w-full px-4 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg transition-colors"
+                        >
+                            Get Started
+                        </button>
+                        <button
+                            onClick={() => { setStep(1); setError(null); setPendingHandle(null) }}
                             className="text-sm text-gray-400 hover:text-gray-600 transition-colors"
                         >
                             ← Back
