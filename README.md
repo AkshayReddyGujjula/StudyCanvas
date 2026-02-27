@@ -35,6 +35,11 @@ The result is a **visual knowledge map** of exactly what you understood, what co
 | **AI Answer Validation** | Short-answer quiz responses are graded by Gemini with constructive feedback. MCQ answers are validated instantly client-side. |
 | **Handwriting & Vision Support** | Quiz/flashcard generation always includes a rendered page image so Gemini can read handwritten notes, annotations, and diagrams that text extraction misses. |
 | **OCR Snipping Tool** | Draw a rectangle over any region of the PDF (Ctrl+Shift+S) to extract text via Gemini Vision and auto-ask a question about it. |
+| **Whiteboard & Drawing Tools** | Full drawing overlay with dual pens, highlighter, stroke & area erasers, text tool, and undo/redo — draw anywhere on the canvas or directly on PDF nodes. |
+| **Color Picker with Drag-to-Delete** | Choose from preset colors or enter custom hex values. Drag a color swatch to the trash bin to remove it. |
+| **Node-Attached Annotations** | Strokes drawn on a PDF/content node automatically attach to it — when the node moves, annotations follow. |
+| **Resize Warning for Annotated Nodes** | If you try to resize a node with drawing annotations, a safety warning appears to prevent accidental annotation displacement. |
+| **PDF Viewer Lock & Quality** | Lock a PDF node to prevent accidental dragging/resizing. Adjust the rendering resolution (DPR) via a quality slider for crisp or fast rendering. |
 | **Streaming Responses** | All AI answers stream token-by-token using `fetch` + `ReadableStream` with a cancel button. |
 | **Folder & Canvas Management** | Organise canvases in folders. Name prompts on creation prevent accidental duplicates. |
 | **Local File Persistence** | Canvas state and PDFs are saved to a local folder you choose via the File System Access API. |
@@ -123,9 +128,15 @@ StudyCanvas/
         │   ├── OnboardingModal.tsx     # First-run user details form
         │   ├── ToolsModal.tsx          # User context / settings modal
         │   ├── StudyNotePDF.tsx        # PDF export component (@react-pdf/renderer)
-        │   └── PDFViewer/
+        │   ├── PDFViewer/
+        │   │   ├── index.ts
+        │   │   └── PDFViewer.tsx       # pdf.js page renderer + snipping tool
+        │   └── whiteboard/
         │       ├── index.ts
-        │       └── PDFViewer.tsx       # pdf.js page renderer + snipping tool
+        │       ├── DrawingCanvas.tsx   # HTML5 Canvas drawing overlay (pen, highlighter, eraser)
+        │       ├── DrawingToolbar.tsx  # Toolbar with tool selection, settings & undo/redo
+        │       ├── ColorPicker.tsx     # Color palette with custom hex & drag-to-delete
+        │       └── TextNode.tsx        # Draggable text annotations on the canvas
         ├── hooks/
         │   └── useTextSelection.ts     # Text selection detection hook
         ├── services/

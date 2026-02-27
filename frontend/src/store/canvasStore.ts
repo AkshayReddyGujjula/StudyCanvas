@@ -417,7 +417,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
     setDrawingStrokes: (strokes) => set({ drawingStrokes: strokes }),
 
     whiteboardUndo: () => {
-        const { whiteboardUndoStack, drawingStrokes, nodes } = get()
+        const { whiteboardUndoStack, nodes } = get()
         if (whiteboardUndoStack.length === 0) return
         const action = whiteboardUndoStack[whiteboardUndoStack.length - 1]
         const newUndo = whiteboardUndoStack.slice(0, -1)
