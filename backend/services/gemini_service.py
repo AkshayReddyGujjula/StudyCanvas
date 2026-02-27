@@ -311,14 +311,13 @@ async def generate_quiz(
         import re as _re
         effective_content = _re.sub(r'^##\s*Page\s*\d+\s*', '', effective_content).strip()
         
+        # Always include the page image when available — handles handwritten notes,
+        # diagrams, and annotations that text extraction misses
         has_image = False
-        if len(effective_content) < 50:
-            img_b64 = image_base64 or (get_page_image_base64(pdf_id, page_index) if pdf_id and page_index is not None else None)
-            if img_b64:
-                # Send the page image directly to Gemini as multimodal content
-                # instead of doing an intermediate OCR extraction
-                contents.append({"mime_type": "image/jpeg", "data": img_b64})
-                has_image = True
+        img_b64 = image_base64 or (get_page_image_base64(pdf_id, page_index) if pdf_id and page_index is not None else None)
+        if img_b64:
+            contents.append({"mime_type": "image/jpeg", "data": img_b64})
+            has_image = True
 
         if len(effective_content) < 20 and not has_image:
             raise HTTPException(
@@ -330,13 +329,18 @@ async def generate_quiz(
         if has_image and len(effective_content) < 20:
             context_section = "(An image of the page is provided above. Base your questions on the visual content.)"
         elif has_image:
-            context_section = f"Page text:\n{effective_content}\n\n(An image of the page is also provided for additional context.)"
+            context_section = f"Extracted text (may be incomplete — the page image above is the primary source):\n{effective_content}"
         else:
             context_section = f"Page context:\n{effective_content}"
 
         prompt = (
             "You are an intelligent quiz generator for university students.\n\n"
             "A student wants to be tested on the following page content.\n\n"
+            "CRITICAL — Image Analysis:\n"
+            "- If a page image is provided, you MUST carefully examine it for ALL visible content "
+            "including handwritten notes, annotations, diagrams, and any text that may not appear in the extracted text.\n"
+            "- The page image is the PRIMARY and most reliable source of content. The extracted text may miss "
+            "handwritten content entirely.\n\n"
             "Format Rules:\n"
             "  • Generate a default of 4 questions total. If there is a lot of content or complex concepts, intelligently decide to ask up to a maximum of 7 questions.\n"
             "  • Mix question types intelligently:\n"
@@ -348,6 +352,8 @@ async def generate_quiz(
             "      - Provide EXACTLY 4 options in the 'options' array.\n"
             "      - Set 'correct_option' to the 0-based index (0–3) of the correct option.\n"
             "      - Make distractors plausible but clearly wrong on reflection.\n"
+            "  • Focus on the EDUCATIONAL SUBJECT MATTER — ignore page numbers, exam formatting, "
+            "headers, barcodes, or administrative instructions.\n"
             "  • For short_answer questions: leave 'options' as null and 'correct_option' as null.\n\n"
             f"{context_section}\n\n"
             "Return the questions as a JSON array. No markdown fencing, no extra keys.\n"
@@ -458,13 +464,13 @@ async def generate_flashcards(
         import re as _re
         effective_content = _re.sub(r'^##\s*Page\s*\d+\s*', '', effective_content).strip()
         
+        # Always include the page image when available — handles handwritten notes,
+        # diagrams, and annotations that text extraction misses
         has_image = False
-        if len(effective_content) < 50:
-            img_b64 = image_base64 or (get_page_image_base64(pdf_id, page_index) if pdf_id and page_index is not None else None)
-            if img_b64:
-                # Send the page image directly to Gemini as multimodal content
-                contents.append({"mime_type": "image/jpeg", "data": img_b64})
-                has_image = True
+        img_b64 = image_base64 or (get_page_image_base64(pdf_id, page_index) if pdf_id and page_index is not None else None)
+        if img_b64:
+            contents.append({"mime_type": "image/jpeg", "data": img_b64})
+            has_image = True
 
         if len(effective_content) < 20 and not has_image:
             raise HTTPException(
@@ -476,19 +482,25 @@ async def generate_flashcards(
         if has_image and len(effective_content) < 20:
             context_section = "(An image of the page is provided above. Base your flashcards on the visual content.)"
         elif has_image:
-            context_section = f"Page text:\n{effective_content}\n\n(An image of the page is also provided for additional context.)"
+            context_section = f"Extracted text (may be incomplete — the page image above is the primary source):\n{effective_content}"
         else:
             context_section = f"Page context:\n{effective_content}"
 
         prompt = (
             "You are an expert study-aid creator making flash cards for a university student.\n\n"
             "A student wants to review the key concepts from the following page content.\n\n"
+            "CRITICAL — Image Analysis:\n"
+            "- If a page image is provided, you MUST carefully examine it for ALL visible content "
+            "including handwritten notes, annotations, diagrams, and any text that may not appear in the extracted text.\n"
+            "- The page image is the PRIMARY and most reliable source of content. The extracted text may miss "
+            "handwritten content entirely.\n\n"
             "Flash card rules:\n"
             "  • Create a minimum of 3 and up to a maximum of 5 flash cards total. Intelligently decide how many to generate based on the amount of content.\n"
             "  • The 'question' field (front of card): A concise, specific question that tests active recall of a key concept.\n"
             "    - Keep it SHORT \u2014 one sentence maximum.\n"
             "  \u2022 The 'answer' field (back of card): A clear, complete explanation the student can use to learn.\n"
             "    - 2-4 sentences. Not too short, not an essay.\n"
+            "  \u2022 Focus on the EDUCATIONAL SUBJECT MATTER — ignore page numbers, exam formatting, headers, barcodes, or administrative instructions.\n"
             "  \u2022 Do NOT add any intro text, markdown fencing, or extra keys.\n"
             f"{avoid_duplicates_instruction}\n"
             f"{context_section}\n\n"
@@ -573,13 +585,13 @@ async def generate_page_quiz(page_content: str, pdf_id: str | None = None, page_
     # Strip the '## Page N' header injected by splitMarkdownByPage — not educational content
     effective_content = _re.sub(r'^##\s*Page\s*\d+\s*', '', effective_content).strip()
     
+    # Always include the page image when available — handles handwritten notes,
+    # diagrams, and annotations that text extraction misses
     has_image = False
-    if len(effective_content) < 50:
-        img_b64 = image_base64 or (get_page_image_base64(pdf_id, page_index) if pdf_id and page_index is not None else None)
-        if img_b64:
-            # Send the page image directly to Gemini as multimodal content
-            contents.append({"mime_type": "image/jpeg", "data": img_b64})
-            has_image = True
+    img_b64 = image_base64 or (get_page_image_base64(pdf_id, page_index) if pdf_id and page_index is not None else None)
+    if img_b64:
+        contents.append({"mime_type": "image/jpeg", "data": img_b64})
+        has_image = True
 
     if len(effective_content) < 20 and not has_image:
         raise HTTPException(
@@ -591,7 +603,7 @@ async def generate_page_quiz(page_content: str, pdf_id: str | None = None, page_
     if has_image and len(effective_content) < 20:
         context_section = "(An image of the page is provided above. Base your questions on the visual content.)"
     elif has_image:
-        context_section = f"Page text:\n{effective_content}\n\n(An image of the page is also provided for additional context.)"
+        context_section = f"Extracted text (may be incomplete — the page image above is the primary source):\n{effective_content}"
     else:
         context_section = f"Page content:\n\n{effective_content}"
 
@@ -599,8 +611,15 @@ async def generate_page_quiz(page_content: str, pdf_id: str | None = None, page_
         "You are an expert academic tutor creating a short comprehension quiz.\n\n"
         "Based ONLY on the page content below, generate between 2 and 5 concise short-answer "
         "questions that test a student's understanding of the key concepts on this page. Intelligently decide how many questions to ask based on the amount of content.\n\n"
+        "CRITICAL — Image Analysis:\n"
+        "- If a page image is provided, you MUST carefully examine it for ALL visible content "
+        "including handwritten notes, annotations, diagrams, and any text that may not appear in the extracted text.\n"
+        "- The page image is the PRIMARY and most reliable source of content. The extracted text may miss "
+        "handwritten content entirely.\n\n"
         "Rules:\n"
-        "- Use ONLY information from the provided page content. Do not introduce outside concepts.\n"
+        "- Use ONLY information visible on the page (image and/or text). Do not introduce outside concepts.\n"
+        "- Questions should be about the EDUCATIONAL SUBJECT MATTER on the page — not about page numbers, "
+        "exam formatting, headers, barcodes, or administrative instructions.\n"
         "- Questions should be specific, not vague or generic.\n"
         "- Questions should require a sentence or two to answer properly.\n"
         "- Number the questions with the depth of understanding ranging from recall → application.\n"
@@ -675,11 +694,15 @@ async def grade_answer(
     # Strip the '## Page N' header before checking if content is readable
     cleaned_page_content = _re.sub(r'^##\s*Page\s*\d+\s*', '', page_content.strip()).strip()
     contents = []
-    if len(cleaned_page_content) < 50:
-        img_b64 = image_base64 or (get_page_image_base64(pdf_id, page_index) if pdf_id and page_index is not None else None)
-        if img_b64:
-            contents.append({"mime_type": "image/jpeg", "data": img_b64})
-            prompt += "\n\n(No readable text was found, so an image of the page is provided instead.)"
+    # Always include the page image when available — handles handwritten notes,
+    # diagrams, and annotations that text extraction misses
+    img_b64 = image_base64 or (get_page_image_base64(pdf_id, page_index) if pdf_id and page_index is not None else None)
+    if img_b64:
+        contents.append({"mime_type": "image/jpeg", "data": img_b64})
+        if len(cleaned_page_content) < 50:
+            prompt += "\n\n(The extracted text was very limited. An image of the page is provided — use it as the primary source of truth for grading.)"
+        else:
+            prompt += "\n\n(An image of the page is also provided. It may contain handwritten notes or annotations not captured in the text above. Use the image as the primary source of truth for grading.)"
 
     contents.append(prompt)
 

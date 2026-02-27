@@ -79,9 +79,10 @@ export default function RevisionModal({
 
         const fetchQuiz = async () => {
             let imageBase64: string | undefined
-            if (sourceType === 'page' && pageContent !== undefined && pageContent.length < 50) {
+            // Always send the page image so Gemini can read handwritten/visual content
+            if (sourceType === 'page' && pageIndex !== undefined) {
                 const pdfBuffer = useCanvasStore.getState().pdfArrayBuffer
-                if (pdfBuffer && pageIndex !== undefined) {
+                if (pdfBuffer) {
                     const b64 = await extractPageImageBase64(pdfBuffer, pageIndex)
                     if (b64) imageBase64 = b64
                 }

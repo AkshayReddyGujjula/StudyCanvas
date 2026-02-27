@@ -156,7 +156,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
 
         let imageBase64: string | undefined
         const pdfBuffer = useCanvasStore.getState().pdfArrayBuffer
-        if (pageContent.length < 50 && pdfBuffer) {
+        if (pdfBuffer) {
             const b64 = await extractPageImageBase64(pdfBuffer, nodePageIndex - 1)
             if (b64) imageBase64 = b64
         }
@@ -201,7 +201,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
             const pageContent = pageMarkdowns[currentPage - 1] ?? ''
             let imageBase64: string | undefined
             const pdfBuffer = useCanvasStore.getState().pdfArrayBuffer
-            if (pageContent.length < 50 && pdfBuffer) {
+            if (pdfBuffer) {
                 const b64 = await extractPageImageBase64(pdfBuffer, currentPage - 1)
                 if (b64) imageBase64 = b64
             }
@@ -873,10 +873,10 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
         let flashcardModelUsed: string | undefined
         try {
             let imageBase64: string | undefined
-            // If the source is the current page and it has very little text, send the image instead
-            if (sourceType === 'page' && pageContent && pageContent.length < 50) {
+            // Always send the page image so Gemini can read handwritten/visual content
+            if (sourceType === 'page' && pIndex !== undefined) {
                 const pdfBuffer = useCanvasStore.getState().pdfArrayBuffer
-                if (pdfBuffer && pIndex !== undefined) {
+                if (pdfBuffer) {
                     const b64 = await extractPageImageBase64(pdfBuffer, pIndex)
                     if (b64) imageBase64 = b64
                 }

@@ -24,6 +24,12 @@ export default function HomePage() {
     const [showContext, setShowContext] = useState(false)
     const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
     const [showAutosaveMenu, setShowAutosaveMenu] = useState(false)
+
+    // ─── New canvas / folder name modals ─────────────────────────────────
+    const [showNewCanvasModal, setShowNewCanvasModal] = useState(false)
+    const [showNewFolderModal, setShowNewFolderModal] = useState(false)
+    const [newItemName, setNewItemName] = useState('')
+    const [newItemError, setNewItemError] = useState('')
     const autoSaveInterval = useAppStore((s) => s.autoSaveInterval)
     const setAutoSaveInterval = useAppStore((s) => s.setAutoSaveInterval)
     const settingsRef = useRef<HTMLDivElement>(null)
@@ -51,12 +57,29 @@ export default function HomePage() {
         return () => clearTimeout(t)
     }, [dragError])
 
-    const handleNewCanvas = async () => {
+    const handleNewCanvas = () => {
+        setNewItemName('')
+        setNewItemError('')
+        setShowNewCanvasModal(true)
+    }
+
+    const handleConfirmNewCanvas = async () => {
+        const name = newItemName.trim()
+        if (!name) {
+            setNewItemError('Please enter a name.')
+            return
+        }
+        const duplicate = canvasesInView.some(c => c.title.toLowerCase() === name.toLowerCase())
+        if (duplicate) {
+            setNewItemError('A canvas with that name already exists in this folder.')
+            return
+        }
+        setShowNewCanvasModal(false)
         const id = crypto.randomUUID()
         const now = new Date().toISOString()
         await addCanvas({
             id,
-            title: 'Untitled',
+            title: name,
             createdAt: now,
             modifiedAt: now,
             parentFolderId: currentFolderId,
@@ -64,14 +87,24 @@ export default function HomePage() {
         navigate(`/canvas/${id}`)
     }
 
-    const handleNewFolder = async () => {
-        const siblings = folderList.filter(f => (f.parentFolderId ?? null) === currentFolderId)
-        let name = 'New Folder'
-        let counter = 1
-        while (siblings.some(f => f.name.toLowerCase() === name.toLowerCase())) {
-            counter++
-            name = `New Folder ${counter}`
+    const handleNewFolder = () => {
+        setNewItemName('')
+        setNewItemError('')
+        setShowNewFolderModal(true)
+    }
+
+    const handleConfirmNewFolder = async () => {
+        const name = newItemName.trim()
+        if (!name) {
+            setNewItemError('Please enter a name.')
+            return
         }
+        const duplicate = foldersInView.some(f => f.name.toLowerCase() === name.toLowerCase())
+        if (duplicate) {
+            setNewItemError('A folder with that name already exists here.')
+            return
+        }
+        setShowNewFolderModal(false)
         try {
             await addFolder(name, currentFolderId)
         } catch (err) {
@@ -420,6 +453,90 @@ export default function HomePage() {
 
             {/* Context / User Details modal */}
             {showContext && <ToolsModal onClose={() => setShowContext(false)} />}
+
+            {/* New Canvas name modal */}
+            {showNewCanvasModal && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40" onClick={() => setShowNewCanvasModal(false)}>
+                    <div
+                        className="bg-white rounded-xl shadow-2xl p-6 max-w-sm w-full mx-4"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <h3 className="text-lg font-semibold text-gray-900 mb-1">New Canvas</h3>
+                        <p className="text-sm text-gray-500 mb-4">Enter a name for your new canvas.</p>
+                        <input
+                            autoFocus
+                            type="text"
+                            value={newItemName}
+                            onChange={(e) => { setNewItemName(e.target.value); setNewItemError('') }}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleConfirmNewCanvas()
+                                if (e.key === 'Escape') setShowNewCanvasModal(false)
+                            }}
+                            placeholder="e.g. Biology Chapter 3"
+                            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
+                        />
+                        {newItemError && (
+                            <p className="mt-1.5 text-xs text-red-600">{newItemError}</p>
+                        )}
+                        <div className="flex justify-end gap-3 mt-5">
+                            <button
+                                onClick={() => setShowNewCanvasModal(false)}
+                                className="px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleConfirmNewCanvas}
+                                className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors"
+                            >
+                                Create
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* New Folder name modal */}
+            {showNewFolderModal && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40" onClick={() => setShowNewFolderModal(false)}>
+                    <div
+                        className="bg-white rounded-xl shadow-2xl p-6 max-w-sm w-full mx-4"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <h3 className="text-lg font-semibold text-gray-900 mb-1">New Folder</h3>
+                        <p className="text-sm text-gray-500 mb-4">Enter a name for your new folder.</p>
+                        <input
+                            autoFocus
+                            type="text"
+                            value={newItemName}
+                            onChange={(e) => { setNewItemName(e.target.value); setNewItemError('') }}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleConfirmNewFolder()
+                                if (e.key === 'Escape') setShowNewFolderModal(false)
+                            }}
+                            placeholder="e.g. Semester 1"
+                            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent"
+                        />
+                        {newItemError && (
+                            <p className="mt-1.5 text-xs text-red-600">{newItemError}</p>
+                        )}
+                        <div className="flex justify-end gap-3 mt-5">
+                            <button
+                                onClick={() => setShowNewFolderModal(false)}
+                                className="px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleConfirmNewFolder}
+                                className="px-4 py-2 text-sm font-medium text-white bg-amber-500 hover:bg-amber-600 rounded-lg transition-colors"
+                            >
+                                Create
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Logout confirmation modal */}
             {showLogoutConfirm && (
