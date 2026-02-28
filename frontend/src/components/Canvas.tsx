@@ -43,6 +43,7 @@ import type { AnswerNodeData, QuizQuestionNodeData, FlashcardNodeData, TextNodeD
 import { pdf } from '@react-pdf/renderer'
 import { buildQATree } from '../utils/buildQATree'
 import StudyNotePDF from './StudyNotePDF'
+import type { StickyNoteEntry, CustomPromptEntry, ImageEntry, SummaryEntry } from './StudyNotePDF'
 import { exportCurrentPage, exportAllPages, isExportInProgress, pageHasContent } from '../utils/canvasExport'
 
 const NODE_TYPES = {
@@ -647,10 +648,16 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
         setNodes((prev) => [...prev, newNode])
         persistToLocalStorage()
 
-        // Auto-stream summary
+        // Auto-stream summary — read pageMarkdowns from store at call time
+        // to avoid stale closure issues where the context might be empty
         const controller = new AbortController()
         try {
-            const pageContent = pageMarkdowns[currentPage - 1] ?? ''
+            const storeState = useCanvasStore.getState()
+            let pageContent = storeState.pageMarkdowns[currentPage - 1] ?? ''
+            // Fallback: if page-specific markdown is empty, use raw_text from fileData
+            if (!pageContent.trim() && storeState.fileData?.raw_text) {
+                pageContent = storeState.fileData.raw_text
+            }
 
             const prompt = `Please provide a concise summary of this page's content. Focus on the key concepts, definitions, and important points. Use bullet points for clarity.`
 
@@ -1398,8 +1405,49 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
         setShowMenu(false)
         setShowRevisionMenu(false)
         const { qaTree, pageQuizzes } = buildQATree(nodes, edges)
-        if (qaTree.length === 0 && pageQuizzes.length === 0) {
-            showToast('No questions yet — ask Gemini something first!')
+
+        // Extract sticky notes
+        const stickyNotes: StickyNoteEntry[] = nodes
+            .filter((n) => n.type === 'stickyNoteNode')
+            .map((n) => {
+                const d = n.data as unknown as StickyNoteNodeData
+                return { content: d.content ?? '', color: d.color ?? '#FFF9C4', pageIndex: d.pageIndex }
+            })
+            .filter((n) => n.content.trim().length > 0)
+
+        // Extract custom prompts with chat history
+        const customPrompts: CustomPromptEntry[] = nodes
+            .filter((n) => n.type === 'customPromptNode')
+            .map((n) => {
+                const d = n.data as unknown as CustomPromptNodeData
+                return { chatHistory: d.chatHistory ?? [], pageIndex: d.pageIndex }
+            })
+            .filter((p) => p.chatHistory.length > 0)
+
+        // Extract uploaded images
+        const imageEntries: ImageEntry[] = nodes
+            .filter((n) => n.type === 'imageNode')
+            .map((n) => {
+                const d = n.data as unknown as ImageNodeData
+                return { imageDataUrl: d.imageDataUrl, imageName: d.imageName ?? 'Image', pageIndex: d.pageIndex }
+            })
+            .filter((img) => !!img.imageDataUrl)
+
+        // Extract summaries
+        const summaryEntries: SummaryEntry[] = nodes
+            .filter((n) => n.type === 'summaryNode')
+            .map((n) => {
+                const d = n.data as unknown as SummaryNodeData
+                return { summary: d.summary ?? '', sourcePage: d.sourcePage ?? 1 }
+            })
+            .filter((s) => s.summary.trim().length > 0)
+
+        const hasContent = qaTree.length > 0 || pageQuizzes.length > 0 ||
+            stickyNotes.length > 0 || customPrompts.length > 0 ||
+            imageEntries.length > 0 || summaryEntries.length > 0
+
+        if (!hasContent) {
+            showToast('Nothing to export — add some content first!')
             return
         }
 
@@ -1437,6 +1485,10 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 <StudyNotePDF
                     qaTree={qaTree}
                     pageQuizzes={pageQuizzes}
+                    stickyNotes={stickyNotes}
+                    customPrompts={customPrompts}
+                    images={imageEntries}
+                    summaries={summaryEntries}
                     filename={fileData?.filename ?? 'Document'}
                     exportDate={exportDate}
                     totalQuestions={qaTree.length}

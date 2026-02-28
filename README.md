@@ -33,6 +33,13 @@ The result is a **visual knowledge map** of exactly what you understood, what co
 | **Revision Quiz Mode** | Generate a personalised mixed MCQ + short-answer quiz from struggling nodes or the current page. |
 | **Flashcard Mode** | Turn struggling nodes or the current page into flashcards for rapid-fire review. |
 | **AI Answer Validation** | Short-answer quiz responses are graded by Gemini with constructive feedback. MCQ answers are validated instantly client-side. |
+| **Custom Prompt Node** | Drop a freeform AI chat node onto the canvas from the left toolbar. Toggle whether it sends the current page's text + image as context, and pick between Gemini Flash or Flash Lite per-node. |
+| **Page Summary Node** | One-click streaming summary of the current page, placed as a canvas node for at-a-glance review. |
+| **Sticky Note Nodes** | Add coloured sticky notes (6 pastel presets) anywhere on the canvas for freeform annotations and reminders. |
+| **Image Nodes** | Drag any image file from your computer onto the canvas via the left toolbar. Images are resizable and persist with the canvas save. |
+| **Pomodoro Study Timer** | Drop a timer node onto the canvas with Pomodoro, short-break, and long-break modes. Tracks completed sessions and supports custom durations. |
+| **Left Toolbar** | Quick-access toolbar to insert any node type: custom prompt, image, sticky note, timer, or page summary. |
+| **Canvas Export** | Export the entire canvas (all nodes, edges, and drawing strokes) as a high-resolution PNG screenshot or assembled PDF, automatically zooming to fit all nodes on the current page. |
 | **Handwriting & Vision Support** | Quiz/flashcard generation always includes a rendered page image so Gemini can read handwritten notes, annotations, and diagrams that text extraction misses. |
 | **OCR Snipping Tool** | Draw a rectangle over any region of the PDF (Ctrl+Shift+S) to extract text via Gemini Vision and auto-ask a question about it. |
 | **Whiteboard & Drawing Tools** | Full drawing overlay with dual pens, highlighter, stroke & area erasers, text tool, and undo/redo — draw anywhere on the canvas or directly on PDF nodes. |
@@ -40,6 +47,7 @@ The result is a **visual knowledge map** of exactly what you understood, what co
 | **Node-Attached Annotations** | Strokes drawn on a PDF/content node automatically attach to it — when the node moves, annotations follow. |
 | **Resize Warning for Annotated Nodes** | If you try to resize a node with drawing annotations, a safety warning appears to prevent accidental annotation displacement. |
 | **PDF Viewer Lock & Quality** | Lock a PDF node to prevent accidental dragging/resizing. Adjust the rendering resolution (DPR) via a quality slider for crisp or fast rendering. |
+| **Dual Model Tiers** | Every AI response includes a model indicator badge. Complex/analytical queries automatically route to Gemini 2.5 Flash; simpler tasks use the faster Flash Lite. Users can also override the model per custom prompt node. |
 | **Streaming Responses** | All AI answers stream token-by-token using `fetch` + `ReadableStream` with a cancel button. |
 | **Folder & Canvas Management** | Organise canvases in folders. Name prompts on creation prevent accidental duplicates. |
 | **Local File Persistence** | Canvas state and PDFs are saved to a local folder you choose via the File System Access API. |
@@ -120,6 +128,12 @@ StudyCanvas/
         │   ├── AnswerNode.tsx          # Q&A answer node with status tracking
         │   ├── QuizQuestionNode.tsx    # Page quiz node with grading
         │   ├── FlashcardNode.tsx       # Flashcard node (flip animation)
+        │   ├── CustomPromptNode.tsx    # Freeform AI chat node — model picker + context toggle
+        │   ├── SummaryNode.tsx         # Streamed one-click page summary node
+        │   ├── ImageNode.tsx           # Drag-and-drop image node with resize support
+        │   ├── StickyNoteNode.tsx      # Coloured sticky note node (6 pastel presets)
+        │   ├── TimerNode.tsx           # Pomodoro timer node (3 modes, custom durations)
+        │   ├── LeftToolbar.tsx         # Toolbar to insert prompt/image/sticky/timer/summary nodes
         │   ├── AskGeminiPopup.tsx      # Floating "Ask Gemini" popup on text select
         │   ├── QuestionModal.tsx       # Full question input modal
         │   ├── RevisionModal.tsx       # Revision quiz modal (MCQ + short-answer)
@@ -147,10 +161,11 @@ StudyCanvas/
         ├── types/
         │   └── index.ts                # Shared TypeScript types
         └── utils/
-            ├── buildQATree.ts          # Builds Q&A tree for PDF export
-            ├── pdfImageExtractor.ts    # Renders PDF page → base64 JPEG (pdf.js)
+            ├── buildQATree.ts          # Builds Q&A tree structure for PDF/study note export
+            ├── canvasExport.ts         # Exports the full canvas as a PNG screenshot or PDF
+            ├── pdfImageExtractor.ts    # Renders PDF page → base64 JPEG for Gemini Vision
             ├── pdfStorage.ts           # IndexedDB helpers for PDF binary caching
-            ├── pdfTextExtractor.ts     # Client-side PDF text extraction (pdf.js)
+            ├── pdfTextExtractor.ts     # Client-side PDF text extraction via pdf.js (large file path)
             └── positioning.ts         # Node placement & overlap-prevention helpers
 ```
 

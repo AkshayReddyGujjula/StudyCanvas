@@ -3,6 +3,7 @@ import {
     Page,
     Text,
     View,
+    Image,
     StyleSheet,
     Font,
     type Styles,
@@ -11,6 +12,30 @@ import {
 type PDFStyle = Styles[string]
 import type { QANode, PageQuizEntry } from '../utils/buildQATree'
 import type { ChatMessage, QuizQuestionNodeData } from '../types'
+
+// ─── Extra data types for enriched PDF export ────────────────────────────────
+
+export interface StickyNoteEntry {
+    content: string
+    color: string
+    pageIndex?: number
+}
+
+export interface CustomPromptEntry {
+    chatHistory: ChatMessage[]
+    pageIndex?: number
+}
+
+export interface ImageEntry {
+    imageDataUrl: string
+    imageName: string
+    pageIndex?: number
+}
+
+export interface SummaryEntry {
+    summary: string
+    sourcePage: number
+}
 
 // Use only built-in fonts — no network requests, instant render
 Font.registerHyphenationCallback((w) => [w])
@@ -500,6 +525,158 @@ const s = StyleSheet.create({
         marginBottom: 3,
         marginTop: 2,
     },
+
+    // ── sticky notes ──
+    notesSectionHeader: {
+        fontFamily: 'Helvetica-Bold',
+        fontSize: 13,
+        color: C.accent,
+        marginBottom: 10,
+        marginTop: 16,
+        paddingBottom: 6,
+        borderBottomWidth: 1.5,
+        borderBottomColor: '#A3BBD3',
+    },
+    noteBlock: {
+        marginBottom: 12,
+        borderLeftWidth: 4,
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+        borderRadius: 3,
+    },
+    notePageLabel: {
+        fontSize: 7.5,
+        color: C.muted,
+        fontFamily: 'Helvetica-Bold',
+        letterSpacing: 0.6,
+        textTransform: 'uppercase' as const,
+        marginBottom: 4,
+    },
+    noteContent: {
+        fontSize: 10,
+        color: C.text,
+        lineHeight: 1.55,
+    },
+
+    // ── custom prompts / AI chat ──
+    promptSectionHeader: {
+        fontFamily: 'Helvetica-Bold',
+        fontSize: 13,
+        color: '#4338CA', // indigo accent
+        marginBottom: 10,
+        marginTop: 16,
+        paddingBottom: 6,
+        borderBottomWidth: 1.5,
+        borderBottomColor: '#A3BBD3',
+    },
+    promptBlock: {
+        marginBottom: 16,
+    },
+    promptDivider: {
+        height: 0.5,
+        backgroundColor: C.divider,
+        marginBottom: 10,
+    },
+    promptIndex: {
+        fontSize: 8,
+        color: C.muted,
+        fontFamily: 'Helvetica-Bold',
+        letterSpacing: 0.8,
+        textTransform: 'uppercase' as const,
+        marginBottom: 6,
+    },
+    promptUserRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        marginBottom: 6,
+        gap: 8,
+    },
+    promptUserLabel: {
+        fontSize: 10,
+        fontFamily: 'Helvetica-Bold',
+        color: '#4338CA',
+        minWidth: 22,
+        paddingTop: 0.5,
+    },
+    promptUserText: {
+        fontSize: 10,
+        fontFamily: 'Helvetica-Bold',
+        color: C.text,
+        flex: 1,
+        lineHeight: 1.5,
+    },
+    promptAiRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        marginBottom: 6,
+        gap: 8,
+    },
+    promptAiLabel: {
+        fontSize: 10,
+        fontFamily: 'Helvetica-Bold',
+        color: C.teal,
+        minWidth: 22,
+        paddingTop: 0.5,
+    },
+    promptAiBody: {
+        flex: 1,
+    },
+
+    // ── images section ──
+    imagesSectionHeader: {
+        fontFamily: 'Helvetica-Bold',
+        fontSize: 13,
+        color: C.accent,
+        marginBottom: 10,
+        marginTop: 16,
+        paddingBottom: 6,
+        borderBottomWidth: 1.5,
+        borderBottomColor: '#A3BBD3',
+    },
+    imageBlock: {
+        marginBottom: 16,
+    },
+    imageLabel: {
+        fontSize: 8,
+        color: C.muted,
+        fontFamily: 'Helvetica-Bold',
+        letterSpacing: 0.6,
+        marginBottom: 6,
+    },
+    imageElement: {
+        maxWidth: 460,
+        maxHeight: 500,
+        objectFit: 'contain' as const,
+    },
+
+    // ── summary section ──
+    summarySectionHeader: {
+        fontFamily: 'Helvetica-Bold',
+        fontSize: 13,
+        color: C.accent,
+        marginBottom: 10,
+        marginTop: 16,
+        paddingBottom: 6,
+        borderBottomWidth: 1.5,
+        borderBottomColor: '#A3BBD3',
+    },
+    summaryBlock: {
+        marginBottom: 14,
+        backgroundColor: '#E8EEF4',
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        borderRadius: 4,
+        borderLeftWidth: 3,
+        borderLeftColor: C.accent,
+    },
+    summaryPageLabel: {
+        fontSize: 8,
+        color: C.accent,
+        fontFamily: 'Helvetica-Bold',
+        letterSpacing: 0.6,
+        textTransform: 'uppercase' as const,
+        marginBottom: 6,
+    },
 })
 
 // ─── Markdown → PDF helpers ──────────────────────────────────────────────────
@@ -867,18 +1044,163 @@ function QuizSection({ pageQuizzes }: { pageQuizzes: PageQuizEntry[] }) {
     )
 }
 
+// ─── Sticky Notes Section ────────────────────────────────────────────────────
+
+function StickyNotesSection({ notes }: { notes: StickyNoteEntry[] }) {
+    if (!notes || notes.length === 0) return null
+
+    // Color map for left-border tones
+    const borderColor = (hex: string) => {
+        const map: Record<string, string> = {
+            '#FFF9C4': '#F9A825', // yellow
+            '#FFCDD2': '#E57373', // pink
+            '#C8E6C9': '#66BB6A', // green
+            '#BBDEFB': '#42A5F5', // blue
+            '#E1BEE7': '#AB47BC', // purple
+            '#FFE0B2': '#FFA726', // orange
+        }
+        return map[hex] ?? '#A3BBD3'
+    }
+
+    return (
+        <View>
+            <Text style={s.notesSectionHeader}>Notes</Text>
+            {notes.map((note, idx) => (
+                <View
+                    key={idx}
+                    style={[
+                        s.noteBlock,
+                        {
+                            borderLeftColor: borderColor(note.color),
+                            backgroundColor: note.color + '66',
+                        },
+                    ]}
+                >
+                    {note.pageIndex && (
+                        <Text style={s.notePageLabel}>Page {note.pageIndex}</Text>
+                    )}
+                    <Text style={s.noteContent}>{note.content || '(empty note)'}</Text>
+                </View>
+            ))}
+        </View>
+    )
+}
+
+// ─── Custom Prompts / AI Chat Section ────────────────────────────────────────
+
+function CustomPromptsSection({ prompts }: { prompts: CustomPromptEntry[] }) {
+    if (!prompts || prompts.length === 0) return null
+
+    return (
+        <View>
+            <Text style={s.promptSectionHeader}>AI Conversations</Text>
+            {prompts.map((prompt, pIdx) => {
+                // Build Q/A pairs from chat history
+                const pairs: Array<{ q: string; a: string }> = []
+                const history = prompt.chatHistory ?? []
+                for (let i = 0; i < history.length; i++) {
+                    if (history[i].role === 'user') {
+                        const answer = history[i + 1]?.role === 'model' ? history[i + 1].content : ''
+                        pairs.push({ q: history[i].content, a: answer })
+                        if (answer) i++ // skip the model message
+                    }
+                }
+                if (pairs.length === 0) return null
+
+                return (
+                    <View key={pIdx} style={s.promptBlock}>
+                        <View style={s.promptDivider} />
+                        <Text style={s.promptIndex}>
+                            AI Chat {pIdx + 1}{prompt.pageIndex ? ` — Page ${prompt.pageIndex}` : ''}
+                        </Text>
+                        {pairs.map((pair, qIdx) => (
+                            <View key={qIdx}>
+                                <View style={s.promptUserRow}>
+                                    <Text style={s.promptUserLabel}>Q{qIdx + 1}.</Text>
+                                    <Text style={s.promptUserText}>{pair.q}</Text>
+                                </View>
+                                {pair.a ? (
+                                    <View style={s.promptAiRow}>
+                                        <Text style={s.promptAiLabel}>AI.</Text>
+                                        <View style={s.promptAiBody}>
+                                            <MarkdownBody text={pair.a} />
+                                        </View>
+                                    </View>
+                                ) : null}
+                            </View>
+                        ))}
+                    </View>
+                )
+            })}
+        </View>
+    )
+}
+
+// ─── Images Section ──────────────────────────────────────────────────────────
+
+function ImagesSection({ images }: { images: ImageEntry[] }) {
+    if (!images || images.length === 0) return null
+    return (
+        <View>
+            <Text style={s.imagesSectionHeader}>Uploaded Images</Text>
+            {images.map((img, idx) => (
+                <View key={idx} style={s.imageBlock} wrap={false}>
+                    <Text style={s.imageLabel}>
+                        {img.imageName}{img.pageIndex ? ` — Page ${img.pageIndex}` : ''}
+                    </Text>
+                    <Image src={img.imageDataUrl} style={s.imageElement} />
+                </View>
+            ))}
+        </View>
+    )
+}
+
+// ─── Summary Section ─────────────────────────────────────────────────────────
+
+function SummarySection({ summaries }: { summaries: SummaryEntry[] }) {
+    if (!summaries || summaries.length === 0) return null
+    // Sort by page
+    const sorted = [...summaries].sort((a, b) => a.sourcePage - b.sourcePage)
+    return (
+        <View>
+            <Text style={s.summarySectionHeader}>Page Summaries</Text>
+            {sorted.map((entry, idx) => (
+                <View key={idx} style={s.summaryBlock}>
+                    <Text style={s.summaryPageLabel}>Page {entry.sourcePage} Summary</Text>
+                    <MarkdownBody text={entry.summary} />
+                </View>
+            ))}
+        </View>
+    )
+}
+
 // ─── Document ────────────────────────────────────────────────────────────────
 
 interface Props {
     qaTree: QANode[]
     pageQuizzes: PageQuizEntry[]
+    stickyNotes?: StickyNoteEntry[]
+    customPrompts?: CustomPromptEntry[]
+    images?: ImageEntry[]
+    summaries?: SummaryEntry[]
     filename: string
     exportDate: string
     totalQuestions: number
     title: string
 }
 
-export default function StudyNotePDF({ qaTree, pageQuizzes, filename, exportDate, totalQuestions, title }: Props) {
+export default function StudyNotePDF({
+    qaTree,
+    pageQuizzes,
+    stickyNotes = [],
+    customPrompts = [],
+    images = [],
+    summaries = [],
+    filename,
+    exportDate,
+    totalQuestions,
+    title,
+}: Props) {
     return (
         <Document
             title="StudyCanvas Study Notes"
@@ -913,18 +1235,35 @@ export default function StudyNotePDF({ qaTree, pageQuizzes, filename, exportDate
                         <Text style={s.coverMeta}>Exported: {exportDate}</Text>
                     </View>
                     <View style={s.coverTagRow}>
-```,oldString:
-                        <Text style={s.coverTag}>{totalQuestions} Questions</Text>
-                        <Text style={s.coverTag}>
-                            {qaTree.reduce((n, r) => n + r.children.length, 0)} Branch Questions
-                        </Text>
-                        <Text style={s.coverTag}>
-                            {qaTree.reduce((n, r) => n + Math.floor(r.chatHistory.length / 2), 0)} Follow-ups
-                        </Text>
+                        {totalQuestions > 0 && (
+                            <Text style={s.coverTag}>{totalQuestions} Questions</Text>
+                        )}
+                        {qaTree.reduce((n, r) => n + r.children.length, 0) > 0 && (
+                            <Text style={s.coverTag}>
+                                {qaTree.reduce((n, r) => n + r.children.length, 0)} Branch Questions
+                            </Text>
+                        )}
+                        {qaTree.reduce((n, r) => n + Math.floor(r.chatHistory.length / 2), 0) > 0 && (
+                            <Text style={s.coverTag}>
+                                {qaTree.reduce((n, r) => n + Math.floor(r.chatHistory.length / 2), 0)} Follow-ups
+                            </Text>
+                        )}
                         {pageQuizzes.length > 0 && (
                             <Text style={s.coverTag}>
                                 {pageQuizzes.reduce((n, p) => n + p.questions.length, 0)} Quiz Questions
                             </Text>
+                        )}
+                        {stickyNotes.length > 0 && (
+                            <Text style={s.coverTag}>{stickyNotes.length} Notes</Text>
+                        )}
+                        {customPrompts.length > 0 && (
+                            <Text style={s.coverTag}>{customPrompts.length} AI Chats</Text>
+                        )}
+                        {images.length > 0 && (
+                            <Text style={s.coverTag}>{images.length} Images</Text>
+                        )}
+                        {summaries.length > 0 && (
+                            <Text style={s.coverTag}>{summaries.length} Summaries</Text>
                         )}
                     </View>
                 </View>
@@ -934,8 +1273,20 @@ export default function StudyNotePDF({ qaTree, pageQuizzes, filename, exportDate
                     <RootQABlock key={node.id} node={node} index={idx} />
                 ))}
 
+                {/* Sticky Notes */}
+                <StickyNotesSection notes={stickyNotes} />
+
+                {/* Custom AI Prompts & Answers */}
+                <CustomPromptsSection prompts={customPrompts} />
+
                 {/* Page Quizzes section */}
                 <QuizSection pageQuizzes={pageQuizzes} />
+
+                {/* Uploaded Images — after quizzes */}
+                <ImagesSection images={images} />
+
+                {/* Page Summaries — at the very end */}
+                <SummarySection summaries={summaries} />
             </Page>
         </Document>
     )

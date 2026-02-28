@@ -67,7 +67,13 @@ export default function SummaryNode({ id, data }: SummaryNodeProps) {
         if (!fileData || isRegenerating) return
         setIsRegenerating(true)
 
-        const pageContent = pageMarkdowns[data.sourcePage - 1] ?? ''
+        // Read pageMarkdowns from store at call time to avoid stale closure issues
+        const storeState = useCanvasStore.getState()
+        let pageContent = storeState.pageMarkdowns[data.sourcePage - 1] ?? ''
+        // Fallback: if page-specific markdown is empty, use raw_text from fileData
+        if (!pageContent.trim() && storeState.fileData?.raw_text) {
+            pageContent = storeState.fileData.raw_text
+        }
         updateNodeData(id, { summary: '', isLoading: true, isStreaming: true, status: 'loading' })
 
         try {

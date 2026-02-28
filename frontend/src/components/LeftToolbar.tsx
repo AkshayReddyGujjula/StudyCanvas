@@ -36,10 +36,7 @@ export default function LeftToolbar({
         <div className="fixed left-4 top-1/2 -translate-y-1/2 z-40 flex flex-col gap-1 p-1.5 bg-white/95 backdrop-blur-sm border border-gray-200 rounded-xl shadow-lg select-none">
             {/* Custom Prompt (chat with Gemini) */}
             <button onClick={onCustomPrompt} className={btnClass} title="Custom Prompt">
-                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="3" />
-                    <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
-                </svg>
+                <span className="text-[11px] font-extrabold leading-none text-indigo-500">AI</span>
             </button>
 
             <div className="h-px bg-gray-200 mx-1" />
