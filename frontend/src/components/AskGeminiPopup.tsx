@@ -22,63 +22,14 @@ export default function AskGeminiPopup({ rect, nodeId, mousePos, onAsk }: AskGem
         const vh = window.innerHeight
         const BUTTON_HEIGHT = 38   // px
         const BUTTON_WIDTH  = 152  // px
-        const GAP           = 12   // gap between anchor edge and button
         const EDGE_PADDING  = 8    // min clearance from viewport edges
 
         const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi)
 
-        // ── Fresh panel-edge query ────────────────────────────────────────────────
-        // Query right now (not at mouseup) so ReactFlow zoom/pan is already settled.
-        const panelEl = document.querySelector(`[data-nodeid="${nodeId}"]`)
-        const panelRect = panelEl?.getBoundingClientRect()
-        // Clamp to viewport — handles nodes that extend off-screen when zoomed in.
-        const pdfLeft  = panelRect ? clamp(panelRect.left,  0, vw) : 0
-        const pdfRight = panelRect ? clamp(panelRect.right, 0, vw) : vw
-
-        // ── Anchor point ─────────────────────────────────────────────────────────
-        // Prefer the selection rect centre; fall back to the mouse-release position
-        // when the rect is outside the viewport (can happen with ReactFlow stale values).
-        const rectInView =
-            rect.width > 0 && rect.height > 0 &&
-            rect.top > -100 && rect.top < vh + 100
-
-        const selCx = rectInView ? rect.left + rect.width  / 2 : mousePos.x
-        const selCy = rectInView ? rect.top  + rect.height / 2 : mousePos.y
-        const selTop    = rectInView ? rect.top    : mousePos.y - 10
-        const selBottom = rectInView ? rect.bottom : mousePos.y + 10
-
-        const vCenter = clamp(selCy - BUTTON_HEIGHT / 2, EDGE_PADDING, vh - BUTTON_HEIGHT - EDGE_PADDING)
-        const hCenter = clamp(selCx - BUTTON_WIDTH  / 2, EDGE_PADDING, vw - BUTTON_WIDTH  - EDGE_PADDING)
-
-        // ── Preferred placement order ────────────────────────────────────────────
-        // Always try RIGHT of PDF panel first → LEFT → ABOVE → BELOW.
-        // This keeps the popup out of the reading area and avoids the false
-        // "closest distance" tie that let ABOVE/BELOW win over the panel sides.
-
-        // Default: float near the mouse (last resort)
-        let finalTop  = clamp(mousePos.y + GAP, EDGE_PADDING, vh - BUTTON_HEIGHT - EDGE_PADDING)
-        let finalLeft = clamp(mousePos.x - BUTTON_WIDTH / 2, EDGE_PADDING, vw - BUTTON_WIDTH - EDGE_PADDING)
-
-        // 1. RIGHT of PDF panel  ← preferred
-        if (vw - pdfRight - EDGE_PADDING >= BUTTON_WIDTH + GAP) {
-            finalLeft = pdfRight + GAP
-            finalTop  = vCenter
-        }
-        // 2. LEFT of PDF panel
-        else if (pdfLeft - EDGE_PADDING >= BUTTON_WIDTH + GAP) {
-            finalLeft = pdfLeft - GAP - BUTTON_WIDTH
-            finalTop  = vCenter
-        }
-        // 3. ABOVE the selection
-        else if (selTop - EDGE_PADDING >= BUTTON_HEIGHT + GAP) {
-            finalTop  = selTop - GAP - BUTTON_HEIGHT
-            finalLeft = hCenter
-        }
-        // 4. BELOW the selection
-        else if (vh - selBottom - EDGE_PADDING >= BUTTON_HEIGHT + GAP) {
-            finalTop  = selBottom + GAP
-            finalLeft = hCenter
-        }
+        // Place the button at the cursor position (centred horizontally on cursor,
+        // slightly below it so it doesn't obscure the selection).
+        const finalTop  = clamp(mousePos.y + 8, EDGE_PADDING, vh - BUTTON_HEIGHT - EDGE_PADDING)
+        const finalLeft = clamp(mousePos.x - BUTTON_WIDTH / 2, EDGE_PADDING, vw - BUTTON_WIDTH - EDGE_PADDING)
 
         setPopupStyle({ position: 'fixed', top: finalTop, left: finalLeft, zIndex: 9999 })
     }, [rect, nodeId, mousePos])

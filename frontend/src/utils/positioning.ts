@@ -7,7 +7,11 @@ import type { Node, Edge } from '@xyflow/react'
 export function getNewNodePosition(
     parentNodeId: string,
     allNodes: Node[],
-    contentNodeId: string
+    contentNodeId: string,
+    /** Optional: relative Y position (0–1) of the highlighted text within the content node. */
+    selectionRelativeY?: number,
+    /** Optional: relative X position (0-1) of the selection start. <0.5 = left side of PDF. */
+    selectionRelativeX?: number
 ): { x: number; y: number; sourceHandle: string; targetHandle: string } {
     const parent = allNodes.find((n) => n.id === parentNodeId)
     if (!parent) {
@@ -19,60 +23,129 @@ export function getNewNodePosition(
 
     if (parentNodeId === contentNodeId) {
         // Spawning from the Content Node
-        // Use a simpler approach: count existing nodes to the right of content node
-        // that were spawned from contentNode
+        // Only consider answerNode types for side counting and Y stacking.
+        // Quiz nodes and flashcard nodes are positioned independently and must
+        // not influence where new answer nodes are placed.
         const contentNode = allNodes.find((n) => n.id === contentNodeId)!
         const contentX = contentNode.position.x
         const contentY = contentNode.position.y
+        const contentHeight = contentNode.measured?.height ?? 600
+        // Read the actual content node width (dynamic — user can resize the PDF viewer)
+        const contentWidth = typeof contentNode.style?.width === 'number'
+            ? contentNode.style.width as number
+            : (contentNode.measured?.width ?? 700)
 
-        // Find all answer nodes whose X is to the right of content node
-        const rightSideNodes = allNodes.filter(
-            (n) => n.id !== contentNodeId && n.position.x > contentX + 100
-        )
+        // Target Y: align with the highlighted text position inside the content node.
+        // If no selection info, default to the content node's top.
+        const targetY = selectionRelativeY !== undefined
+            ? contentY + selectionRelativeY * contentHeight
+            : contentY
 
-        // Find all answer nodes to the left of content node
-        const leftSideNodes = allNodes.filter(
-            (n) => n.id !== contentNodeId && n.position.x < contentX - 100
-        )
+        // Determine preferred side based on where the text is in the PDF.
+        // selectionRelativeX < 0.5 means text starts on left half -> prefer left placement
+        // selectionRelativeX >= 0.5 means right half -> prefer right placement
+        // Default (no info): prefer right.
+        const preferLeft = selectionRelativeX !== undefined && selectionRelativeX < 0.5
 
-        if (rightSideNodes.length < 4) {
-            // Place on the right side
-            if (rightSideNodes.length === 0) {
-                return {
-                    x: contentX + 700 + 80,
-                    y: contentY,
-                    sourceHandle: 'right',
-                    targetHandle: 'left',
+        const GAP = 80
+        const NODE_WIDTH = 360
+        const NODE_HEIGHT = 200
+
+        const rightColumnX = contentX + contentWidth + GAP
+        const leftColumnX = contentX - NODE_WIDTH - GAP
+
+        // Helper: find a non-overlapping Y slot as close to targetY as possible.
+        // Checks against ALL existing nodes that horizontally overlap the column,
+        // not just answer nodes — so quiz nodes, flashcard nodes, etc. are respected.
+        const findBestY = (columnX: number): number => {
+            const overlapping = allNodes
+                .filter((n) => {
+                    if (n.id === contentNodeId) return false
+                    const nLeft = n.position.x
+                    const nWidth = typeof n.style?.width === 'number'
+                        ? n.style.width as number
+                        : (n.measured?.width ?? NODE_WIDTH)
+                    const nRight = nLeft + nWidth
+                    // Check horizontal overlap with the proposed column
+                    return columnX < nRight + 1 && columnX + NODE_WIDTH > nLeft - 1
+                })
+                .sort((a, b) => a.position.y - b.position.y)
+
+            if (overlapping.length === 0) return targetY
+
+            // Check if targetY is free of overlaps
+            let targetYFree = true
+            for (const n of overlapping) {
+                const nTop = n.position.y
+                const nBottom = nTop + (n.measured?.height ?? NODE_HEIGHT)
+                if (targetY < nBottom + 1 && targetY + NODE_HEIGHT > nTop - 1) {
+                    targetYFree = false
+                    break
                 }
             }
-            const sortedRight = [...rightSideNodes].sort((a, b) => a.position.y - b.position.y)
-            const last = sortedRight[sortedRight.length - 1]
-            const lastHeight = (last.measured?.height ?? 200)
-            return {
-                x: contentX + 700 + 80,
-                y: last.position.y + lastHeight + 1,
-                sourceHandle: 'right',
-                targetHandle: 'left',
-            }
-        } else {
-            // Place on the left side
-            if (leftSideNodes.length === 0) {
-                return {
-                    x: contentX - 360 - 80,
-                    y: contentY,
-                    sourceHandle: 'left',
-                    targetHandle: 'right',
+            if (targetYFree) return targetY
+
+            // Build candidate slots: gaps between nodes + above first + below last
+            const slots: number[] = []
+
+            // Slot above the first node
+            slots.push(overlapping[0].position.y - NODE_HEIGHT - 1)
+
+            // Slots between consecutive nodes
+            for (let i = 0; i < overlapping.length - 1; i++) {
+                const bottomOfCurrent = overlapping[i].position.y + (overlapping[i].measured?.height ?? NODE_HEIGHT)
+                const topOfNext = overlapping[i + 1].position.y
+                if (topOfNext - bottomOfCurrent >= NODE_HEIGHT + 2) {
+                    slots.push(bottomOfCurrent + 1)
                 }
             }
-            const sortedLeft = [...leftSideNodes].sort((a, b) => a.position.y - b.position.y)
-            const last = sortedLeft[sortedLeft.length - 1]
-            const lastHeight = (last.measured?.height ?? 200)
-            return {
-                x: contentX - 360 - 80,
-                y: last.position.y + lastHeight + 1,
-                sourceHandle: 'left',
-                targetHandle: 'right',
+
+            // Slot below the last node
+            const lastNode = overlapping[overlapping.length - 1]
+            const lastBottom = lastNode.position.y + (lastNode.measured?.height ?? NODE_HEIGHT)
+            slots.push(lastBottom + 1)
+
+            // Pick the slot closest to targetY
+            let bestSlot = slots[0]
+            let bestDist = Math.abs(slots[0] - targetY)
+            for (const slot of slots) {
+                const dist = Math.abs(slot - targetY)
+                if (dist < bestDist) {
+                    bestDist = dist
+                    bestSlot = slot
+                }
             }
+
+            return bestSlot
+        }
+
+        // Try preferred side first, then fall back to the other side
+        const sides: Array<{ x: number; handle: 'right' | 'left'; targetHandle: 'left' | 'right' }> = preferLeft
+            ? [
+                { x: leftColumnX,  handle: 'left',  targetHandle: 'right' },
+                { x: rightColumnX, handle: 'right', targetHandle: 'left'  },
+              ]
+            : [
+                { x: rightColumnX, handle: 'right', targetHandle: 'left'  },
+                { x: leftColumnX,  handle: 'left',  targetHandle: 'right' },
+              ]
+
+        for (const s of sides) {
+            const bestY = findBestY(s.x)
+            return {
+                x: s.x,
+                y: bestY,
+                sourceHandle: s.handle,
+                targetHandle: s.targetHandle,
+            }
+        }
+
+        // Fallback (should never reach here)
+        return {
+            x: rightColumnX,
+            y: targetY,
+            sourceHandle: 'right',
+            targetHandle: 'left',
         }
     } else {
         // Spawning from an Answer Node
@@ -126,11 +199,11 @@ export function recalculateSiblingPositions(
     let siblings: Node[]
     if (side === 'right') {
         siblings = nodes
-            .filter((n) => n.id !== contentNodeId && n.position.x > contentX + 100)
+            .filter((n) => n.id !== contentNodeId && n.type === 'answerNode' && n.position.x > contentX + 100)
             .sort((a, b) => a.position.y - b.position.y)
     } else {
         siblings = nodes
-            .filter((n) => n.id !== contentNodeId && n.position.x < contentX - 100)
+            .filter((n) => n.id !== contentNodeId && n.type === 'answerNode' && n.position.x < contentX - 100)
             .sort((a, b) => a.position.y - b.position.y)
     }
 
@@ -314,12 +387,14 @@ export function snapLeafNodeToColumn(
         ? contentX + (contentWidth as number) + GAP   // right column
         : contentX - NODE_W - GAP                     // left column
 
-    // All nodes in the target column, excluding the dragged node
+    // All answer nodes in the target column, excluding the dragged node
+    // (quiz/flashcard nodes are positioned independently and should not affect column snapping)
     const columnNodes = nodes
         .filter(
             (n) =>
                 n.id !== draggedNodeId &&
                 n.id !== contentNodeId &&
+                n.type === 'answerNode' &&
                 (isRight ? n.position.x >= contentCenterX : n.position.x < contentCenterX),
         )
         .sort((a, b) => a.position.y - b.position.y)
@@ -480,4 +555,67 @@ export function isOverlapping(
     }
 
     return false
+}
+
+/**
+ * Calculates x/y positions for a row of flashcard nodes placed ABOVE the ContentNode.
+ * Nodes are centred horizontally on the ContentNode and spaced apart.
+ * Pushes the row UP until it is clear of every existing node (no overlaps).
+ */
+export function getFlashcardPositions(
+    contentNodeX: number,
+    contentNodeY: number,
+    contentNodeWidth: number,
+    count: number,
+    cardWidth: number,
+    gap: number,
+    existingNodes: Node[] = []
+): Array<{ x: number; y: number }> {
+    const estimatedCardHeight = 260
+    const verticalGap = 1
+    const padding = 1
+
+    const totalWidth = count * cardWidth + (count - 1) * gap
+    const startX = contentNodeX + contentNodeWidth / 2 - totalWidth / 2
+    const endX = startX + totalWidth
+
+    // Start directly above the content node
+    let y = contentNodeY - estimatedCardHeight - verticalGap
+
+    // Iteratively push the row UP until no existing node overlaps with any flashcard slot
+    let shifted = true
+    let iterations = 0
+    while (shifted && iterations < 100) {
+        shifted = false
+        iterations++
+        for (const node of existingNodes) {
+            if (node.type === 'contentNode') continue
+
+            const nLeft = node.position.x
+            const nWidth =
+                typeof node.style?.width === 'number'
+                    ? node.style.width
+                    : (node.measured?.width ?? 360)
+            const nRight = nLeft + (nWidth as number)
+            const nTop = node.position.y
+            const nBottom = nTop + (node.measured?.height ?? 200)
+
+            // Does this node share horizontal space with any part of the flashcard row?
+            const overlapX = startX - padding < nRight && endX + padding > nLeft
+            // Would the flashcard row overlap vertically with this node?
+            const overlapY = y < nBottom + padding && y + estimatedCardHeight > nTop - padding
+
+            if (overlapX && overlapY) {
+                // Push row up above this node
+                y = nTop - estimatedCardHeight - 1
+                shifted = true
+                break
+            }
+        }
+    }
+
+    return Array.from({ length: count }, (_, i) => ({
+        x: startX + i * (cardWidth + gap),
+        y,
+    }))
 }

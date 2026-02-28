@@ -32,7 +32,7 @@ import { useTextSelection } from '../hooks/useTextSelection'
 import { useCanvasStore } from '../store/canvasStore'
 import { extractPageImageBase64 } from '../utils/pdfImageExtractor'
 import { streamQuery, generateTitle, generatePageQuiz, gradeAnswer, generateFlashcards } from '../api/studyApi'
-import { getNewNodePosition, recalculateSiblingPositions, resolveOverlaps, isOverlapping, rerouteEdgeHandles, getQuizNodePositions } from '../utils/positioning'
+import { getNewNodePosition, recalculateSiblingPositions, resolveOverlaps, isOverlapping, rerouteEdgeHandles, getQuizNodePositions, getFlashcardPositions } from '../utils/positioning'
 import type { AnswerNodeData, QuizQuestionNodeData, FlashcardNodeData, TextNodeData } from '../types'
 import { pdf } from '@react-pdf/renderer'
 import { buildQATree } from '../utils/buildQATree'
@@ -168,6 +168,15 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
     const contentNode = nodes.find((n) => n.type === 'contentNode')
     const contentNodeId = contentNode?.id ?? ''
 
+    // Helper function to determine verdict from feedback
+    const getVerdict = (feedback: string): 'correct' | 'partial' | 'incorrect' | null => {
+        const lower = feedback.toLowerCase()
+        if (/\bpartially correct\b/.test(lower)) return 'partial'
+        if (/\bincorrect\b|\bwrong\b|\bnot correct\b/.test(lower)) return 'incorrect'
+        if (/\bcorrect\b/.test(lower)) return 'correct'
+        return null
+    }
+
     // ── Quiz callbacks (defined before visibleNodes so they can be injected) ───
     const handleGradeAnswer = useCallback(async (nodeId: string, question: string, answer: string) => {
         const targetNode = nodes.find((n) => n.id === nodeId)
@@ -193,7 +202,24 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 nodePageIndex - 1,
                 imageBase64
             )
-            updateQuizNodeData(nodeId, { isGrading: false, feedback: result.feedback, modelUsed: result.model_used })
+            
+            // Determine verdict from feedback and set status accordingly
+            const verdict = getVerdict(result.feedback)
+            let newStatus: 'understood' | 'struggling' | undefined = undefined
+            
+            if (verdict === 'correct') {
+                newStatus = 'understood'
+            } else if (verdict === 'incorrect') {
+                newStatus = 'struggling'
+            }
+            // If verdict is 'partial' or null, don't change status
+            
+            updateQuizNodeData(nodeId, { 
+                isGrading: false, 
+                feedback: result.feedback, 
+                modelUsed: result.model_used,
+                ...(newStatus && { status: newStatus })
+            })
         } catch (err) {
             console.error('Grade answer error:', err)
             updateQuizNodeData(nodeId, { isGrading: false, feedback: 'Unable to grade your answer at this time. Please try again.' })
@@ -618,10 +644,30 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
 
             // Calculate new node position — only consider visible nodes to
             // avoid stacking on top of answer nodes from other pages.
+            // Compute the relative Y and X positions of the highlighted text within the
+            // content node so the answer node spawns on the correct side and vertical level.
+            let selectionRelativeY: number | undefined
+            let selectionRelativeX: number | undefined
+            if (sourceNodeId === contentNodeId && modal.selectionRect) {
+                const contentEl = document.querySelector(`[data-nodeid="${contentNodeId}"]`)
+                if (contentEl) {
+                    const contentRect = contentEl.getBoundingClientRect()
+                    const selCenterY = modal.selectionRect.top + modal.selectionRect.height / 2
+                    selectionRelativeY = (selCenterY - contentRect.top) / contentRect.height
+                    selectionRelativeY = Math.max(0, Math.min(1, selectionRelativeY))
+                    // Use the LEFT edge of the selection rect (first word position)
+                    // to determine which side of the PDF the text starts on.
+                    selectionRelativeX = (modal.selectionRect.left - contentRect.left) / contentRect.width
+                    selectionRelativeX = Math.max(0, Math.min(1, selectionRelativeX))
+                }
+            }
+
             const { x, y, sourceHandle: side, targetHandle } = getNewNodePosition(
                 sourceNodeId,
                 visibleNodes,
-                contentNodeId
+                contentNodeId,
+                selectionRelativeY,
+                selectionRelativeX
             )
 
             // Pick the handle on the ContentNode closest to the highlighted text
@@ -786,7 +832,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
         if (newHeight <= prevHeight || newHeight === 0) return
 
         const cLeft = contentNode.position.x
-        const cRight = cLeft + 700 // ContentNode width is fixed at 700
+        const cRight = cLeft + (typeof contentNode.style?.width === 'number' ? contentNode.style.width as number : (contentNode.measured?.width ?? 700))
         const cTop = contentNode.position.y
         const cBottom = cTop + newHeight
 
@@ -1049,25 +1095,30 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
             return
         }
 
-        // Find the lowest Y position of all visible nodes to place cards below
+        // Place flashcard row ABOVE the content node, avoiding overlaps
+        const cNode = nodes.find((n) => n.type === 'contentNode')
+        const contentX = cNode ? cNode.position.x : 0
+        const contentY = cNode ? cNode.position.y : 0
+        const contentW = cNode && typeof cNode.style?.width === 'number' ? cNode.style.width as number : 700
+        const cardWidth = 380
+        const gap = 40
+
+        // Only consider visible nodes for overlap avoidance
         const currentVisibleNodes = nodes.filter((n) => {
             if (n.type === 'contentNode') return true
             const d = n.data as unknown as AnswerNodeData
             return d.isPinned === true || d.pageIndex === currentPage
         })
-        const maxY = currentVisibleNodes.reduce((max, n) => {
-            const h = n.measured?.height ?? 200
-            return Math.max(max, n.position.y + h)
-        }, 0)
-        const startY = maxY + 80
 
-        // Find horizontal center from contentNode
-        const cNode = nodes.find((n) => n.type === 'contentNode')
-        const centerX = cNode ? cNode.position.x + 350 : 400
-        const cardWidth = 380
-        const gap = 40
-        const totalWidth = cards.length * cardWidth + (cards.length - 1) * gap
-        const startX = centerX - totalWidth / 2
+        const flashcardPositions = getFlashcardPositions(
+            contentX,
+            contentY,
+            contentW,
+            cards.length,
+            cardWidth,
+            gap,
+            currentVisibleNodes
+        )
 
         const cardNodeIds: string[] = []
         const flashcardNodes: Node[] = cards.map((card, i) => {
@@ -1076,7 +1127,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
             return {
                 id: nodeId,
                 type: 'flashcardNode',
-                position: { x: startX + i * (cardWidth + gap), y: startY },
+                position: flashcardPositions[i] ?? { x: contentX + i * (cardWidth + gap), y: contentY - 300 },
                 data: {
                     question: card.question,
                     answer: card.answer,
