@@ -161,6 +161,7 @@ export const streamQuery = async (
             status: string
             educationLevel: string
         }
+        preferred_model?: string
     },
     signal: AbortSignal
 ): Promise<Response> => {

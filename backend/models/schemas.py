@@ -43,6 +43,7 @@ class QueryRequest(BaseModel):
     parent_response: Optional[str] = None
     user_details: Optional[UserDetails] = None
     chat_history: Optional[list[ChatMessage]] = None
+    preferred_model: Optional[str] = Field(None, description="Override model selection: 'gemini-2.5-flash' or 'gemini-2.5-flash-lite'")
 
 
 class QuizNode(BaseModel):

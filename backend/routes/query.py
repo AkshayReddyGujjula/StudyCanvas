@@ -6,7 +6,7 @@ from rate_limiter import limiter
 from models.schemas import QueryRequest, GenerateTitleRequest
 from services import gemini_service
 
-from services.gemini_service import classify_query_complexity, MODEL_LITE
+from services.gemini_service import classify_query_complexity, MODEL_LITE, MODEL_FLASH
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -19,9 +19,14 @@ async def query_stream(request: Request, payload: QueryRequest):
     Streams Gemini response as plain text using an asynchronous generator.
     Selects model tier based on query complexity.
     """
-    model_name = classify_query_complexity(
-        payload.question, payload.highlighted_text, payload.chat_history
-    )
+    # Use preferred_model if the client explicitly requested one
+    allowed_models = {MODEL_FLASH, MODEL_LITE}
+    if payload.preferred_model and payload.preferred_model in allowed_models:
+        model_name = payload.preferred_model
+    else:
+        model_name = classify_query_complexity(
+            payload.question, payload.highlighted_text, payload.chat_history
+        )
     generator = gemini_service.stream_query(
         question=payload.question,
         highlighted_text=payload.highlighted_text,

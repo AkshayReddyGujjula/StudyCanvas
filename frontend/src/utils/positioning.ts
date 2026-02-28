@@ -508,6 +508,70 @@ export function getQuizNodePositions(
 }
 
 /**
+ * Finds a position closest to the desired center that doesn't overlap with any existing nodes.
+ * Uses a spiral search pattern expanding outward from the center.
+ */
+export function findNonOverlappingPosition(
+    center: { x: number; y: number },
+    nodeWidth: number,
+    nodeHeight: number,
+    existingNodes: Node[],
+    padding: number = 20
+): { x: number; y: number } {
+    const proposedX = center.x - nodeWidth / 2
+    const proposedY = center.y - nodeHeight / 2
+
+    const checkOverlap = (x: number, y: number): boolean => {
+        const aLeft = x
+        const aRight = x + nodeWidth
+        const aTop = y
+        const aBottom = y + nodeHeight
+
+        for (const node of existingNodes) {
+            const nLeft = node.position.x
+            const nWidth = typeof node.style?.width === 'number'
+                ? node.style.width as number
+                : (node.measured?.width ?? 360)
+            const nRight = nLeft + nWidth
+            const nTop = node.position.y
+            const nHeight = node.measured?.height ?? 300
+            const nBottom = nTop + nHeight
+
+            const overlapX = aLeft < nRight + padding && aRight + padding > nLeft
+            const overlapY = aTop < nBottom + padding && aBottom + padding > nTop
+
+            if (overlapX && overlapY) return true
+        }
+        return false
+    }
+
+    // Check center first
+    if (!checkOverlap(proposedX, proposedY)) {
+        return { x: proposedX, y: proposedY }
+    }
+
+    // Spiral outward from center
+    const step = 50
+    for (let radius = step; radius < 3000; radius += step) {
+        // Try 12 directions per ring for good coverage
+        const directions = 12
+        for (let i = 0; i < directions; i++) {
+            const angle = (i / directions) * Math.PI * 2
+            const dx = Math.cos(angle) * radius
+            const dy = Math.sin(angle) * radius
+            const testX = proposedX + dx
+            const testY = proposedY + dy
+            if (!checkOverlap(testX, testY)) {
+                return { x: testX, y: testY }
+            }
+        }
+    }
+
+    // Fallback: place far to the right
+    return { x: proposedX + 1500, y: proposedY }
+}
+
+/**
  * Checks if a proposed position for a node overlaps with any other nodes.
  * Used during drag to prevent overlapping.
  */

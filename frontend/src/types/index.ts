@@ -105,6 +105,91 @@ export interface QuizQuestionNodeData {
     modelUsed?: string
 }
 
+// ─── Left Toolbar Node types ─────────────────────────────────────────────────
+
+export type PromptModel = 'gemini-2.5-flash' | 'gemini-2.5-flash-lite'
+
+export interface CustomPromptNodeData {
+    chatHistory: ChatMessage[]
+    isLoading: boolean
+    isStreaming: boolean
+    status: NodeStatus
+    isMinimized?: boolean
+    isPinned?: boolean
+    pageIndex?: number
+    modelUsed?: string
+    /** Whether to send page context (text + image) with the prompt */
+    useContext: boolean
+    /** Which Gemini model to use */
+    selectedModel: PromptModel
+}
+
+export interface ImageNodeData {
+    /** Base64 data URL of the image */
+    imageDataUrl: string
+    /** Original file name */
+    imageName: string
+    isPinned?: boolean
+    pageIndex?: number
+    /** Persisted width after resize */
+    savedWidth?: number
+    /** Persisted height after resize (0 = auto) */
+    savedHeight?: number
+}
+
+export interface StickyNoteNodeData {
+    /** User-entered text content */
+    content: string
+    /** Pastel header color hex */
+    color: string
+    isPinned?: boolean
+    pageIndex?: number
+}
+
+export const STICKY_NOTE_COLORS = [
+    '#FFF9C4', // yellow
+    '#FFCDD2', // pink
+    '#C8E6C9', // green
+    '#BBDEFB', // blue
+    '#E1BEE7', // purple
+    '#FFE0B2', // orange
+] as const
+
+export type TimerMode = 'pomodoro' | 'shortBreak' | 'longBreak'
+
+export interface TimerNodeData {
+    mode: TimerMode
+    /** Total duration in seconds */
+    duration: number
+    /** Remaining seconds */
+    remaining: number
+    isRunning: boolean
+    sessionsCompleted: number
+    isPinned?: boolean
+    pageIndex?: number
+    /** Custom durations saved by the user (in seconds) */
+    customDurations?: Record<TimerMode, number>
+}
+
+export const TIMER_DURATIONS: Record<TimerMode, number> = {
+    pomodoro: 25 * 60,
+    shortBreak: 5 * 60,
+    longBreak: 15 * 60,
+}
+
+export interface SummaryNodeData {
+    summary: string
+    isLoading: boolean
+    isStreaming: boolean
+    status: NodeStatus
+    isMinimized?: boolean
+    isPinned?: boolean
+    pageIndex?: number
+    modelUsed?: string
+    /** The page index for which this summary was generated */
+    sourcePage: number
+}
+
 // ─── Whiteboard / Drawing types ──────────────────────────────────────────────
 
 export type WhiteboardTool = 'cursor' | 'pen1' | 'pen2' | 'highlighter' | 'eraser' | 'text'

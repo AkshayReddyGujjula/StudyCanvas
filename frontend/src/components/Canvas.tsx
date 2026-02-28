@@ -22,6 +22,12 @@ import ContentNode from './ContentNode'
 import AnswerNode from './AnswerNode'
 import QuizQuestionNode from './QuizQuestionNode'
 import FlashcardNode from './FlashcardNode'
+import CustomPromptNode from './CustomPromptNode'
+import ImageNode from './ImageNode'
+import StickyNoteNode from './StickyNoteNode'
+import TimerNode from './TimerNode'
+import SummaryNode from './SummaryNode'
+import LeftToolbar from './LeftToolbar'
 import AskGeminiPopup from './AskGeminiPopup'
 import QuestionModal from './QuestionModal'
 import RevisionModal from './RevisionModal'
@@ -32,8 +38,8 @@ import { useTextSelection } from '../hooks/useTextSelection'
 import { useCanvasStore } from '../store/canvasStore'
 import { extractPageImageBase64 } from '../utils/pdfImageExtractor'
 import { streamQuery, generateTitle, generatePageQuiz, gradeAnswer, generateFlashcards } from '../api/studyApi'
-import { getNewNodePosition, recalculateSiblingPositions, resolveOverlaps, isOverlapping, rerouteEdgeHandles, getQuizNodePositions, getFlashcardPositions } from '../utils/positioning'
-import type { AnswerNodeData, QuizQuestionNodeData, FlashcardNodeData, TextNodeData } from '../types'
+import { getNewNodePosition, recalculateSiblingPositions, resolveOverlaps, isOverlapping, rerouteEdgeHandles, getQuizNodePositions, getFlashcardPositions, findNonOverlappingPosition } from '../utils/positioning'
+import type { AnswerNodeData, QuizQuestionNodeData, FlashcardNodeData, TextNodeData, CustomPromptNodeData, ImageNodeData, StickyNoteNodeData, TimerNodeData, SummaryNodeData } from '../types'
 import { pdf } from '@react-pdf/renderer'
 import { buildQATree } from '../utils/buildQATree'
 import StudyNotePDF from './StudyNotePDF'
@@ -45,6 +51,11 @@ const NODE_TYPES = {
     quizQuestionNode: QuizQuestionNode,
     flashcardNode: FlashcardNode,
     textNode: TextNode,
+    customPromptNode: CustomPromptNode,
+    imageNode: ImageNode,
+    stickyNoteNode: StickyNoteNode,
+    timerNode: TimerNode,
+    summaryNode: SummaryNode,
 }
 
 // StudyCanvas Minimalist Colour Palette
@@ -396,6 +407,26 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                     const d = n.data as unknown as FlashcardNodeData
                     return d.isPinned === true || d.pageIndex === currentPage
                 }
+                if (n.type === 'customPromptNode') {
+                    const d = n.data as unknown as CustomPromptNodeData
+                    return d.isPinned === true || d.pageIndex === currentPage
+                }
+                if (n.type === 'imageNode') {
+                    const d = n.data as unknown as ImageNodeData
+                    return d.isPinned === true || d.pageIndex === currentPage
+                }
+                if (n.type === 'stickyNoteNode') {
+                    const d = n.data as unknown as StickyNoteNodeData
+                    return d.isPinned === true || d.pageIndex === currentPage
+                }
+                if (n.type === 'timerNode') {
+                    const d = n.data as unknown as TimerNodeData
+                    return d.isPinned === true || d.pageIndex === currentPage
+                }
+                if (n.type === 'summaryNode') {
+                    const d = n.data as unknown as SummaryNodeData
+                    return d.isPinned === true || d.pageIndex === currentPage
+                }
                 const d = n.data as unknown as AnswerNodeData
                 return d.isPinned === true || d.pageIndex === currentPage
             })
@@ -479,10 +510,198 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 return '#2D9CDB'; // Soft Teal - neutral
             case 'flashcardNode':
                 return '#2D9CDB'; // Soft Teal - neutral
+            case 'customPromptNode':
+                return '#6366F1'; // Indigo
+            case 'imageNode':
+                return '#9CA3AF'; // Gray
+            case 'stickyNoteNode':
+                return '#FBBF24'; // Amber
+            case 'timerNode':
+                return '#EB5757'; // Warm Coral
+            case 'summaryNode':
+                return '#1E3A5F'; // Deep Navy
             default:
                 return '#6B7280'; // Neutral Slate
         }
     }, [])
+
+    // ── Left Toolbar node spawning ──────────────────────────────────────────
+    const getViewportCenter = useCallback(() => {
+        const container = containerRef.current
+        const w = container?.clientWidth ?? window.innerWidth
+        const h = container?.clientHeight ?? window.innerHeight
+        return screenToFlowPosition({ x: w / 2, y: h / 2 })
+    }, [screenToFlowPosition])
+
+    const handleSpawnCustomPrompt = useCallback(() => {
+        const center = getViewportCenter()
+        const nodeWidth = 440
+        const nodeHeight = 380
+        const pos = findNonOverlappingPosition(center, nodeWidth, nodeHeight, nodes)
+        const nodeId = `custom-prompt-${Date.now()}`
+        const newNode: Node = {
+            id: nodeId,
+            type: 'customPromptNode',
+            position: pos,
+            data: {
+                chatHistory: [],
+                isLoading: false,
+                isStreaming: false,
+                status: 'unread',
+                useContext: false,
+                selectedModel: 'gemini-2.5-flash',
+                pageIndex: currentPage,
+            } as unknown as Record<string, unknown>,
+            style: { width: 350 },
+        }
+        setNodes((prev) => [...prev, newNode])
+        persistToLocalStorage()
+    }, [getViewportCenter, currentPage, nodes, setNodes, persistToLocalStorage])
+
+    const handleSpawnImage = useCallback((dataUrl: string, fileName: string) => {
+        const center = getViewportCenter()
+        const nodeWidth = 300
+        const nodeHeight = 300
+        const pos = findNonOverlappingPosition(center, nodeWidth, nodeHeight, nodes)
+        const nodeId = `image-${Date.now()}`
+        const newNode: Node = {
+            id: nodeId,
+            type: 'imageNode',
+            position: pos,
+            data: {
+                imageDataUrl: dataUrl,
+                imageName: fileName,
+                pageIndex: currentPage,
+            } as unknown as Record<string, unknown>,
+            style: { width: 300 },
+        }
+        setNodes((prev) => [...prev, newNode])
+        persistToLocalStorage()
+    }, [getViewportCenter, currentPage, nodes, setNodes, persistToLocalStorage])
+
+    const handleSpawnStickyNote = useCallback(() => {
+        const center = getViewportCenter()
+        const nodeWidth = 260
+        const nodeHeight = 200
+        const pos = findNonOverlappingPosition(center, nodeWidth, nodeHeight, nodes)
+        const nodeId = `sticky-${Date.now()}`
+        const newNode: Node = {
+            id: nodeId,
+            type: 'stickyNoteNode',
+            position: pos,
+            data: {
+                content: '',
+                color: '#FFF9C4',
+                pageIndex: currentPage,
+            } as unknown as Record<string, unknown>,
+            style: { width: 220 },
+        }
+        setNodes((prev) => [...prev, newNode])
+        persistToLocalStorage()
+    }, [getViewportCenter, currentPage, nodes, setNodes, persistToLocalStorage])
+
+    const handleSpawnTimer = useCallback(() => {
+        const center = getViewportCenter()
+        const nodeWidth = 240
+        const nodeHeight = 280
+        const pos = findNonOverlappingPosition(center, nodeWidth, nodeHeight, nodes)
+        const nodeId = `timer-${Date.now()}`
+        const newNode: Node = {
+            id: nodeId,
+            type: 'timerNode',
+            position: pos,
+            data: {
+                mode: 'pomodoro',
+                duration: 25 * 60,
+                remaining: 25 * 60,
+                isRunning: false,
+                sessionsCompleted: 0,
+                pageIndex: currentPage,
+            } as unknown as Record<string, unknown>,
+            style: { width: 240 },
+        }
+        setNodes((prev) => [...prev, newNode])
+        persistToLocalStorage()
+    }, [getViewportCenter, currentPage, nodes, setNodes, persistToLocalStorage])
+
+    const handleSpawnSummary = useCallback(async () => {
+        const center = getViewportCenter()
+        const nodeWidth = 350
+        const nodeHeight = 350
+        const pos = findNonOverlappingPosition(center, nodeWidth, nodeHeight, nodes)
+        const nodeId = `summary-${Date.now()}`
+        const newNode: Node = {
+            id: nodeId,
+            type: 'summaryNode',
+            position: pos,
+            data: {
+                summary: '',
+                isLoading: true,
+                isStreaming: false,
+                status: 'loading',
+                sourcePage: currentPage,
+                pageIndex: currentPage,
+            } as unknown as Record<string, unknown>,
+            style: { width: 350 },
+        }
+        setNodes((prev) => [...prev, newNode])
+        persistToLocalStorage()
+
+        // Auto-stream summary
+        const controller = new AbortController()
+        try {
+            const pageContent = pageMarkdowns[currentPage - 1] ?? ''
+
+            const prompt = `Please provide a concise summary of this page's content. Focus on the key concepts, definitions, and important points. Use bullet points for clarity.`
+
+            const response = await streamQuery(
+                {
+                    question: prompt,
+                    highlighted_text: pageContent,
+                    raw_text: pageContent,
+                    parent_response: null,
+                    user_details: userDetails ?? undefined,
+                    preferred_model: 'gemini-2.5-flash-lite',
+                },
+                controller.signal,
+            )
+
+            const modelUsed = response.headers.get('X-Model-Used') || 'gemini-2.5-flash-lite'
+            updateNodeData(nodeId, { isStreaming: true, isLoading: false, modelUsed })
+
+            if (!response.body) throw new Error('No response body')
+
+            const reader = response.body.getReader()
+            const decoder = new TextDecoder()
+            let accumulated = ''
+
+            while (true) {
+                const { value, done } = await reader.read()
+                if (done) break
+                const chunk = decoder.decode(value, { stream: true })
+                accumulated += chunk
+                updateNodeData(nodeId, { summary: accumulated })
+            }
+
+            updateNodeData(nodeId, {
+                summary: accumulated,
+                isStreaming: false,
+                status: accumulated ? 'unread' : 'struggling',
+                modelUsed,
+            })
+        } catch (err) {
+            if ((err as Error).name !== 'AbortError') {
+                console.error('Summary generation error:', err)
+                updateNodeData(nodeId, {
+                    summary: 'Failed to generate summary. Click regenerate to try again.',
+                    isLoading: false,
+                    isStreaming: false,
+                    status: 'struggling',
+                })
+            }
+        }
+        persistToLocalStorage()
+    }, [getViewportCenter, currentPage, pageMarkdowns, fileData, userDetails, nodes, setNodes, updateNodeData, persistToLocalStorage])
 
     // Dismiss popup on mousedown outside
     useEffect(() => {
@@ -1515,6 +1734,15 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
 
             {/* Whiteboard toolbar */}
             <DrawingToolbar />
+
+            {/* Left toolbar — custom nodes */}
+            <LeftToolbar
+                onCustomPrompt={handleSpawnCustomPrompt}
+                onAddImage={handleSpawnImage}
+                onStickyNote={handleSpawnStickyNote}
+                onTimer={handleSpawnTimer}
+                onSummary={handleSpawnSummary}
+            />
 
             {/* Ask Gemini popup */}
             {selection && (
