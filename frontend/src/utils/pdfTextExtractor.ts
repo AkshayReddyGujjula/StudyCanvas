@@ -81,3 +81,46 @@ export async function extractPdfPagesText(file: File): Promise<string[]> {
     pdf.destroy()
     return pages
 }
+
+/**
+ * Same as extractPdfPagesText but accepts an ArrayBuffer instead of a File.
+ * Useful when we already have the PDF binary in memory (e.g. from IndexedDB).
+ */
+export async function extractPdfPagesTextFromBuffer(buffer: ArrayBuffer): Promise<string[]> {
+    const pdf = await pdfjsLib.getDocument({ data: buffer.slice(0) }).promise
+    const pages: string[] = []
+
+    for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+        const page = await pdf.getPage(pageNum)
+        const textContent = await page.getTextContent()
+
+        let pageText = ''
+        let lastY: number | null = null
+        let lineHeightSum = 0
+        let lineCount = 0
+
+        for (const item of textContent.items) {
+            if (!('str' in item)) continue
+            const y = (item as TextItem).transform[5]
+            if (lastY !== null) {
+                const yDiff = Math.abs(y - lastY)
+                if (yDiff > 2) {
+                    if (yDiff < 80) { lineHeightSum += yDiff; lineCount++ }
+                    const avgLineHeight = lineCount > 0 ? lineHeightSum / lineCount : 0
+                    if (avgLineHeight > 0 && yDiff > avgLineHeight * 1.8) {
+                        pageText += '\n\n'
+                    } else {
+                        pageText += '\n'
+                    }
+                }
+            }
+            pageText += (item as TextItem).str
+            lastY = y
+        }
+        pages.push(pageText)
+        page.cleanup()
+    }
+
+    pdf.destroy()
+    return pages
+}

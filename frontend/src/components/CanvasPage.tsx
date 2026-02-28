@@ -13,6 +13,8 @@ import {
     resolveParentHandle,
 } from '../services/fileSystemService'
 import { savePdfToLocal, loadPdfFromLocal } from '../utils/pdfStorage'
+import { extractPdfPagesTextFromBuffer } from '../utils/pdfTextExtractor'
+import { saveCanvasBackup, loadCanvasBackup } from '../utils/canvasBackup'
 import { toPng } from 'html-to-image'
 
 /**
@@ -60,9 +62,46 @@ export default function CanvasPage() {
                 drawingStrokes, savedColors, toolSettings,
             } = store
 
-            // 1. Save state.json
-            const stateObj = { nodes, edges, fileData, highlights, userDetails, currentPage, pageMarkdowns, zoomLevel, scrollPositions, canvasViewport, drawingStrokes, savedColors, toolSettings }
-            await saveCanvasState(parentHandle, canvasId, stateObj)
+            // 1. Save state.json — strip large recoverable fields to prevent
+            //    main-thread freezes from multi-MB JSON.stringify calls.
+            //    raw_text & markdown_content are re-derivable from the PDF binary.
+            //    Image node data URLs are individually large; we strip them and
+            //    save images as separate files in a future iteration.
+            const lightFileData = fileData ? {
+                ...fileData,
+                raw_text: '',            // recoverable from PDF
+                markdown_content: '',    // recoverable from PDF
+            } : null
+            // Strip base64 image data from image nodes to reduce state size
+            const lightNodes = nodes.map((n: any) => {
+                if (n.type === 'imageNode' && n.data?.imageDataUrl) {
+                    return { ...n, data: { ...n.data } }  // keep imageDataUrl for now (needed for display)
+                }
+                return n
+            })
+            const stateObj = { nodes: lightNodes, edges, fileData: lightFileData, highlights, userDetails, currentPage, pageMarkdowns, zoomLevel, scrollPositions, canvasViewport, drawingStrokes, savedColors, toolSettings }
+            
+            // Use a Web Worker (via Blob URL) to JSON.stringify off the main thread
+            const jsonString: string = await new Promise((resolve, reject) => {
+                const workerCode = `self.onmessage = function(e) { try { self.postMessage(JSON.stringify(e.data)); } catch(err) { self.postMessage('__SERIALIZE_ERROR__'); } };`
+                const blob = new Blob([workerCode], { type: 'application/javascript' })
+                const url = URL.createObjectURL(blob)
+                const worker = new Worker(url)
+                worker.onmessage = (e) => {
+                    worker.terminate()
+                    URL.revokeObjectURL(url)
+                    if (e.data === '__SERIALIZE_ERROR__') reject(new Error('Serialization failed'))
+                    else resolve(e.data)
+                }
+                worker.onerror = () => {
+                    worker.terminate()
+                    URL.revokeObjectURL(url)
+                    // Fallback: serialize on main thread
+                    try { resolve(JSON.stringify(stateObj)) } catch { reject(new Error('Serialization failed')) }
+                }
+                worker.postMessage(stateObj)
+            })
+            await saveCanvasState(parentHandle, canvasId, jsonString as any)
 
             // 2. Save PDF to the local folder (if we have it in memory or IndexedDB)
             const pdfBuffer = store.pdfArrayBuffer
@@ -117,6 +156,10 @@ export default function CanvasPage() {
             // 5. Also update localStorage cache
             store.persistToLocalStorage()
 
+            // 6. Save IndexedDB backup for crash recovery
+            const backupState = { nodes, edges, fileData, highlights, userDetails, currentPage, pageMarkdowns, zoomLevel, scrollPositions, canvasViewport, drawingStrokes, savedColors, toolSettings }
+            saveCanvasBackup(canvasId, backupState).catch(() => {})
+
             setDirty(false)
         } catch (err) {
             console.error('[CanvasPage] save failed:', err)
@@ -148,7 +191,16 @@ export default function CanvasPage() {
                 )
 
                 // Load state.json
-                const stateObj = await loadCanvasState(parentHandle, canvasId)
+                let stateObj = await loadCanvasState(parentHandle, canvasId)
+                
+                // Fallback: if state.json is missing or corrupt, try IndexedDB backup
+                if (!stateObj) {
+                    console.warn('[CanvasPage] state.json missing, trying IndexedDB backup…')
+                    stateObj = await loadCanvasBackup(canvasId!)
+                    if (stateObj) {
+                        console.info('[CanvasPage] Recovered canvas from IndexedDB backup')
+                    }
+                }
                 const store = useCanvasStore.getState()
 
                 if (stateObj) {
@@ -202,6 +254,21 @@ export default function CanvasPage() {
                 } else if (stateObj?.fileData) {
                     // Try IndexedDB
                     await store.loadPdfFromStorage()
+                }
+
+                // Re-derive raw_text & markdown_content if they were stripped during save.
+                // This runs lazily after the UI has loaded so it doesn't block rendering.
+                const currentFileData = useCanvasStore.getState().fileData
+                const loadedPdf = useCanvasStore.getState().pdfArrayBuffer
+                if (currentFileData && (!currentFileData.raw_text || currentFileData.raw_text.length === 0) && loadedPdf) {
+                    // Fire-and-forget: re-extract text in the background
+                    extractPdfPagesTextFromBuffer(loadedPdf).then((pages) => {
+                        if (!mountedRef.current) return
+                        const rawText = pages.join('\n\n')
+                        const markdownContent = pages.map((p, i) => `## Page ${i + 1}\n${p}`).join('\n\n')
+                        const s = useCanvasStore.getState()
+                        s.updateFileDataText(rawText, markdownContent)
+                    }).catch((err) => console.warn('[CanvasPage] PDF text re-extraction failed:', err))
                 }
 
                 if (mountedRef.current) {
@@ -270,6 +337,19 @@ export default function CanvasPage() {
     // ── Clean up store on unmount ────────────────────────────────────────────
     useEffect(() => {
         return () => {
+            // Save an IndexedDB backup before clearing (crash-safe)
+            if (canvasId) {
+                const s = useCanvasStore.getState()
+                const backup = {
+                    nodes: s.nodes, edges: s.edges, fileData: s.fileData,
+                    highlights: s.highlights, userDetails: s.userDetails,
+                    currentPage: s.currentPage, pageMarkdowns: s.pageMarkdowns,
+                    zoomLevel: s.zoomLevel, scrollPositions: s.scrollPositions,
+                    canvasViewport: s.canvasViewport, drawingStrokes: s.drawingStrokes,
+                    savedColors: s.savedColors, toolSettings: s.toolSettings,
+                }
+                saveCanvasBackup(canvasId, backup).catch(() => {})
+            }
             // Save before leaving
             if (useAppStore.getState().isDirty) {
                 // Fire-and-forget — we can't await in a cleanup

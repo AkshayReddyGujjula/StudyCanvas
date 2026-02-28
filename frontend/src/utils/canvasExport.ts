@@ -276,41 +276,68 @@ async function captureContainer(
 
 // ─── Image / PDF helpers ─────────────────────────────────────────────────────
 
-/** Convert canvas to data URL. Falls back to high-quality JPEG if PNG > 10 MB. */
-function canvasToDataUrl(canvas: HTMLCanvasElement): string {
-    const png = canvas.toDataURL('image/png')
-    if (png.length < 10_000_000) return png
-    return canvas.toDataURL('image/jpeg', 0.92)
-}
+/**
+ * Convert an HTMLCanvasElement to compressed image bytes **asynchronously** using
+ * `canvas.toBlob()`.  This avoids creating a huge base64 data-URL string on the
+ * JS heap (which can be 30-40 % larger than the binary) and lets the browser use
+ * its native, often hardware-accelerated, JPEG encoder off the main thread.
+ *
+ * Returns a `Uint8Array` suitable for `jsPDF.addImage()`.
+ */
+async function canvasToCompressedBytes(
+    canvas: HTMLCanvasElement,
+    preferJpeg = false,
+): Promise<{ data: Uint8Array; format: 'PNG' | 'JPEG'; width: number; height: number }> {
+    const width = canvas.width
+    const height = canvas.height
 
-/** Assemble one or more captured canvases into a jsPDF document. */
-function buildPdfFromCanvases(
-    captures: Array<{ canvas: HTMLCanvasElement; dataUrl: string }>,
-): jsPDF {
-    if (captures.length === 0) throw new Error('No captures to build PDF from')
+    // Helper: blob → Uint8Array (avoids keeping the Blob reference alive)
+    const blobToUint8 = async (blob: Blob): Promise<Uint8Array> =>
+        new Uint8Array(await blob.arrayBuffer())
 
-    const first = captures[0]
-    const doc = new jsPDF({
-        orientation: first.canvas.width >= first.canvas.height ? 'landscape' : 'portrait',
-        unit: 'px',
-        format: [first.canvas.width, first.canvas.height],
-        compress: true,
-    })
-
-    const fmt = first.dataUrl.startsWith('data:image/png') ? 'PNG' : 'JPEG'
-    doc.addImage(first.dataUrl, fmt, 0, 0, first.canvas.width, first.canvas.height)
-
-    for (let i = 1; i < captures.length; i++) {
-        const cap = captures[i]
-        const capFmt = cap.dataUrl.startsWith('data:image/png') ? 'PNG' : 'JPEG'
-        doc.addPage(
-            [cap.canvas.width, cap.canvas.height],
-            cap.canvas.width >= cap.canvas.height ? 'landscape' : 'portrait',
-        )
-        doc.addImage(cap.dataUrl, capFmt, 0, 0, cap.canvas.width, cap.canvas.height)
+    // For multi-page or when explicitly requested, always use JPEG — faster
+    // encoding and dramatically smaller memory footprint.
+    if (preferJpeg) {
+        const blob = await new Promise<Blob>((resolve, reject) => {
+            canvas.toBlob(
+                (b) => (b ? resolve(b) : reject(new Error('toBlob JPEG failed'))),
+                'image/jpeg',
+                0.92,
+            )
+        })
+        return { data: await blobToUint8(blob), format: 'JPEG', width, height }
     }
 
-    return doc
+    // Single-page: try PNG first, fall back to JPEG if > 10 MB
+    const pngBlob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+            (b) => (b ? resolve(b) : reject(new Error('toBlob PNG failed'))),
+            'image/png',
+        )
+    })
+
+    if (pngBlob.size < 10_000_000) {
+        return { data: await blobToUint8(pngBlob), format: 'PNG', width, height }
+    }
+
+    // PNG too large — re-encode as JPEG
+    const jpgBlob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+            (b) => (b ? resolve(b) : reject(new Error('toBlob JPEG fallback failed'))),
+            'image/jpeg',
+            0.92,
+        )
+    })
+    return { data: await blobToUint8(jpgBlob), format: 'JPEG', width, height }
+}
+
+/**
+ * Release the pixel buffer backing an HTMLCanvasElement so the browser can
+ * reclaim the GPU / CPU memory immediately instead of waiting for GC.
+ */
+function releaseCanvas(canvas: HTMLCanvasElement): void {
+    canvas.width = 0
+    canvas.height = 0
 }
 
 function triggerDownload(blob: Blob, filename: string): void {
@@ -369,8 +396,18 @@ export async function exportCurrentPage(options: ExportOptions): Promise<Blob | 
 
         onProgress?.('Building PDF…')
 
-        const dataUrl = canvasToDataUrl(canvas)
-        const doc = buildPdfFromCanvases([{ canvas, dataUrl }])
+        // Use async blob conversion — avoids huge base64 string on main thread
+        const imgData = await canvasToCompressedBytes(canvas)
+        releaseCanvas(canvas) // free pixel buffer immediately
+
+        const doc = new jsPDF({
+            orientation: imgData.width >= imgData.height ? 'landscape' : 'portrait',
+            unit: 'px',
+            format: [imgData.width, imgData.height],
+            compress: true,
+        })
+        doc.addImage(imgData.data, imgData.format, 0, 0, imgData.width, imgData.height)
+
         const blob = doc.output('blob')
 
         triggerDownload(blob, `${filenameBase}-Page${currentPage}.pdf`)
@@ -385,8 +422,16 @@ export async function exportCurrentPage(options: ExportOptions): Promise<Blob | 
 
 /**
  * Export all annotated pages as a multi-page PDF.
- * Navigates to each annotated page, fits all its nodes, captures it, then
- * assembles every capture into a single downloadable PDF.
+ *
+ * **Optimised for memory** — each page is captured, compressed to JPEG bytes
+ * via the async `canvas.toBlob()` API, added to the jsPDF document immediately,
+ * and then the source canvas's pixel buffer is released.  This means only ONE
+ * uncompressed bitmap + ONE compressed JPEG buffer exist at any given time,
+ * instead of accumulating every capture in a giant array.
+ *
+ * The event loop is yielded between pages (`setTimeout(0)`) so the browser
+ * never triggers the "Page Unresponsive" dialog, even for 50-page exports.
+ *
  * Returns a Blob, or null if no pages have content.
  */
 export async function exportAllPages(options: ExportAllOptions): Promise<Blob | null> {
@@ -420,7 +465,11 @@ export async function exportAllPages(options: ExportAllOptions): Promise<Blob | 
         const h = containerEl.offsetHeight
         const scale = computeSafeScaleMulti(w, h, annotatedPages.length, DEFAULT_SCALE)
 
-        const captures: Array<{ canvas: HTMLCanvasElement; dataUrl: string }> = []
+        // ── Incremental PDF assembly ───────────────────────────────────────
+        // The jsPDF document is created lazily when the first page is captured
+        // and each subsequent page is added immediately — nothing accumulates.
+        let doc: jsPDF | null = null
+        let capturedCount = 0
 
         for (let i = 0; i < annotatedPages.length; i++) {
             if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError')
@@ -448,21 +497,44 @@ export async function exportAllPages(options: ExportAllOptions): Promise<Blob | 
                     ),
                 )
                 const canvas = await Promise.race([capturePromise, timeoutPromise])
-                const dataUrl = canvasToDataUrl(canvas)
-                captures.push({ canvas, dataUrl })
+
+                // ★ Async JPEG compression — no base64 string in the JS heap
+                const imgData = await canvasToCompressedBytes(canvas, /* preferJpeg */ true)
+
+                // ★ Release canvas pixel buffer immediately (~33 MB per page at 2×)
+                releaseCanvas(canvas)
+
+                // ★ Add to PDF document incrementally
+                if (!doc) {
+                    doc = new jsPDF({
+                        orientation: imgData.width >= imgData.height ? 'landscape' : 'portrait',
+                        unit: 'px',
+                        format: [imgData.width, imgData.height],
+                        compress: true,
+                    })
+                } else {
+                    doc.addPage(
+                        [imgData.width, imgData.height],
+                        imgData.width >= imgData.height ? 'landscape' : 'portrait',
+                    )
+                }
+                doc.addImage(imgData.data, imgData.format, 0, 0, imgData.width, imgData.height)
+                capturedCount++
             } catch (err) {
                 console.warn(`[canvasExport] Failed to capture page ${pageNum}:`, err)
                 onProgress?.(`Warning: Failed to capture page ${pageNum}, skipping…`)
                 await new Promise((r) => setTimeout(r, 500))
             }
+
+            // ★ Yield to event loop — prevents "Page Unresponsive" dialog
+            await new Promise((r) => setTimeout(r, 0))
         }
 
-        if (captures.length === 0) throw new Error('All page captures failed')
+        if (!doc || capturedCount === 0) throw new Error('All page captures failed')
         if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError')
 
         onProgress?.('Building PDF…')
 
-        const doc = buildPdfFromCanvases(captures)
         const blob = doc.output('blob')
 
         triggerDownload(blob, `${filenameBase}-AllPages.pdf`)

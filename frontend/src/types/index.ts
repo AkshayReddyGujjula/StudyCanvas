@@ -135,6 +135,8 @@ export interface ImageNodeData {
     savedWidth?: number
     /** Persisted height after resize (0 = auto) */
     savedHeight?: number
+    /** Rotation angle in degrees (0, 90, 180, 270) */
+    rotation?: number
 }
 
 export interface StickyNoteNodeData {

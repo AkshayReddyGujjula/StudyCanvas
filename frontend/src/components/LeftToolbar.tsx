@@ -2,6 +2,7 @@ import { useRef } from 'react'
 
 interface LeftToolbarProps {
     onCustomPrompt: () => void
+    onSnip: () => void
     onAddImage: (dataUrl: string, fileName: string) => void
     onStickyNote: () => void
     onTimer: () => void
@@ -10,6 +11,7 @@ interface LeftToolbarProps {
 
 export default function LeftToolbar({
     onCustomPrompt,
+    onSnip,
     onAddImage,
     onStickyNote,
     onTimer,
@@ -37,6 +39,17 @@ export default function LeftToolbar({
             {/* Custom Prompt (chat with Gemini) */}
             <button onClick={onCustomPrompt} className={btnClass} title="Custom Prompt">
                 <span className="text-[11px] font-extrabold leading-none text-indigo-500">AI</span>
+            </button>
+
+            {/* Snipping Tool */}
+            <button onClick={onSnip} className={btnClass} title="Snipping Tool (Ctrl+Shift+S)">
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="6" cy="6" r="3" />
+                    <circle cx="6" cy="18" r="3" />
+                    <line x1="20" y1="4" x2="8.12" y2="15.88" />
+                    <line x1="14.47" y1="14.48" x2="20" y2="20" />
+                    <line x1="8.12" y1="8.12" x2="12" y2="12" />
+                </svg>
             </button>
 
             <div className="h-px bg-gray-200 mx-1" />

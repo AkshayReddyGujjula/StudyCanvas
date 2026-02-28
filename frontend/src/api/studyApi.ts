@@ -88,8 +88,14 @@ export const generateTitle = async (raw_text: string): Promise<string> => {
 /**
  * Generate 3-5 short-answer quiz questions for a single page's content.
  */
-export const generatePageQuiz = async (page_content: string, pdf_id?: string, page_index?: number, image_base64?: string): Promise<{ questions: string[]; model_used: string }> => {
-    const response = await api.post<{ questions: string[]; model_used: string }>('/api/page-quiz', { page_content, pdf_id, page_index, image_base64 })
+export const generatePageQuiz = async (
+    page_content: string,
+    pdf_id?: string,
+    page_index?: number,
+    image_base64?: string,
+    user_details?: { name: string; age: string; status: string; educationLevel: string }
+): Promise<{ questions: string[]; model_used: string }> => {
+    const response = await api.post<{ questions: string[]; model_used: string }>('/api/page-quiz', { page_content, pdf_id, page_index, image_base64, user_details })
     return response.data
 }
 
@@ -166,6 +172,34 @@ export const streamQuery = async (
     signal: AbortSignal
 ): Promise<Response> => {
     const response = await fetch(`${API_BASE}/api/query`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+        signal,
+    })
+    return response
+}
+
+/**
+ * Stream a Vision AI-enhanced page summary.
+ * Returns the Response object for streaming via response.body.getReader().
+ */
+export const streamPageSummary = async (
+    request: {
+        page_content: string
+        pdf_id?: string
+        page_index?: number
+        image_base64?: string
+        user_details?: {
+            name: string
+            age: string
+            status: string
+            educationLevel: string
+        }
+    },
+    signal: AbortSignal
+): Promise<Response> => {
+    const response = await fetch(`${API_BASE}/api/summarize-page`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(request),

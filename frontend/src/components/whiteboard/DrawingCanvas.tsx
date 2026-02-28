@@ -437,20 +437,25 @@ export default function DrawingCanvas() {
             return `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${size/2} ${size/2}, auto`
         }
         if (isDrawingTool) {
-            // Pen: pen-tip icon (24x24)
+            // Colored dot cursor — matches pen/highlighter colour and
+            // scales proportionally to the current brush width.
+            const tool = activeTool as 'pen1' | 'pen2' | 'highlighter'
+            const settings = tool === 'highlighter' ? toolSettings.highlighter : toolSettings[tool]
+            const color = settings.color
+            // Clamp rendered cursor dot between 6px and 32px so it stays visible & usable
+            const dotSize = Math.max(6, Math.min(settings.width, 32))
+            const r = dotSize / 2
+            const hexColor = color.replace('#', '%23')
+            const opacity = tool === 'highlighter' ? toolSettings.highlighter.opacity : 1
             const svg = [
-                `<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'>`,
-                `<g transform='rotate(-135, 12, 12)'>`,
-                `<rect x='10' y='2' width='4' height='16' rx='1' fill='%23333' />`,
-                `<polygon points='10,18 12,22 14,18' fill='%23333' />`,
-                `<rect x='10' y='2' width='4' height='4' rx='1' fill='%23666' />`,
-                `</g>`,
+                `<svg xmlns='http://www.w3.org/2000/svg' width='${dotSize}' height='${dotSize}' viewBox='0 0 ${dotSize} ${dotSize}'>`,
+                `<circle cx='${r}' cy='${r}' r='${r - 0.5}' fill='${hexColor}' fill-opacity='${opacity}' stroke='%23ffffff' stroke-width='1'/>`,
                 `</svg>`,
             ].join('')
-            return `url("data:image/svg+xml,${encodeURIComponent(svg)}") 3 21, auto`
+            return `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${r} ${r}, crosshair`
         }
         return 'default'
-    }, [isEraserTool, isDrawingTool, toolSettings.eraser.width])
+    }, [isEraserTool, isDrawingTool, toolSettings, activeTool])
 
     const shouldCapture = isDrawingTool || isEraserTool
 

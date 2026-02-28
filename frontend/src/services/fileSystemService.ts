@@ -521,12 +521,14 @@ export async function saveCanvasState(
     rootHandle: FileSystemDirectoryHandle,
     canvasId: string,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    stateObj: Record<string, any>,
+    stateObj: Record<string, any> | string,
 ): Promise<void> {
     const folder = await getCanvasFolder(rootHandle, canvasId, true)
     const fileHandle = await folder.getFileHandle(STATE_FILE, { create: true })
     const writable = await fileHandle.createWritable()
-    await writable.write(JSON.stringify(stateObj))
+    // Accept a pre-serialized JSON string (from Web Worker) or an object
+    const json = typeof stateObj === 'string' ? stateObj : JSON.stringify(stateObj)
+    await writable.write(json)
     await writable.close()
 }
 

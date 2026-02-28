@@ -273,29 +273,6 @@ export default function PDFViewer({
     }, [containerWidth])
 
     const isSnippingMode = useCanvasStore((s) => s.isSnippingMode)
-    const setIsSnippingMode = useCanvasStore((s) => s.setIsSnippingMode)
-
-    // Snipping State
-    const [snipStart, setSnipStart] = useState<{ x: number, y: number } | null>(null)
-    const [snipCurrent, setSnipCurrent] = useState<{ x: number, y: number } | null>(null)
-    const [isExtracting, setIsExtracting] = useState(false)
-    const [snipErrorMsg, setSnipErrorMsg] = useState<string | null>(null)
-
-    // Handle Escape to exit snipping mode.
-    // NOTE: Ctrl+Shift+S is handled ONLY by the global handler in Canvas.tsx.
-    // Having a second handler here caused a double-toggle race condition
-    // (Zustand's synchronous set meant the Canvas handler read the already-
-    // flipped value and toggled it back, making snipping mode appear broken
-    // in PDF view).
-    useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent) => {
-            if (e.key === 'Escape' && isSnippingMode) {
-                setIsSnippingMode(false)
-            }
-        }
-        window.addEventListener('keydown', handleKeyDown)
-        return () => window.removeEventListener('keydown', handleKeyDown)
-    }, [isSnippingMode, setIsSnippingMode])
 
     // ── Zoom helper — call before setScale to schedule scroll correction ─────
     // Returns a function that applies the scroll correction in a rAF.
@@ -358,7 +335,6 @@ export default function PDFViewer({
     }, [pageInputValue, numPages, onPageChange])
 
     const handleMouseUp = useCallback((e: React.MouseEvent) => {
-        if (isSnippingMode) return // Handled by Snipping overlay
         const selection = window.getSelection()
         const text = selection?.toString().trim() ?? ''
         console.log('[PDFViewer handleMouseUp] Text length:', text.length, 'rangeCount:', selection?.rangeCount)
@@ -368,137 +344,7 @@ export default function PDFViewer({
             console.log('[PDFViewer handleMouseUp] triggering onTextSelection with:', rect)
             onTextSelection?.(text, rect, { x: e.clientX, y: e.clientY })
         }
-    }, [onTextSelection, isSnippingMode])
-
-    // ── Snipping Tool Handlers ───────────────────────────────────────────────
-    const handleSnipMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
-        const el = pageContainerRef.current
-        if (!el) return
-        const rect = el.getBoundingClientRect()
-        // Convert screen-pixel offset to the element's LOCAL coordinate space.
-        // getBoundingClientRect() returns visual (post-CSS-transform) dimensions,
-        // but CSS left/top positioning uses the untransformed local space.
-        // When this component is inside a React Flow node with viewport zoom,
-        // the two spaces differ by the effective scale factor.
-        const scaleX = rect.width > 0 ? el.offsetWidth / rect.width : 1
-        const scaleY = rect.height > 0 ? el.offsetHeight / rect.height : 1
-        const localX = (e.clientX - rect.left) * scaleX
-        const localY = (e.clientY - rect.top) * scaleY
-        setSnipStart({ x: localX, y: localY })
-        setSnipCurrent({ x: localX, y: Math.max(0, localY) })
-    }
-
-    const handleSnipMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-        if (!snipStart) return
-        const el = pageContainerRef.current
-        if (!el) return
-        const rect = el.getBoundingClientRect()
-        const scaleX = rect.width > 0 ? el.offsetWidth / rect.width : 1
-        const scaleY = rect.height > 0 ? el.offsetHeight / rect.height : 1
-        setSnipCurrent({
-            x: (e.clientX - rect.left) * scaleX,
-            y: Math.max(0, (e.clientY - rect.top) * scaleY)
-        })
-    }
-
-    const handleSnipMouseUp = async (e: React.MouseEvent<HTMLDivElement>) => {
-        if (!snipStart || !snipCurrent || !canvasRef.current) {
-            setSnipStart(null)
-            setSnipCurrent(null)
-            return
-        }
-
-        const clientX = e.clientX
-        const clientY = e.clientY
-
-        const x = Math.min(snipStart.x, snipCurrent.x)
-        const y = Math.min(snipStart.y, snipCurrent.y)
-        const width = Math.max(10, Math.abs(snipStart.x - snipCurrent.x))
-        const height = Math.max(10, Math.abs(snipStart.y - snipCurrent.y))
-
-        // Derive the actual pixel ratio used when rendering the canvas, so
-        // CSS-pixel snip coordinates map to the correct canvas-buffer region.
-        const renderDpr = canvasRef.current.width / parseFloat(canvasRef.current.style.width || '1')
-
-        setSnipStart(null)
-        setSnipCurrent(null)
-
-        // Only process if it's a reasonably sized box (avoids accidental clicks)
-        if (width < 20 || height < 20) return
-
-        setIsExtracting(true)
-        try {
-            // Create a temporary canvas to crop the image
-            const tempCanvas = document.createElement('canvas')
-            tempCanvas.width = Math.floor(width * renderDpr)
-            tempCanvas.height = Math.floor(height * renderDpr)
-            const ctx = tempCanvas.getContext('2d')
-            if (!ctx) return
-
-            // Draw the cropped portion from the main PDF canvas
-            ctx.drawImage(
-                canvasRef.current,
-                x * renderDpr, y * renderDpr, width * renderDpr, height * renderDpr, // Source rect
-                0, 0, tempCanvas.width, tempCanvas.height  // Destination rect
-            )
-
-            // Convert to base64
-            const base64Image = tempCanvas.toDataURL('image/jpeg', 0.9)
-
-            // Send to backend OCR endpoint
-            const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
-            const response = await fetch(`${API_BASE}/api/vision`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ image_base64: base64Image })
-            })
-
-            if (!response.ok) {
-                const errBody = await response.json().catch(() => null)
-                const detail = errBody?.detail ?? `HTTP ${response.status}`
-                throw new Error(detail)
-            }
-
-            const data = await response.json()
-            if (data.text && data.text.trim().length > 0) {
-                // Return to normal mode and trigger selection
-                setIsSnippingMode(false)
-
-                const pgRect = pageContainerRef.current?.getBoundingClientRect()
-                const el = pageContainerRef.current
-                // Convert local coordinates back to screen coordinates for the popup
-                const toScreenX = (el && el.offsetWidth > 0 && pgRect) ? pgRect.width / el.offsetWidth : 1
-                const toScreenY = (el && el.offsetHeight > 0 && pgRect) ? pgRect.height / el.offsetHeight : 1
-                const domRect = new DOMRect(
-                    (pgRect?.left ?? 0) + x * toScreenX,
-                    (pgRect?.top ?? 0) + y * toScreenY,
-                    width * toScreenX,
-                    height * toScreenY
-                )
-
-                onTextSelection?.(data.text.trim(), domRect, { x: clientX, y: clientY }, true)
-            } else {
-                // No text detected — exit snipping mode and tell the user.
-                setIsSnippingMode(false)
-                setSnipErrorMsg('No text detected — try selecting a larger area with text')
-                setTimeout(() => setSnipErrorMsg(null), 3500)
-            }
-        } catch (err) {
-            console.error('[PDFViewer] Vision extract error:', err)
-            // Exit snipping mode and surface the error to the user.
-            setIsSnippingMode(false)
-            const errMsg = err instanceof Error ? err.message : ''
-            const isNetworkErr = errMsg.includes('Failed to fetch') || errMsg.includes('NetworkError') || errMsg.includes('ERR_CONNECTION')
-            setSnipErrorMsg(
-                isNetworkErr
-                    ? 'Cannot reach backend server — is it running on port 8000?'
-                    : `Text extraction failed: ${errMsg || 'check connection and try again'}`
-            )
-            setTimeout(() => setSnipErrorMsg(null), 5000)
-        } finally {
-            setIsExtracting(false)
-        }
-    }
+    }, [onTextSelection])
 
     if (isLoading) {
         return (
@@ -716,45 +562,6 @@ export default function PDFViewer({
                                 opacity: 1,
                             }}
                         />
-
-                        {/* Snipping Tool Overlay */}
-                        {isSnippingMode && (
-                            <div
-                                className={`absolute top-0 left-0 w-full h-full z-20 ${isExtracting ? 'cursor-wait' : 'cursor-crosshair'}`}
-                                style={{ backgroundColor: 'rgba(0,0,0,0.1)' }}
-                                onMouseDown={!isExtracting ? handleSnipMouseDown : undefined}
-                                onMouseMove={!isExtracting ? handleSnipMouseMove : undefined}
-                                onMouseUp={!isExtracting ? handleSnipMouseUp : undefined}
-                                onMouseLeave={!isExtracting ? handleSnipMouseUp : undefined}
-                            >
-                                {snipStart && snipCurrent && (
-                                    <div
-                                        className="absolute border-2 border-indigo-500 bg-indigo-500/20"
-                                        style={{
-                                            left: Math.min(snipStart.x, snipCurrent.x),
-                                            top: Math.min(snipStart.y, snipCurrent.y),
-                                            width: Math.abs(snipStart.x - snipCurrent.x),
-                                            height: Math.abs(snipStart.y - snipCurrent.y),
-                                        }}
-                                    />
-                                )}
-                                {isExtracting && (
-                                    <div className="absolute inset-0 flex items-center justify-center bg-white/50 backdrop-blur-sm z-30">
-                                        <div className="bg-white p-4 rounded-lg shadow-xl flex items-center gap-3">
-                                            <div className="w-5 h-5 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
-                                            <span className="text-sm font-medium text-gray-700">Extracting text with Vision AI...</span>
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        )}
-
-                        {/* Snip error toast — shown briefly after a failed OCR attempt */}
-                        {snipErrorMsg && (
-                            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-40 px-4 py-2 bg-gray-800 text-white text-xs font-medium rounded-lg shadow-lg whitespace-nowrap pointer-events-none">
-                                {snipErrorMsg}
-                            </div>
-                        )}
                     </div>
                 </div>
             </div>

@@ -3,13 +3,15 @@ import json
 import base64
 import logging
 import asyncio
-import google.generativeai as genai
+from google.generativeai.client import configure as genai_configure
+from google.generativeai.generative_models import GenerativeModel
+from google.generativeai.types import GenerationConfig
 from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)
 
 # Initialise the Gemini client once at module level
-genai.configure(api_key=os.environ.get("GEMINI_API_KEY", ""))
+genai_configure(api_key=os.environ.get("GEMINI_API_KEY", ""))
 
 # ── Model tier constants ──────────────────────────────────────────────────────
 # Lite: cheaper & faster — ideal for simple tasks (OCR, titles, simple Q&A)
@@ -67,7 +69,7 @@ async def generate_title(raw_text: str) -> str:
     Receives the cleaned Markdown content (not raw PDF extraction) for accuracy.
     Returns plain text with no markdown, punctuation, or explanation.
     """
-    model = genai.GenerativeModel(MODEL_LITE)
+    model = GenerativeModel(MODEL_LITE)
     # Use up to 6000 chars of the (already-clean) markdown content
     excerpt = raw_text[:6000]
     prompt = (
@@ -88,7 +90,7 @@ async def generate_title(raw_text: str) -> str:
     response = await asyncio.to_thread(
         lambda: model.generate_content(
             prompt,
-            generation_config=genai.GenerationConfig(max_output_tokens=50, temperature=0.3),
+            generation_config=GenerationConfig(max_output_tokens=50, temperature=0.3),
         )
     )
     # Safely extract text — finish_reason 2 (MAX_TOKENS) or blocked candidates
@@ -165,7 +167,7 @@ async def stream_query(
     raw_text: str,
     parent_response: str | None,
     user_details=None,
-    chat_history: list = None,
+    chat_history: list | None = None,
     model_name: str | None = None,
 ):
     """
@@ -176,7 +178,7 @@ async def stream_query(
     # --- Context routing: skip raw_text if general knowledge suffices ---
     needs_context = _needs_pdf_context(question, highlighted_text)
 
-    model = genai.GenerativeModel(
+    model = GenerativeModel(
         model_name=model_name or MODEL_LITE,
     )
 
@@ -265,7 +267,7 @@ async def extract_text_from_image_b64(img_b64: str) -> str:
     Uses Gemini Vision to read substantive educational text from an image,
     ignoring page numbers and footers.
     """
-    model = genai.GenerativeModel(MODEL_LITE)
+    model = GenerativeModel(MODEL_LITE)
     prompt = (
         "You are an OCR system. Extract ALL educational text, headings, bullet points, and "
         "substantive content visible in this image. "
@@ -296,9 +298,9 @@ async def generate_quiz(
     Primary source is either the Gemini answers the student struggled with
     or the provided page content, depending on source_type.
     """
-    model = genai.GenerativeModel(
+    model = GenerativeModel(
         MODEL_FLASH,
-        generation_config=genai.GenerationConfig(
+        generation_config=GenerationConfig(
             response_mime_type="application/json",
         ),
     )
@@ -334,8 +336,10 @@ async def generate_quiz(
             context_section = f"Page context:\n{effective_content}"
 
         prompt = (
-            "You are an intelligent quiz generator for university students.\n\n"
+            "You are an expert academic examiner creating a rigorous revision quiz.\n\n"
             "A student wants to be tested on the following page content.\n\n"
+            "STEP 1 — Identify the key topic(s) and concepts on this page.\n"
+            "STEP 2 — Build questions of VARYING DIFFICULTY that test deep understanding.\n\n"
             "CRITICAL — Image Analysis:\n"
             "- If a page image is provided, you MUST carefully examine it for ALL visible content "
             "including handwritten notes, annotations, diagrams, and any text that may not appear in the extracted text.\n"
@@ -351,7 +355,15 @@ async def generate_quiz(
             "  • For MCQ questions:\n"
             "      - Provide EXACTLY 4 options in the 'options' array.\n"
             "      - Set 'correct_option' to the 0-based index (0–3) of the correct option.\n"
-            "      - Make distractors plausible but clearly wrong on reflection.\n"
+            "      - Make ALL distractors PLAUSIBLE — they should require careful reasoning to eliminate. "
+            "Avoid obviously wrong options.\n"
+            "  • Question Quality (CRITICAL):\n"
+            "      - Questions MUST be exam-quality — the kind a student would see in an end-of-unit test.\n"
+            "      - NEVER ask trivial or obvious questions like 'What is the definition of X?' when X is directly stated.\n"
+            "      - Include questions that require APPLYING knowledge to new scenarios or calculations.\n"
+            "      - Include questions that require ANALYSIS — comparing, contrasting, explaining WHY something happens.\n"
+            "      - If the page has formulas, data, or worked examples, include a calculation question.\n"
+            "      - Each question should make the student THINK DEEPLY, not just scan the text for an answer.\n"
             "  • Focus on the EDUCATIONAL SUBJECT MATTER — ignore page numbers, exam formatting, "
             "headers, barcodes, or administrative instructions.\n"
             "  • For short_answer questions: leave 'options' as null and 'correct_option' as null.\n\n"
@@ -372,7 +384,7 @@ async def generate_quiz(
             for n in struggling_nodes
         )
         prompt = (
-            "You are an intelligent quiz generator for university students.\n\n"
+            "You are an expert academic examiner creating a targeted revision quiz.\n\n"
             "A student has been studying and has marked certain topics as ones they are struggling with. "
             "For each struggling topic you are given three things:\n"
             "  1. The highlighted passage from the document\n"
@@ -385,6 +397,12 @@ async def generate_quiz(
             "  • If the topic (e.g. macOS efficiency, a specific algorithm, a historical event) was "
             "covered in the Gemini answer but is NOT in the PDF, you MUST still test it — do NOT skip "
             "it or restrict yourself only to PDF content.\n\n"
+            "CRITICAL — Question Quality:\n"
+            "  • Focus on the CONCEPTUAL GAPS the student demonstrated by marking these topics as struggling.\n"
+            "  • Ask questions that address COMMON MISCONCEPTIONS in these topic areas.\n"
+            "  • Questions MUST be exam-quality — not trivial or obvious recall questions.\n"
+            "  • Include questions that require APPLYING the concept to a new scenario.\n"
+            "  • Each question should make the student think deeply and demonstrate genuine understanding.\n\n"
             "Format Rules:\n"
             "  • Generate a default of 4 questions total. If the content is dense or there are many struggling topics, intelligently decide to ask up to a maximum of 7 questions.\n"
             "  • Mix question types intelligently:\n"
@@ -395,7 +413,7 @@ async def generate_quiz(
             "  • For MCQ questions:\n"
             "      - Provide EXACTLY 4 options in the 'options' array.\n"
             "      - Set 'correct_option' to the 0-based index (0–3) of the correct option.\n"
-            "      - Make distractors plausible but clearly wrong on reflection.\n"
+            "      - Make ALL distractors PLAUSIBLE — they should require careful reasoning to eliminate.\n"
             "  • For short_answer questions: leave 'options' as null and 'correct_option' as null.\n\n"
             f"Struggling topics:\n{nodes_summary}\n\n"
             f"Document (secondary context only, first 8000 chars):\n{truncated_raw}\n\n"
@@ -443,9 +461,9 @@ async def generate_flashcards(
     """
     Generates flashcards based on struggling topics or page context depending on source_type.
     """
-    model = genai.GenerativeModel(
+    model = GenerativeModel(
         MODEL_FLASH,
-        generation_config=genai.GenerationConfig(
+        generation_config=GenerationConfig(
             response_mime_type="application/json",
         ),
     )
@@ -566,15 +584,94 @@ async def generate_flashcards(
     return json.loads(text.strip())
 
 
-async def generate_page_quiz(page_content: str, pdf_id: str | None = None, page_index: int | None = None, image_base64: str | None = None) -> list[str]:
+async def generate_page_summary(
+    page_content: str,
+    pdf_id: str | None = None,
+    page_index: int | None = None,
+    image_base64: str | None = None,
+    user_details: dict | None = None,
+):
+    """
+    Generates a concise summary of a page using both text and Vision AI.
+    Yields text chunks for streaming. Uses the page image as the primary source
+    so diagrams, handwritten notes, and visual content are captured.
+    """
+    import re as _re
+    
+    effective_content = (page_content or "").strip()
+    effective_content = _re.sub(r'^##\s*Page\s*\d+\s*', '', effective_content).strip()
+    
+    contents = []
+    has_image = False
+    
+    # Include the page image for Vision AI analysis
+    img_b64 = image_base64 or (get_page_image_base64(pdf_id, page_index) if pdf_id and page_index is not None else None)
+    if img_b64:
+        contents.append({"mime_type": "image/jpeg", "data": img_b64})
+        has_image = True
+    
+    if len(effective_content) < 20 and not has_image:
+        yield "This page appears to have no readable content."
+        return
+    
+    # Build context description
+    if has_image and len(effective_content) < 20:
+        context_section = "(An image of the page is provided above. Base your summary on the visual content.)"
+    elif has_image:
+        context_section = f"Extracted text (may be incomplete — the page image above is the primary source):\n{effective_content}"
+    else:
+        context_section = f"Page content:\n{effective_content}"
+    
+    personalisation = ""
+    if user_details:
+        name = user_details.get("name", "")
+        level = user_details.get("educationLevel", "")
+        if name or level:
+            personalisation = f"\nTailor the summary for a {level} student{(' named ' + name) if name else ''}.\n"
+    
+    prompt = (
+        "You are an expert academic summariser.\n\n"
+        "CRITICAL — Image Analysis:\n"
+        "- If a page image is provided, you MUST carefully examine it for ALL visible content "
+        "including diagrams, tables, charts, handwritten notes, annotations, and any text that may not appear in the extracted text.\n"
+        "- The page image is the PRIMARY and most reliable source of content.\n\n"
+        f"{personalisation}"
+        "Create a concise summary of the page content. Format rules:\n"
+        "- Use 3-5 bullet points with markdown formatting.\n"
+        "- Focus on KEY CONCEPTS, definitions, formulas, and important relationships.\n"
+        "- If there are diagrams or visual elements, describe and explain them.\n"
+        "- Be specific and informative — avoid vague generalizations.\n"
+        "- Keep it brief but comprehensive enough for effective revision.\n\n"
+        f"{context_section}"
+    )
+    contents.append(prompt)
+    
+    model_name = MODEL_LITE
+    model = GenerativeModel(model_name)
+    
+    try:
+        response = await model.generate_content_async(contents, stream=True)
+        async for chunk in response:
+            try:
+                text = chunk.text
+                if text:
+                    yield text
+            except ValueError:
+                pass
+    except Exception as e:
+        logger.error(f"Summary generation error: {e}")
+        yield f"\n\n[Error generating summary: {str(e)}]"
+
+
+async def generate_page_quiz(page_content: str, pdf_id: str | None = None, page_index: int | None = None, image_base64: str | None = None, user_details: dict | None = None) -> list[str]:
     """
     Generates 3-5 short-answer questions based ONLY on the provided page content.
     No struggling nodes, no user context — pure page comprehension test.
     Returns a plain JSON array of question strings.
     """
-    model = genai.GenerativeModel(
+    model = GenerativeModel(
         MODEL_FLASH,
-        generation_config=genai.GenerationConfig(
+        generation_config=GenerationConfig(
             response_mime_type="application/json",
         ),
     )
@@ -607,24 +704,69 @@ async def generate_page_quiz(page_content: str, pdf_id: str | None = None, page_
     else:
         context_section = f"Page content:\n\n{effective_content}"
 
+    # Build adaptive difficulty instruction based on user details and page context
+    difficulty_instruction = (
+        "ADAPTIVE DIFFICULTY — Calibrate question complexity intelligently:\n"
+        "- FIRST, examine the page content carefully for indicators of educational level. Look for keywords "
+        "such as 'GCSE', 'A-Level', 'AS-Level', 'A2', 'IGCSE', '11+', '11 plus', 'Common Entrance', "
+        "'SATs', 'Key Stage', 'AP', 'IB', 'undergraduate', 'degree', 'masters', 'PhD', exam board names "
+        "(AQA, Edexcel, OCR, WJEC, CIE, IB), syllabus codes, or year group references.\n"
+    )
+    if user_details:
+        name = user_details.get("name", "")
+        age = user_details.get("age", "")
+        status = user_details.get("status", "")
+        level = user_details.get("educationLevel", "")
+        if any([name, age, status, level]):
+            parts = []
+            if name: parts.append(f"Name: {name}")
+            if age: parts.append(f"Age: {age}")
+            if status: parts.append(f"Status: {status}")
+            if level: parts.append(f"Education level: {level}")
+            difficulty_instruction += (
+                f"- The student's context: {', '.join(parts)}. Use this as a SECONDARY signal if no "
+                "explicit level indicator is found on the page itself.\n"
+            )
+    difficulty_instruction += (
+        "- For primary school / 11+ / Key Stage 2: Focus on recall, basic comprehension, and simple application. "
+        "Use clear, straightforward language. Questions should be accessible but still require thought.\n"
+        "- For GCSE / Key Stage 4 / IGCSE: Balanced mix of recall and application. Include 'Explain why...' "
+        "and 'Describe how...' style questions. Some questions should require linking concepts.\n"
+        "- For A-Level / IB / AP: Emphasis on application and analysis. Include questions requiring evaluation, "
+        "comparison, and extended reasoning. Expect multi-step answers.\n"
+        "- For undergraduate and above: Focus on synthesis, evaluation, critical analysis, and edge cases. "
+        "Questions should challenge deep understanding and ability to apply knowledge to novel scenarios.\n"
+        "- If NO level indicator is found on the page AND no user context is provided, infer the level from "
+        "the complexity of the content itself and calibrate accordingly.\n"
+        "- Each question MUST be clearly worded and easy to understand, regardless of difficulty level.\n\n"
+    )
+
     prompt = (
-        "You are an expert academic tutor creating a short comprehension quiz.\n\n"
-        "Based ONLY on the page content below, generate between 2 and 5 concise short-answer "
-        "questions that test a student's understanding of the key concepts on this page. Intelligently decide how many questions to ask based on the amount of content.\n\n"
+        "You are an expert academic examiner creating a rigorous comprehension quiz.\n\n"
+        "STEP 1 — Identify the key topic(s) and concepts on this page.\n"
+        "STEP 2 — Based ONLY on the page content, generate between 2 and 5 exam-quality short-answer "
+        "questions that genuinely test understanding. Intelligently decide how many questions to ask based on the amount of content.\n\n"
         "CRITICAL — Image Analysis:\n"
         "- If a page image is provided, you MUST carefully examine it for ALL visible content "
         "including handwritten notes, annotations, diagrams, and any text that may not appear in the extracted text.\n"
         "- The page image is the PRIMARY and most reliable source of content. The extracted text may miss "
         "handwritten content entirely.\n\n"
-        "Rules:\n"
-        "- Use ONLY information visible on the page (image and/or text). Do not introduce outside concepts.\n"
-        "- Questions should be about the EDUCATIONAL SUBJECT MATTER on the page — not about page numbers, "
-        "exam formatting, headers, barcodes, or administrative instructions.\n"
-        "- Questions should be specific, not vague or generic.\n"
+        f"{difficulty_instruction}"
+        "Question Quality Rules:\n"
+        "- Questions MUST be the kind a student would encounter in a real exam — not trivial or obvious.\n"
+        "- NEVER ask questions answerable by simply scanning for a keyword (e.g. avoid 'What is X?' when X is directly stated).\n"
+        "- Each question should require the student to THINK and demonstrate genuine understanding.\n"
+        "- Include a MIX of difficulty levels appropriate to the detected educational level:\n"
+        "    1. One question testing recall of a key definition or fact (but phrased in a non-obvious way).\n"
+        "    2. One or two questions requiring APPLICATION — e.g. 'Calculate...', 'Explain why...', 'What would happen if...'.\n"
+        "    3. At least one question requiring ANALYSIS or SYNTHESIS — e.g. 'Compare...', 'Why is this important in the context of...', 'How does X relate to Y?'.\n"
+        "- If the page contains numerical data, formulas, or worked examples, include at least one calculation-based question.\n"
+        "- If the page contains a diagram or visual, ask a question that requires interpreting it.\n"
         "- Questions should require a sentence or two to answer properly.\n"
-        "- Number the questions with the depth of understanding ranging from recall → application.\n"
+        "- Use ONLY information visible on the page. Do not introduce outside concepts.\n"
+        "- Ignore page numbers, exam formatting, headers, barcodes, or administrative instructions.\n"
         "- Output ONLY a JSON array of question strings. No explanation, no extra keys.\n"
-        "- Example: [\"What is X?\", \"How does Y relate to Z?\", \"Why is W important?\"]\n\n"
+        "- Example: [\"Why does increasing temperature shift the equilibrium position to the right in this endothermic reaction?\", \"Calculate the energy change for the reaction given the bond energies shown.\"]\n\n"
         f"{context_section}"
     )
 
@@ -657,7 +799,7 @@ async def grade_answer(
     Grades a student's answer to a page-quiz question and returns direct, personalised
     feedback as a plain text string (not JSON).
     """
-    model = genai.GenerativeModel(MODEL_FLASH)
+    model = GenerativeModel(MODEL_FLASH)
 
     personalisation = ""
     if user_details:
@@ -709,7 +851,7 @@ async def grade_answer(
     response = await asyncio.to_thread(
         lambda: model.generate_content(
             contents,
-            generation_config=genai.GenerationConfig(max_output_tokens=8192, temperature=0.4),
+            generation_config=GenerationConfig(max_output_tokens=8192, temperature=0.4),
         )
     )
     try:
@@ -751,9 +893,9 @@ async def validate_answer(
         }
 
     # ── Short answer: ask Gemini ────────────────────────────────────────────
-    model = genai.GenerativeModel(
+    model = GenerativeModel(
         MODEL_LITE,
-        generation_config=genai.GenerationConfig(
+        generation_config=GenerationConfig(
             response_mime_type="application/json",
         ),
     )
@@ -792,15 +934,19 @@ async def image_to_text(base64_image: str) -> str:
     if "base64," in base64_image:
         base64_image = base64_image.split("base64,")[1]
         
-    model = genai.GenerativeModel(MODEL_LITE)
+    model = GenerativeModel(MODEL_LITE)
     
     prompt = (
-        "You are an expert Optical Character Recognition (OCR) assistant.\n"
+        "You are an expert Optical Character Recognition (OCR) and handwriting recognition assistant.\n"
+        "The image may contain printed text, handwritten text (including freehand mouse or stylus strokes\n"
+        "on a digital canvas), mathematical notation, diagrams with labels, or any combination of these.\n"
         "Please extract all the text exactly as it appears in the provided image.\n"
         "Rules:\n"
         "1. Output ONLY the extracted text.\n"
         "2. Preserve the original formatting, line breaks, and punctuation as best as possible.\n"
-        "3. Do not add any conversational filler, markdown fencing, or explanations."
+        "3. For handwritten or freehand text, interpret the strokes as characters even if the\n"
+        "   letterforms are imperfect, wobbly, or stylised. Use your best judgement to decode them.\n"
+        "4. Do not add any conversational filler, markdown fencing, or explanations."
     )
     
     response = await asyncio.to_thread(
@@ -809,7 +955,7 @@ async def image_to_text(base64_image: str) -> str:
                 {"mime_type": "image/jpeg", "data": base64_image},
                 prompt
             ],
-            generation_config=genai.GenerationConfig(temperature=0.1),
+            generation_config=GenerationConfig(temperature=0.1),
         )
     )
     try:

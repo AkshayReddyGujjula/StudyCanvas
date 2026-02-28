@@ -31,6 +31,13 @@ export default function ImageNode({ id, data }: ImageNodeProps) {
         persistToLocalStorage()
     }, [confirmDelete, id, setNodes, setEdges, persistToLocalStorage])
 
+    const handleRotate = useCallback(() => {
+        const currentRotation = data.rotation || 0
+        const newRotation = (currentRotation + 90) % 360
+        updateNodeData(id, { rotation: newRotation })
+        persistToLocalStorage()
+    }, [id, data.rotation, updateNodeData, persistToLocalStorage])
+
     const handleResizeMouseDown = useCallback((corner: string) => (e: React.MouseEvent) => {
         e.preventDefault()
         e.stopPropagation()
@@ -130,6 +137,18 @@ export default function ImageNode({ id, data }: ImageNodeProps) {
                             <path d="M14.5 9l1 1" />
                         </svg>
                     </button>
+
+                    {/* Rotate button */}
+                    <button
+                        title="Rotate 90°"
+                        onClick={handleRotate}
+                        className="p-1 text-gray-400 hover:text-blue-500 rounded-md hover:bg-blue-50 transition-colors"
+                    >
+                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M21.5 2v6h-6" />
+                            <path d="M21.34 15.57a10 10 0 1 1-.57-8.38L21.5 8" />
+                        </svg>
+                    </button>
                 </div>
             </div>
 
@@ -139,7 +158,11 @@ export default function ImageNode({ id, data }: ImageNodeProps) {
                     src={data.imageDataUrl}
                     alt={data.imageName}
                     className="w-full h-full"
-                    style={{ objectFit: autoHeight ? 'contain' : 'contain' }}
+                    style={{
+                        objectFit: 'contain',
+                        transform: `rotate(${data.rotation || 0}deg)`,
+                        transition: 'transform 0.2s ease',
+                    }}
                     draggable={false}
                 />
             </div>

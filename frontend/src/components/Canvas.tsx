@@ -17,6 +17,7 @@ import {
     type Viewport,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
+import { toCanvas as domToCanvas } from 'html-to-image'
 
 import ContentNode from './ContentNode'
 import AnswerNode from './AnswerNode'
@@ -37,7 +38,7 @@ import { DrawingCanvas, DrawingToolbar, TextNode } from './whiteboard'
 import { useTextSelection } from '../hooks/useTextSelection'
 import { useCanvasStore } from '../store/canvasStore'
 import { extractPageImageBase64 } from '../utils/pdfImageExtractor'
-import { streamQuery, generateTitle, generatePageQuiz, gradeAnswer, generateFlashcards } from '../api/studyApi'
+import { streamQuery, streamPageSummary, generateTitle, generatePageQuiz, gradeAnswer, generateFlashcards } from '../api/studyApi'
 import { getNewNodePosition, recalculateSiblingPositions, resolveOverlaps, isOverlapping, rerouteEdgeHandles, getQuizNodePositions, getFlashcardPositions, findNonOverlappingPosition } from '../utils/positioning'
 import type { AnswerNodeData, QuizQuestionNodeData, FlashcardNodeData, TextNodeData, CustomPromptNodeData, ImageNodeData, StickyNoteNodeData, TimerNodeData, SummaryNodeData } from '../types'
 import { pdf } from '@react-pdf/renderer'
@@ -105,6 +106,13 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
     const exportAbortRef = useRef<AbortController | null>(null)
     const streamingNodesRef = useRef<Set<string>>(new Set())
     const containerRef = useRef<HTMLDivElement>(null)
+
+    // ── Global Snipping Tool state ──────────────────────────────────────────
+    const isSnippingMode = useCanvasStore((s) => s.isSnippingMode)
+    const setIsSnippingMode = useCanvasStore((s) => s.setIsSnippingMode)
+    const [snipStart, setSnipStart] = useState<{ x: number; y: number } | null>(null)
+    const [snipCurrent, setSnipCurrent] = useState<{ x: number; y: number } | null>(null)
+    const [isSnipExtracting, setIsSnipExtracting] = useState(false)
 
     const nodes = useCanvasStore((s) => s.nodes)
     const edges = useCanvasStore((s) => s.edges)
@@ -271,7 +279,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 if (b64) imageBase64 = b64
             }
 
-            const result = await generatePageQuiz(pageContent, fileData.pdf_id, currentPage - 1, imageBase64)
+            const result = await generatePageQuiz(pageContent, fileData.pdf_id, currentPage - 1, imageBase64, userDetails)
             questions = result.questions
         } catch (err: unknown) {
             console.error('Page quiz generation error:', err)
@@ -618,6 +626,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 isRunning: false,
                 sessionsCompleted: 0,
                 pageIndex: currentPage,
+                isPinned: true,
             } as unknown as Record<string, unknown>,
             style: { width: 240 },
         }
@@ -648,27 +657,32 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
         setNodes((prev) => [...prev, newNode])
         persistToLocalStorage()
 
-        // Auto-stream summary — read pageMarkdowns from store at call time
-        // to avoid stale closure issues where the context might be empty
+        // Auto-stream summary using Vision AI — extracts page image for
+        // diagrams/handwritten content alongside the text
         const controller = new AbortController()
         try {
             const storeState = useCanvasStore.getState()
             let pageContent = storeState.pageMarkdowns[currentPage - 1] ?? ''
             // Fallback: if page-specific markdown is empty, use raw_text from fileData
             if (!pageContent.trim() && storeState.fileData?.raw_text) {
-                pageContent = storeState.fileData.raw_text
+                pageContent = storeState.fileData.raw_text.slice(0, 50000)
             }
 
-            const prompt = `Please provide a concise summary of this page's content. Focus on the key concepts, definitions, and important points. Use bullet points for clarity.`
+            // Extract page image for Vision AI analysis
+            let imageBase64: string | undefined
+            const pdfBuffer = storeState.pdfArrayBuffer
+            if (pdfBuffer) {
+                const b64 = await extractPageImageBase64(pdfBuffer, currentPage - 1)
+                if (b64) imageBase64 = b64
+            }
 
-            const response = await streamQuery(
+            const response = await streamPageSummary(
                 {
-                    question: prompt,
-                    highlighted_text: pageContent,
-                    raw_text: pageContent,
-                    parent_response: null,
+                    page_content: pageContent,
+                    pdf_id: fileData?.pdf_id ?? '',
+                    page_index: currentPage - 1,
+                    image_base64: imageBase64,
                     user_details: userDetails ?? undefined,
-                    preferred_model: 'gemini-2.5-flash-lite',
                 },
                 controller.signal,
             )
@@ -751,28 +765,15 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 // Always prevent the browser "Save As" dialog.
                 e.preventDefault()
                 const state = useCanvasStore.getState()
-                if (!state.pdfArrayBuffer) {
-                    // PDF not loaded or not in PDF view — try loading it first
-                    if (state.fileData) {
-                        state.loadPdfFromStorage().then(() => {
-                            const fresh = useCanvasStore.getState()
-                            if (fresh.pdfArrayBuffer) {
-                                fresh.setIsSnippingMode(true)
-                            } else {
-                                setToast('Switch to PDF View mode to use the snipping tool')
-                                if (toastTimeout) clearTimeout(toastTimeout)
-                                toastTimeout = setTimeout(() => setToast(null), 3000)
-                            }
-                        })
-                    } else {
-                        setToast('Upload a PDF first to use the snipping tool')
-                        if (toastTimeout) clearTimeout(toastTimeout)
-                        toastTimeout = setTimeout(() => setToast(null), 3000)
-                    }
-                    return
-                }
-                // Toggle snipping mode — the PDFViewer overlay responds to this store flag.
+                // Toggle global snipping mode — works anywhere on the canvas
                 state.setIsSnippingMode(!state.isSnippingMode)
+            }
+            // Escape exits snipping mode
+            if (e.key === 'Escape') {
+                const state = useCanvasStore.getState()
+                if (state.isSnippingMode) {
+                    state.setIsSnippingMode(false)
+                }
             }
         }
         document.addEventListener('keydown', handleKeyDown)
@@ -848,6 +849,172 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
         if (toastTimeout) clearTimeout(toastTimeout)
         toastTimeout = setTimeout(() => setToast(null), 3000)
     }, [])
+
+    // ── Global Snipping Tool handlers ───────────────────────────────────────
+    const handleSnipPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+        if (isSnipExtracting) return
+        const rect = e.currentTarget.getBoundingClientRect()
+        const x = e.clientX - rect.left
+        const y = e.clientY - rect.top
+        setSnipStart({ x, y })
+        setSnipCurrent({ x, y })
+        ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+    }, [isSnipExtracting])
+
+    const handleSnipPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+        if (!snipStart || isSnipExtracting) return
+        const rect = e.currentTarget.getBoundingClientRect()
+        setSnipCurrent({
+            x: Math.max(0, Math.min(e.clientX - rect.left, rect.width)),
+            y: Math.max(0, Math.min(e.clientY - rect.top, rect.height)),
+        })
+    }, [snipStart, isSnipExtracting])
+
+    const handleSnipPointerUp = useCallback(async (e: React.PointerEvent<HTMLDivElement>) => {
+        if (!snipStart || !snipCurrent || isSnipExtracting) {
+            setSnipStart(null)
+            setSnipCurrent(null)
+            return
+        }
+
+        // Compute selection rectangle in screen (viewport) pixels
+        const overlayRect = e.currentTarget.getBoundingClientRect()
+        const sx = Math.min(snipStart.x, snipCurrent.x)
+        const sy = Math.min(snipStart.y, snipCurrent.y)
+        const sw = Math.abs(snipStart.x - snipCurrent.x)
+        const sh = Math.abs(snipStart.y - snipCurrent.y)
+
+        setSnipStart(null)
+        setSnipCurrent(null)
+
+        // Require a minimum selection size to avoid accidental clicks
+        if (sw < 20 || sh < 20) return
+
+        setIsSnipExtracting(true)
+        try {
+            // Capture the ReactFlow container as a canvas using html-to-image.
+            // The container includes all nodes, edges, and the drawing layer.
+            const el = containerRef.current
+            if (!el) throw new Error('Canvas container not found')
+
+            // html-to-image captures the full element; we then crop to selection.
+            // Use a reasonable pixel ratio for quality without being excessive.
+            const capturePixelRatio = Math.min(window.devicePixelRatio || 1, 2)
+
+            const fullCanvas = await domToCanvas(el, {
+                pixelRatio: capturePixelRatio,
+                cacheBust: true,
+                filter: (node: HTMLElement) => {
+                    // Exclude the snipping overlay itself and fixed UI elements
+                    if (node.dataset?.snipOverlay === 'true') return false
+                    if (node.classList?.contains('react-flow__controls')) return false
+                    if (node.classList?.contains('react-flow__minimap')) return false
+                    // Exclude the temp drawing canvas (live in-progress stroke layer).
+                    // Keep drawing-canvas-main so html-to-image natively captures
+                    // its pixel data via toDataURL() — this includes all completed
+                    // handwritten strokes. (Matches the approach in canvasExport.ts.)
+                    if (node.classList?.contains('drawing-canvas-temp')) return false
+                    return true
+                },
+            })
+
+            // Crop the captured canvas to the selection rectangle.
+            // The overlay is positioned over the same element, so coordinates map directly.
+            const cropCanvas = document.createElement('canvas')
+            const cropX = sx * capturePixelRatio
+            const cropY = sy * capturePixelRatio
+            const cropW = sw * capturePixelRatio
+            const cropH = sh * capturePixelRatio
+            cropCanvas.width = Math.floor(cropW)
+            cropCanvas.height = Math.floor(cropH)
+            const ctx = cropCanvas.getContext('2d')
+            if (!ctx) throw new Error('Could not get 2d context')
+
+            ctx.drawImage(
+                fullCanvas,
+                cropX, cropY, cropW, cropH,
+                0, 0, cropCanvas.width, cropCanvas.height,
+            )
+
+            // Convert to base64 JPEG
+            const base64Image = cropCanvas.toDataURL('image/jpeg', 0.92)
+
+            // Send to backend OCR endpoint
+            const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
+            const response = await fetch(`${API_BASE}/api/vision`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image_base64: base64Image }),
+            })
+
+            if (!response.ok) {
+                const errBody = await response.json().catch(() => null)
+                const detail = errBody?.detail ?? `HTTP ${response.status}`
+                throw new Error(detail)
+            }
+
+            const data = await response.json()
+            const extractedText = (data.text ?? '').trim()
+
+            // Detect OCR "no content" responses — Gemini may return a
+            // descriptive message instead of empty text when the captured
+            // image is blank/black.
+            const noContentPhrases = [
+                'entirely black',
+                'no discernible text',
+                'no text',
+                'cannot extract',
+                'no visible text',
+                'blank image',
+                'no content',
+                'unable to extract',
+                'does not contain',
+            ]
+            const isNoContent =
+                extractedText.length === 0 ||
+                noContentPhrases.some((p) => extractedText.toLowerCase().includes(p))
+
+            if (!isNoContent) {
+                setIsSnippingMode(false)
+
+                // Build a DOMRect in viewport coordinates for the selection area
+                const domRect = new DOMRect(
+                    overlayRect.left + sx,
+                    overlayRect.top + sy,
+                    sw,
+                    sh,
+                )
+
+                // Open QuestionModal directly with autoAsk behavior
+                const preGeneratedNodeId = crypto.randomUUID()
+                setModal({
+                    selectedText: extractedText,
+                    sourceNodeId: contentNodeId || '',
+                    preGeneratedNodeId,
+                    selectionRect: domRect,
+                })
+            } else {
+                setIsSnippingMode(false)
+                setToast('No text detected — try selecting a larger area with visible content')
+                if (toastTimeout) clearTimeout(toastTimeout)
+                toastTimeout = setTimeout(() => setToast(null), 3500)
+            }
+        } catch (err) {
+            console.error('[Canvas] Global snip extract error:', err)
+            setIsSnippingMode(false)
+            const errMsg = err instanceof Error ? err.message : ''
+            const isNetworkErr = errMsg.includes('Failed to fetch') || errMsg.includes('NetworkError') || errMsg.includes('ERR_CONNECTION')
+            setToast(
+                isNetworkErr
+                    ? 'Cannot reach backend server — is it running?'
+                    : `Text extraction failed: ${errMsg || 'check connection and try again'}`
+            )
+            if (toastTimeout) clearTimeout(toastTimeout)
+            toastTimeout = setTimeout(() => setToast(null), 5000)
+        } finally {
+            setIsSnipExtracting(false)
+        }
+    }, [snipStart, snipCurrent, isSnipExtracting, contentNodeId, setIsSnippingMode])
 
     // When popup is clicked — generate preGeneratedNodeId and open modal
     const handleAsk = useCallback(() => {
@@ -964,11 +1131,20 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                     : null
 
             try {
+                // Send only the current page's markdown (+ surrounding pages) instead of
+                // the entire PDF raw_text, which can exceed the 500K char backend limit.
+                const storeSnapshot = useCanvasStore.getState()
+                const cpIdx = storeSnapshot.currentPage
+                const pm = storeSnapshot.pageMarkdowns
+                const scopedContext = pm.length > 0
+                    ? pm.slice(Math.max(0, cpIdx - 2), cpIdx + 1).join('\n')
+                    : (fileData.raw_text ?? '').slice(0, 50000)
+
                 const response = await streamQuery(
                     {
                         question,
                         highlighted_text: selectedText,
-                        raw_text: fileData.raw_text,
+                        raw_text: scopedContext,
                         parent_response: parentResponse,
                         user_details: userDetails,
                     },
@@ -1289,9 +1465,11 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 }
             }
 
+            // Use page-scoped text instead of full PDF raw_text to avoid 500K limit
+            const scopedRawText = pageContent || pageMarkdowns[currentPage - 1] || (fileData.raw_text ?? '').slice(0, 50000)
             const fcResult = await generateFlashcards(
                 payload,
-                fileData.raw_text,
+                scopedRawText,
                 fileData.pdf_id,
                 sourceType,
                 pIndex,
@@ -1784,12 +1962,55 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 <MiniMap nodeColor={nodeColor} position="bottom-right" />
             </ReactFlow>
 
+            {/* ── Global Snipping Tool Overlay ─────────────────────────────── */}
+            {isSnippingMode && (
+                <div
+                    data-snip-overlay="true"
+                    className={`absolute inset-0 z-50 ${isSnipExtracting ? 'cursor-wait' : 'cursor-crosshair'}`}
+                    style={{ backgroundColor: 'rgba(0,0,0,0.15)', touchAction: 'none' }}
+                    onPointerDown={handleSnipPointerDown}
+                    onPointerMove={handleSnipPointerMove}
+                    onPointerUp={handleSnipPointerUp}
+                >
+                    {/* Selection rectangle */}
+                    {snipStart && snipCurrent && (
+                        <div
+                            className="absolute border-2 border-indigo-500 bg-indigo-500/20 rounded-sm pointer-events-none"
+                            style={{
+                                left: Math.min(snipStart.x, snipCurrent.x),
+                                top: Math.min(snipStart.y, snipCurrent.y),
+                                width: Math.abs(snipStart.x - snipCurrent.x),
+                                height: Math.abs(snipStart.y - snipCurrent.y),
+                            }}
+                        />
+                    )}
+                    {/* Extracting spinner */}
+                    {isSnipExtracting && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-white/40 backdrop-blur-sm">
+                            <div className="bg-white p-4 rounded-lg shadow-xl flex items-center gap-3">
+                                <div className="w-5 h-5 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+                                <span className="text-sm font-medium text-gray-700">Extracting text with Vision AI...</span>
+                            </div>
+                        </div>
+                    )}
+                    {/* Hint label */}
+                    {!snipStart && !isSnipExtracting && (
+                        <div className="absolute top-6 left-1/2 -translate-x-1/2 pointer-events-none">
+                            <div className="bg-gray-900/80 text-white text-xs font-medium px-3 py-1.5 rounded-full shadow-lg">
+                                Drag to select an area · Press <kbd className="font-mono bg-white/20 px-1 rounded">Esc</kbd> to cancel
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
+
             {/* Whiteboard toolbar */}
             <DrawingToolbar />
 
             {/* Left toolbar — custom nodes */}
             <LeftToolbar
                 onCustomPrompt={handleSpawnCustomPrompt}
+                onSnip={() => setIsSnippingMode(true)}
                 onAddImage={handleSpawnImage}
                 onStickyNote={handleSpawnStickyNote}
                 onTimer={handleSpawnTimer}
@@ -1816,7 +2037,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
             {showRevision && fileData && revisionSource && (
                 <RevisionModal
                     nodes={nodes}
-                    rawText={fileData.raw_text}
+                    rawText={revisionSource.pageContent || pageMarkdowns[currentPage - 1] || (fileData.raw_text ?? '').slice(0, 50000)}
                     pdfId={fileData.pdf_id}
                     onClose={() => setShowRevision(false)}
                     sourceType={revisionSource.sourceType}

@@ -7,7 +7,8 @@ import rehypeRaw from 'rehype-raw'
 import rehypeSanitize, { defaultSchema, type Options as SanitizeOptions } from 'rehype-sanitize'
 import type { SummaryNodeData } from '../types'
 import { useCanvasStore } from '../store/canvasStore'
-import { streamQuery } from '../api/studyApi'
+import { streamPageSummary } from '../api/studyApi'
+import { extractPageImageBase64 } from '../utils/pdfImageExtractor'
 import ModelIndicator from './ModelIndicator'
 
 const customSchema: SanitizeOptions = {
@@ -72,19 +73,26 @@ export default function SummaryNode({ id, data }: SummaryNodeProps) {
         let pageContent = storeState.pageMarkdowns[data.sourcePage - 1] ?? ''
         // Fallback: if page-specific markdown is empty, use raw_text from fileData
         if (!pageContent.trim() && storeState.fileData?.raw_text) {
-            pageContent = storeState.fileData.raw_text
+            pageContent = storeState.fileData.raw_text.slice(0, 50000)
         }
         updateNodeData(id, { summary: '', isLoading: true, isStreaming: true, status: 'loading' })
 
         try {
+            // Extract page image for Vision AI analysis
+            let imageBase64: string | undefined
+            const pdfBuffer = storeState.pdfArrayBuffer
+            if (pdfBuffer) {
+                const b64 = await extractPageImageBase64(pdfBuffer, data.sourcePage - 1)
+                if (b64) imageBase64 = b64
+            }
+
             const controller = new AbortController()
-            const response = await streamQuery({
-                question: `Summarize the following page content concisely in 3-5 bullet points for a student. Focus on the key concepts, definitions, and takeaways. Use markdown bullet points. Be brief but comprehensive.`,
-                highlighted_text: '',
-                raw_text: pageContent,
-                parent_response: null,
+            const response = await streamPageSummary({
+                page_content: pageContent,
+                pdf_id: fileData.pdf_id,
+                page_index: data.sourcePage - 1,
+                image_base64: imageBase64,
                 user_details: userDetails,
-                preferred_model: 'gemini-2.5-flash-lite',
             }, controller.signal)
 
             const modelUsed = response.headers.get('X-Model-Used') || undefined

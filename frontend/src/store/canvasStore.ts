@@ -86,6 +86,8 @@ interface CanvasActions {
     getQuizNodesForPage: (pageIndex: number) => Node[]
     /** Toggle snipping mode */
     setIsSnippingMode: (isSnipping: boolean) => void
+    /** Update only the text fields of fileData without resetting page/zoom/scroll state */
+    updateFileDataText: (rawText: string, markdownContent: string) => void
     /** Store a PDF ArrayBuffer in memory + IndexedDB */
     setPdfArrayBuffer: (buffer: ArrayBuffer | null) => void
     /** Load the PDF ArrayBuffer from IndexedDB into memory */
@@ -109,6 +111,10 @@ interface CanvasActions {
 }
 
 const STORAGE_KEY = 'studycanvas_state'
+
+// Debounce timer for localStorage persistence
+let _persistTimer: ReturnType<typeof setTimeout> | null = null
+const PERSIST_DEBOUNCE_MS = 2000
 
 export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => ({
     nodes: [],
@@ -235,10 +241,41 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
     },
 
     persistToLocalStorage: () => {
-        const { nodes, edges, fileData, highlights, userDetails, currentPage, pageMarkdowns, zoomLevel, scrollPositions, canvasViewport, drawingStrokes, savedColors, toolSettings } = get()
-        // Never persist activeAbortController — it is a transient runtime field
-        const state = { nodes, edges, fileData, highlights, userDetails, currentPage, pageMarkdowns, zoomLevel, scrollPositions, canvasViewport, drawingStrokes, savedColors, toolSettings }
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+        // Debounce: only persist once every 2 seconds to avoid main-thread freezes
+        // from repeated JSON.stringify of large state
+        if (_persistTimer) clearTimeout(_persistTimer)
+        _persistTimer = setTimeout(() => {
+            _persistTimer = null
+            const { nodes, edges, fileData, highlights, userDetails, currentPage, pageMarkdowns, zoomLevel, scrollPositions, canvasViewport, drawingStrokes, savedColors, toolSettings } = get()
+            // Strip large recoverable fields to stay under the ~5MB localStorage quota.
+            // raw_text & markdown_content are re-derived from the PDF on next load.
+            // Image data URLs are kept (needed for display) but could be stripped in future.
+            const lightFileData = fileData ? {
+                ...fileData,
+                raw_text: '',
+                markdown_content: '',
+            } : null
+            const state = { nodes, edges, fileData: lightFileData, highlights, userDetails, currentPage, pageMarkdowns, zoomLevel, scrollPositions, canvasViewport, drawingStrokes, savedColors, toolSettings }
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+            } catch (e) {
+                // QuotaExceededError — try again with even less data
+                console.warn('[canvasStore] localStorage quota exceeded, retrying with minimal state', e)
+                try {
+                    // Strip image data URLs and drawing strokes
+                    const minimalNodes = nodes.map((n: any) => {
+                        if (n.type === 'imageNode' && n.data?.imageDataUrl) {
+                            return { ...n, data: { ...n.data, imageDataUrl: '' } }
+                        }
+                        return n
+                    })
+                    const minState = { nodes: minimalNodes, edges, fileData: lightFileData, highlights, userDetails, currentPage, pageMarkdowns, zoomLevel, scrollPositions, canvasViewport, drawingStrokes: [], savedColors, toolSettings }
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(minState))
+                } catch {
+                    console.error('[canvasStore] localStorage write failed even with minimal state')
+                }
+            }
+        }, PERSIST_DEBOUNCE_MS)
     },
 
     setUserDetails: (details) => set({ userDetails: details }),
@@ -267,6 +304,16 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
     },
 
     setIsSnippingMode: (isSnipping) => set({ isSnippingMode: isSnipping }),
+
+    updateFileDataText: (rawText, markdownContent) => {
+        const { fileData } = get()
+        if (!fileData) return
+        const pages = splitMarkdownByPage(markdownContent)
+        set({
+            fileData: { ...fileData, raw_text: rawText, markdown_content: markdownContent },
+            pageMarkdowns: pages,
+        })
+    },
 
     setPdfArrayBuffer: (buffer) => set({ pdfArrayBuffer: buffer }),
 

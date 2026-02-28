@@ -26,11 +26,8 @@ export default function DrawingToolbar() {
             setOpenPanel((prev) => (prev === tool ? null : tool as ToolPanel))
         } else {
             setActiveTool(tool)
-            if (tool === 'cursor') {
-                setOpenPanel(null)
-            } else {
-                setOpenPanel(tool as ToolPanel)
-            }
+            // Close panel when switching to a different tool
+            setOpenPanel(null)
         }
     }, [activeTool, setActiveTool])
 

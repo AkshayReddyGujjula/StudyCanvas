@@ -1,9 +1,10 @@
 import logging
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from rate_limiter import limiter
 from services import gemini_service
-from services.gemini_service import MODEL_FLASH
+from services.gemini_service import MODEL_FLASH, MODEL_LITE
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -14,6 +15,7 @@ class PageQuizRequest(BaseModel):
     pdf_id: str | None = None
     page_index: int | None = None
     image_base64: str | None = None
+    user_details: dict | None = None
 
 
 class PageQuizResponse(BaseModel):
@@ -42,7 +44,7 @@ async def generate_page_quiz(request: Request, payload: PageQuizRequest):
     """Generate 3-5 short-answer questions based solely on a single page's content."""
     try:
         questions = await gemini_service.generate_page_quiz(
-            payload.page_content, pdf_id=payload.pdf_id, page_index=payload.page_index, image_base64=payload.image_base64
+            payload.page_content, pdf_id=payload.pdf_id, page_index=payload.page_index, image_base64=payload.image_base64, user_details=payload.user_details
         )
         return PageQuizResponse(questions=questions, model_used=MODEL_FLASH)
     except HTTPException:
@@ -66,3 +68,28 @@ async def grade_answer(request: Request, payload: GradeAnswerRequest):
         image_base64=payload.image_base64,
     )
     return GradeAnswerResponse(feedback=feedback, model_used=MODEL_FLASH)
+
+
+class SummarizePageRequest(BaseModel):
+    page_content: str = Field("", max_length=200000)
+    pdf_id: str | None = None
+    page_index: int | None = None
+    image_base64: str | None = None
+    user_details: dict | None = None
+
+
+@router.post("/summarize-page")
+@limiter.limit("15/minute; 100/hour; 500/day")
+async def summarize_page(request: Request, payload: SummarizePageRequest):
+    """Stream a Vision AI-enhanced page summary using both text and page image."""
+    generator = gemini_service.generate_page_summary(
+        page_content=payload.page_content,
+        pdf_id=payload.pdf_id,
+        page_index=payload.page_index,
+        image_base64=payload.image_base64,
+        user_details=payload.user_details,
+    )
+    return StreamingResponse(
+        generator, media_type="text/plain",
+        headers={"X-Model-Used": MODEL_LITE},
+    )
