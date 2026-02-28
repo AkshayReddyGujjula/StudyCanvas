@@ -21,6 +21,8 @@
     "autoprefixer": "^10.4.24",
     "axios": "^1.13.5",
     "html-to-image": "^1.11.13",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^4.2.0",
     "pdfjs-dist": "^4.9.155",
     "postcss": "^8.5.6",
     "react": "^19.2.0",

@@ -37,6 +37,7 @@ import type { AnswerNodeData, QuizQuestionNodeData, FlashcardNodeData, TextNodeD
 import { pdf } from '@react-pdf/renderer'
 import { buildQATree } from '../utils/buildQATree'
 import StudyNotePDF from './StudyNotePDF'
+import { exportCurrentPage, exportAllPages, isExportInProgress, pageHasContent } from '../utils/canvasExport'
 
 const NODE_TYPES = {
     contentNode: ContentNode,
@@ -86,6 +87,10 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
     const [toast, setToast] = useState<string | null>(null)
     const [isGeneratingPDF, setIsGeneratingPDF] = useState(false)
     const [isDarkMode, setIsDarkMode] = useState(false)
+    const [isExportingPage, setIsExportingPage] = useState(false)
+    const [isExportingAll, setIsExportingAll] = useState(false)
+    const [exportProgress, setExportProgress] = useState<string | null>(null)
+    const exportAbortRef = useRef<AbortController | null>(null)
     const streamingNodesRef = useRef<Set<string>>(new Set())
     const containerRef = useRef<HTMLDivElement>(null)
 
@@ -1169,7 +1174,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
         showToast(`${cards.length} flashcards created!`)
     }, [nodes, fileData, currentPage, setNodes, setEdges, persistToLocalStorage, setCenter, getZoom, showToast])
 
-    // Download Q&A as a PDF
+    // Download Q&A as a PDF (text-based export — legacy)
     const handleDownloadPDF = useCallback(async () => {
         setShowMenu(false)
         setShowRevisionMenu(false)
@@ -1236,6 +1241,122 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
             setIsGeneratingPDF(false)
         }
     }, [nodes, edges, fileData, showToast])
+
+    // ── Visual export: Save this page as a screenshot PDF ──────────────────
+    const handleExportCurrentPage = useCallback(async () => {
+        setShowMenu(false)
+        setShowRevisionMenu(false)
+
+        if (isExportInProgress()) {
+            showToast('An export is already in progress.')
+            return
+        }
+        if (!containerRef.current) {
+            showToast('Canvas not ready — please try again.')
+            return
+        }
+        if (!pageHasContent(currentPage)) {
+            showToast('This page has no annotations to export.')
+            return
+        }
+
+        setIsExportingPage(true)
+        setExportProgress('Preparing…')
+        const abortController = new AbortController()
+        exportAbortRef.current = abortController
+
+        try {
+            const originalName = fileData?.filename?.replace(/\.[^/.]+$/, '') ?? 'Notes'
+            await exportCurrentPage({
+                containerEl: containerRef.current,
+                filenameBase: originalName,
+                onProgress: (msg) => setExportProgress(msg),
+                signal: abortController.signal,
+                fitView,
+                getViewport,
+                setViewport,
+            })
+            showToast('Page exported successfully!')
+        } catch (err) {
+            if (err instanceof DOMException && err.name === 'AbortError') {
+                showToast('Export cancelled.')
+            } else {
+                const msg = err instanceof Error ? err.message : String(err)
+                console.error('Page export error:', err)
+                showToast(`Export failed: ${msg}`)
+            }
+        } finally {
+            setIsExportingPage(false)
+            setExportProgress(null)
+            exportAbortRef.current = null
+        }
+    }, [currentPage, fileData, showToast, fitView, getViewport, setViewport])
+
+    // ── Visual export: Save all annotated pages as a multi-page PDF ────────
+    const handleExportAllPages = useCallback(async () => {
+        setShowMenu(false)
+        setShowRevisionMenu(false)
+
+        if (isExportInProgress()) {
+            showToast('An export is already in progress.')
+            return
+        }
+        if (!containerRef.current) {
+            showToast('Canvas not ready — please try again.')
+            return
+        }
+
+        const totalPages = pageMarkdowns.length || 1
+
+        // Quick check: any annotated pages?
+        let hasAny = false
+        for (let p = 1; p <= totalPages; p++) {
+            if (pageHasContent(p)) { hasAny = true; break }
+        }
+        if (!hasAny) {
+            showToast('No pages have annotations to export.')
+            return
+        }
+
+        setIsExportingAll(true)
+        setExportProgress('Preparing…')
+        const abortController = new AbortController()
+        exportAbortRef.current = abortController
+
+        try {
+            const originalName = fileData?.filename?.replace(/\.[^/.]+$/, '') ?? 'Notes'
+            await exportAllPages({
+                containerEl: containerRef.current,
+                filenameBase: originalName,
+                onProgress: (msg) => setExportProgress(msg),
+                signal: abortController.signal,
+                goToPage,
+                totalPages,
+                currentPage,
+                fitView,
+                getViewport,
+                setViewport,
+            })
+            showToast('All pages exported successfully!')
+        } catch (err) {
+            if (err instanceof DOMException && err.name === 'AbortError') {
+                showToast('Export cancelled.')
+            } else {
+                const msg = err instanceof Error ? err.message : String(err)
+                console.error('All-pages export error:', err)
+                showToast(`Export failed: ${msg}`)
+            }
+        } finally {
+            setIsExportingAll(false)
+            setExportProgress(null)
+            exportAbortRef.current = null
+        }
+    }, [pageMarkdowns.length, currentPage, fileData, goToPage, showToast, fitView, getViewport, setViewport])
+
+    // Cancel an in-progress visual export
+    const handleCancelExport = useCallback(() => {
+        exportAbortRef.current?.abort()
+    }, [])
 
     return (
         <div ref={containerRef} style={{ width: '100vw', height: '100vh' }} className={isDarkMode ? 'dark-mode' : ''}>
@@ -1635,10 +1756,58 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                             </span>
                         </button>
                         <div className="h-px bg-gray-200 mx-1.5" />
+                        <div className="px-3 py-1 mb-1 text-[11px] font-bold text-gray-400 uppercase tracking-wider">Export Canvas</div>
+                        <button
+                            onClick={handleExportCurrentPage}
+                            disabled={isExportingPage || isExportingAll}
+                            className="text-left px-3 py-2 hover:bg-indigo-50 rounded-md text-sm text-indigo-700 font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                            {isExportingPage ? (
+                                <span className="flex items-center gap-1.5">
+                                    <svg className="animate-spin h-3.5 w-3.5 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                                    </svg>
+                                    Exporting…
+                                </span>
+                            ) : (
+                                <span className="flex items-center gap-1.5 pl-2">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <rect x="3" y="3" width="18" height="18" rx="2" />
+                                        <path d="M3 9h18" />
+                                    </svg>
+                                    Save This Page
+                                </span>
+                            )}
+                        </button>
+                        <button
+                            onClick={handleExportAllPages}
+                            disabled={isExportingPage || isExportingAll}
+                            className="text-left px-3 py-2 hover:bg-indigo-50 rounded-md text-sm text-indigo-700 font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                            {isExportingAll ? (
+                                <span className="flex items-center gap-1.5">
+                                    <svg className="animate-spin h-3.5 w-3.5 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                                    </svg>
+                                    Exporting…
+                                </span>
+                            ) : (
+                                <span className="flex items-center gap-1.5 pl-2">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <rect x="3" y="3" width="18" height="18" rx="2" />
+                                        <path d="M3 9h18" />
+                                        <path d="M3 15h18" />
+                                    </svg>
+                                    Save All Pages
+                                </span>
+                            )}
+                        </button>
                         <button
                             onClick={handleDownloadPDF}
                             disabled={!nodes.some((n) => n.type === 'answerNode' || n.type === 'quizQuestionNode') || isGeneratingPDF}
-                            className="text-left px-3 py-2 hover:bg-indigo-50 rounded-md text-sm text-indigo-700 font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                            className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                             {isGeneratingPDF ? (
                                 <span className="flex items-center gap-1.5">
@@ -1649,13 +1818,12 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                                     Generating…
                                 </span>
                             ) : (
-                                <span className="flex items-center gap-1.5">
+                                <span className="flex items-center gap-1.5 pl-2">
                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                                        <polyline points="7 10 12 15 17 10" />
-                                        <line x1="12" y1="15" x2="12" y2="3" />
+                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                        <polyline points="14 2 14 8 20 8" />
                                     </svg>
-                                    Save Notes (PDF)
+                                    Save Notes (Text)
                                 </span>
                             )}
                         </button>
@@ -1671,6 +1839,25 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
                     </svg>
                     Generating PDF title with Gemini…
+                </div>
+            )}
+
+            {/* Visual export progress overlay */}
+            {(isExportingPage || isExportingAll) && exportProgress && (
+                <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 bg-indigo-700 text-white text-sm font-medium rounded-xl shadow-xl">
+                    <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                    </svg>
+                    {exportProgress}
+                    {isExportingAll && (
+                        <button
+                            onClick={handleCancelExport}
+                            className="ml-2 px-2 py-0.5 bg-white/20 hover:bg-white/30 rounded text-xs transition-colors"
+                        >
+                            Cancel
+                        </button>
+                    )}
                 </div>
             )}
 
