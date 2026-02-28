@@ -901,6 +901,14 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
             // Use a reasonable pixel ratio for quality without being excessive.
             const capturePixelRatio = Math.min(window.devicePixelRatio || 1, 2)
 
+            // First, manually capture the drawing canvas content (handwritten strokes)
+            // This is needed because html-to-image doesn't capture canvas elements properly
+            const drawingCanvasMain = el.querySelector('.drawing-canvas-main') as HTMLCanvasElement | null
+            let drawingCanvasDataUrl: string | null = null
+            if (drawingCanvasMain) {
+                drawingCanvasDataUrl = drawingCanvasMain.toDataURL('image/png')
+            }
+
             const fullCanvas = await domToCanvas(el, {
                 pixelRatio: capturePixelRatio,
                 cacheBust: true,
@@ -909,16 +917,38 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                     if (node.dataset?.snipOverlay === 'true') return false
                     if (node.classList?.contains('react-flow__controls')) return false
                     if (node.classList?.contains('react-flow__minimap')) return false
-                    // Exclude the temp drawing canvas (live in-progress stroke layer).
-                    // Keep drawing-canvas-main so html-to-image natively captures
-                    // its pixel data via toDataURL() — this includes all completed
-                    // handwritten strokes. (Matches the approach in canvasExport.ts.)
+                    // Exclude both drawing canvases - we'll manually overlay them
+                    if (node.classList?.contains('drawing-canvas-main')) return false
                     if (node.classList?.contains('drawing-canvas-temp')) return false
                     return true
                 },
             })
 
-            // Crop the captured canvas to the selection rectangle.
+            // Create final canvas that combines DOM capture with canvas overlay
+            const combinedCanvas = document.createElement('canvas')
+            combinedCanvas.width = fullCanvas.width
+            combinedCanvas.height = fullCanvas.height
+            const combinedCtx = combinedCanvas.getContext('2d')
+            if (!combinedCtx) throw new Error('Could not get 2d context')
+            
+            // First draw the html-to-image capture (DOM elements)
+            combinedCtx.drawImage(fullCanvas, 0, 0)
+
+            // Overlay the manually captured drawing canvas content (handwritten strokes)
+            if (drawingCanvasDataUrl) {
+                const drawingImg = new Image()
+                drawingImg.src = drawingCanvasDataUrl
+                await new Promise<void>((resolve) => {
+                    drawingImg.onload = () => resolve()
+                    drawingImg.onerror = () => resolve() // Continue even if drawing canvas fails
+                })
+                
+                // The drawing canvas covers the same area as the container
+                // Draw it directly at full size
+                combinedCtx.drawImage(drawingImg, 0, 0)
+            }
+
+            // Crop the combined canvas (DOM + drawing canvas) to the selection rectangle.
             // The overlay is positioned over the same element, so coordinates map directly.
             const cropCanvas = document.createElement('canvas')
             const cropX = sx * capturePixelRatio
@@ -930,14 +960,15 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
             const ctx = cropCanvas.getContext('2d')
             if (!ctx) throw new Error('Could not get 2d context')
 
+            // Draw from the combined canvas which already has both DOM and drawing canvas
             ctx.drawImage(
-                fullCanvas,
+                combinedCanvas,
                 cropX, cropY, cropW, cropH,
                 0, 0, cropCanvas.width, cropCanvas.height,
             )
 
-            // Convert to base64 JPEG
-            const base64Image = cropCanvas.toDataURL('image/jpeg', 0.92)
+            // Convert to base64 JPEG with maximum quality for better OCR results
+            const base64Image = cropCanvas.toDataURL('image/jpeg', 1.0)
 
             // Send to backend OCR endpoint
             const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''

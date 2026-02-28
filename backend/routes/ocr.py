@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from rate_limiter import limiter
 from services import gemini_service
-from services.gemini_service import MODEL_LITE
+from services.gemini_service import MODEL_FLASH
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -27,7 +27,7 @@ async def extract_text_from_image(request: Request, payload: OCRRequest):
             raise HTTPException(status_code=400, detail="Base64 image data is required")
             
         extracted_text = await gemini_service.image_to_text(payload.image_base64)
-        return OCRResponse(text=extracted_text, model_used=MODEL_LITE)
+        return OCRResponse(text=extracted_text, model_used=MODEL_FLASH)
     except Exception as e:
         logger.error(f"Error in OCR vision endpoint: {e}")
         raise HTTPException(status_code=500, detail="Failed to extract text from image due to an internal error.")

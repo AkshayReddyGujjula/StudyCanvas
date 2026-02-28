@@ -934,7 +934,7 @@ async def image_to_text(base64_image: str) -> str:
     if "base64," in base64_image:
         base64_image = base64_image.split("base64,")[1]
         
-    model = GenerativeModel(MODEL_LITE)
+    model = GenerativeModel(MODEL_FLASH)
     
     prompt = (
         "You are an expert Optical Character Recognition (OCR) and handwriting recognition assistant.\n"
