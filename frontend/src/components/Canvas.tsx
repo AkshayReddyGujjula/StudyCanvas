@@ -905,7 +905,10 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
             // This is needed because html-to-image doesn't capture canvas elements properly
             const drawingCanvasMain = el.querySelector('.drawing-canvas-main') as HTMLCanvasElement | null
             let drawingCanvasDataUrl: string | null = null
+
             if (drawingCanvasMain) {
+                // Capture canvas with transparent background (original behavior)
+                // This allows DOM content to show through beneath the canvas
                 drawingCanvasDataUrl = drawingCanvasMain.toDataURL('image/png')
             }
 
@@ -943,6 +946,16 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                     drawingImg.onerror = () => resolve() // Continue even if drawing canvas fails
                 })
                 
+                // DEBUG: Log overlay info
+                console.log('[Snip] Drawing overlay:', {
+                    imgWidth: drawingImg.width,
+                    imgHeight: drawingImg.height,
+                    combinedWidth: combinedCanvas.width,
+                    combinedHeight: combinedCanvas.height,
+                    fullCanvasWidth: fullCanvas.width,
+                    fullCanvasHeight: fullCanvas.height
+                })
+                
                 // The drawing canvas covers the same area as the container
                 // Draw it directly at full size
                 combinedCtx.drawImage(drawingImg, 0, 0)
@@ -961,6 +974,14 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
             if (!ctx) throw new Error('Could not get 2d context')
 
             // Draw from the combined canvas which already has both DOM and drawing canvas
+            
+            // IMPORTANT: Fill with white background FIRST to ensure transparent areas 
+            // (where canvas has no strokes) don't become black in JPEG
+            // This makes black strokes on transparent canvas visible
+            ctx.fillStyle = '#FFFFFF'
+            ctx.fillRect(0, 0, cropCanvas.width, cropCanvas.height)
+            
+            // Then draw the content on top of white background
             ctx.drawImage(
                 combinedCanvas,
                 cropX, cropY, cropW, cropH,
