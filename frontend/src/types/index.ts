@@ -191,7 +191,18 @@ export interface SummaryNodeData {
     /** The page index for which this summary was generated */
     sourcePage: number
 }
-
+export interface VoiceNoteNodeData {
+    /** IndexedDB key for the stored audio Blob (null before first recording) */
+    audioId: string | null
+    /** Duration of the recording in seconds */
+    duration: number
+    /** User-written label/title for the note */
+    label: string
+    /** Whether the node is collapsed to show only the top bar + play/pause */
+    isMinimized: boolean
+    isPinned?: boolean
+    pageIndex?: number
+}
 // ─── Whiteboard / Drawing types ──────────────────────────────────────────────
 
 export type WhiteboardTool = 'cursor' | 'pen1' | 'pen2' | 'highlighter' | 'eraser' | 'text'

@@ -28,6 +28,7 @@ import ImageNode from './ImageNode'
 import StickyNoteNode from './StickyNoteNode'
 import TimerNode from './TimerNode'
 import SummaryNode from './SummaryNode'
+import VoiceNoteNode from './VoiceNoteNode'
 import LeftToolbar from './LeftToolbar'
 import AskGeminiPopup from './AskGeminiPopup'
 import QuestionModal from './QuestionModal'
@@ -58,6 +59,7 @@ const NODE_TYPES = {
     stickyNoteNode: StickyNoteNode,
     timerNode: TimerNode,
     summaryNode: SummaryNode,
+    voiceNoteNode: VoiceNoteNode,
 }
 
 // StudyCanvas Minimalist Colour Palette
@@ -629,6 +631,28 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 isPinned: true,
             } as unknown as Record<string, unknown>,
             style: { width: 240 },
+        }
+        setNodes((prev) => [...prev, newNode])
+        persistToLocalStorage()
+    }, [getViewportCenter, currentPage, nodes, setNodes, persistToLocalStorage])
+
+    const handleSpawnVoiceNote = useCallback(() => {
+        const center = getViewportCenter()
+        const pos = findNonOverlappingPosition(center, 260, 260, nodes)
+        const nodeId = `voicenote-${Date.now()}`
+        const newNode: Node = {
+            id: nodeId,
+            type: 'voiceNoteNode',
+            position: pos,
+            data: {
+                audioId: null,
+                duration: 0,
+                label: '',
+                isMinimized: false,
+                isPinned: false,
+                pageIndex: currentPage,
+            } as unknown as Record<string, unknown>,
+            style: { width: 260 },
         }
         setNodes((prev) => [...prev, newNode])
         persistToLocalStorage()
@@ -2065,6 +2089,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 onSnip={() => setIsSnippingMode(true)}
                 onAddImage={handleSpawnImage}
                 onStickyNote={handleSpawnStickyNote}
+                onVoiceNote={handleSpawnVoiceNote}
                 onTimer={handleSpawnTimer}
                 onSummary={handleSpawnSummary}
             />

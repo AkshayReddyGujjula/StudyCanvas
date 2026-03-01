@@ -5,6 +5,7 @@ interface LeftToolbarProps {
     onSnip: () => void
     onAddImage: (dataUrl: string, fileName: string) => void
     onStickyNote: () => void
+    onVoiceNote: () => void
     onTimer: () => void
     onSummary: () => void
 }
@@ -14,6 +15,7 @@ export default function LeftToolbar({
     onSnip,
     onAddImage,
     onStickyNote,
+    onVoiceNote,
     onTimer,
     onSummary,
 }: LeftToolbarProps) {
@@ -70,8 +72,6 @@ export default function LeftToolbar({
                 onChange={handleImageSelect}
             />
 
-            <div className="h-px bg-gray-200 mx-1" />
-
             {/* Sticky Note */}
             <button onClick={onStickyNote} className={btnClass} title="Sticky Note">
                 <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -80,6 +80,18 @@ export default function LeftToolbar({
                 </svg>
             </button>
 
+            {/* Voice Note */}
+            <button onClick={onVoiceNote} className={btnClass} title="Voice Note">
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                    <line x1="12" y1="19" x2="12" y2="23" />
+                    <line x1="8" y1="23" x2="16" y2="23" />
+                </svg>
+            </button>
+
+            <div className="h-px bg-gray-200 mx-1" />
+
             {/* Timer */}
             <button onClick={onTimer} className={btnClass} title="Timer">
                 <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -87,6 +99,8 @@ export default function LeftToolbar({
                     <polyline points="12 6 12 12 16 14" />
                 </svg>
             </button>
+
+            <div className="h-px bg-gray-200 mx-1" />
 
             {/* Summary Generator */}
             <button onClick={onSummary} className={btnClass} title="Generate Summary">
