@@ -636,7 +636,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 isLoading: false,
                 isStreaming: false,
                 status: 'unread',
-                useContext: false,
+                useContext: true,
                 selectedModel: 'gemini-2.5-flash',
                 pageIndex: currentPage,
             } as unknown as Record<string, unknown>,
@@ -697,8 +697,8 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
             type: 'flashcardNode',
             position: pos,
             data: {
-                question: 'Your question here…',
-                answer: 'Your answer here…',
+                question: '',
+                answer: '',
                 isFlipped: false,
                 status: 'unread',
                 isMinimized: false,
@@ -925,7 +925,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
     // guaranteed to be applied.  2-finger pan (ctrlKey:false) is also boosted.
     const MIN_ZOOM = 0.1
     const MAX_ZOOM = 4
-    const ZOOM_SPEED = 0.015   // per deltaY unit — raise to taste
+    const ZOOM_SPEED = 0.004   // per deltaY unit — reduced for finer Ctrl+scroll control
     const PAN_SPEED = 3       // multiplier for 2-finger pan
     useEffect(() => {
         const el = containerRef.current
@@ -2142,7 +2142,20 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                         )}
                     </ControlButton>
                 </Controls>
-                <MiniMap nodeColor={nodeColor} position="bottom-right" />
+                <MiniMap
+                    nodeColor={nodeColor}
+                    position="bottom-right"
+                    style={{
+                        backgroundColor: '#f8fafc',
+                        border: '1px solid #e2e8f0',
+                        borderRadius: '12px',
+                        boxShadow: '0 4px 16px rgba(0,0,0,0.10), 0 1px 4px rgba(0,0,0,0.06)',
+                        overflow: 'hidden',
+                    }}
+                    maskColor="rgba(148,163,184,0.18)"
+                    pannable
+                    zoomable
+                />
             </ReactFlow>
 
             {/* ── Global Snipping Tool Overlay ─────────────────────────────── */}

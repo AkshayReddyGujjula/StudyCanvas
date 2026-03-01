@@ -79,11 +79,40 @@ body.rf-connecting .react-flow__node .nodrag * {
   fill: #1e1e1e;
 }
 
-/* ReactFlow built-in controls panel */
+/* ReactFlow built-in controls panel — doubled button size */
+.react-flow__controls-button {
+  width: 48px !important;
+  height: 48px !important;
+  padding: 10px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: 10px !important;
+}
+
+.react-flow__controls-button svg {
+  width: 20px !important;
+  height: 20px !important;
+}
+
+.react-flow__controls {
+  border-radius: 14px !important;
+  overflow: hidden !important;
+  gap: 2px !important;
+  padding: 4px !important;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.10), 0 1px 4px rgba(0,0,0,0.06) !important;
+  display: flex !important;
+  flex-direction: column !important;
+  border: 1px solid #e2e8f0 !important;
+  background: #ffffff !important;
+}
+
+/* ReactFlow built-in controls panel — dark mode overrides */
 .dark-mode .react-flow__controls {
-  background-color: #1e1e1e;
-  border-color: #3a3a3a;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
+  background-color: #1e1e1e !important;
+  background: #1e1e1e !important;
+  border-color: #3a3a3a !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6) !important;
 }
 
 .dark-mode .react-flow__controls-button {
@@ -103,7 +132,8 @@ body.rf-connecting .react-flow__node .nodrag * {
 /* MiniMap */
 .dark-mode .react-flow__minimap {
   background-color: #1e1e1e !important;
-  border-color: #3a3a3a;
+  border-color: #3a3a3a !important;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5) !important;
 }
 
 .dark-mode .react-flow__minimap-mask {
