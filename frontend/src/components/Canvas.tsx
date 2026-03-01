@@ -99,7 +99,7 @@ const STICKY_NOTE_BORDER_COLORS: Record<string, string> = {
     '#FFE0B2': '#FFB74D',
 }
 
-export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; onSave?: () => Promise<void> }) {
+export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; onSave?: (onProgress?: (pct: number, label: string) => void) => Promise<void> }) {
     const { setCenter, getZoom, fitView, setViewport, getViewport, screenToFlowPosition } = useReactFlow()
     const [selection, setSelection] = useState<SelectionState | null>(null)
     const [modal, setModal] = useState<ModalState | null>(null)
@@ -111,7 +111,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
     const [showTools, setShowTools] = useState(false)
     const [showUploadPopup, setShowUploadPopup] = useState(false)
     const [showUploadHint, setShowUploadHint] = useState(true)
-    const [isSaving, setIsSaving] = useState(false)
+    const [saveOverlay, setSaveOverlay] = useState<{ progress: number; label: string; done: boolean; failed: boolean; goHome: boolean } | null>(null)
     const [toast, setToast] = useState<string | null>(null)
     const [isGeneratingPDF, setIsGeneratingPDF] = useState(false)
     const [isDarkMode, setIsDarkMode] = useState(false)
@@ -172,12 +172,32 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
         setCanvasViewport({ x: vp.x, y: vp.y, zoom: vp.zoom })
     }, [getViewport, setCanvasViewport])
 
-    // Wrap onSave so viewport is always flushed first
+    // Wrap onSave so viewport is always flushed first (used for Ctrl+S / auto-triggered saves)
     const wrappedSave = useCallback(async () => {
         if (!onSave) return
         flushViewport()
         await onSave()
     }, [onSave, flushViewport])
+
+    // Save with full-screen progress overlay (used by the Save and Save & Home menu buttons)
+    const runSaveWithProgress = useCallback(async (goHome: boolean) => {
+        if (!onSave) return
+        flushViewport()
+        setSaveOverlay({ progress: 0, label: 'Starting…', done: false, failed: false, goHome })
+        try {
+            await onSave((pct: number, label: string) => {
+                setSaveOverlay(prev => prev ? { ...prev, progress: pct, label } : null)
+            })
+            setSaveOverlay(prev => prev ? { ...prev, progress: 100, label: 'Saved!', done: true } : null)
+            if (goHome) {
+                setTimeout(() => { setSaveOverlay(null); onGoHome?.() }, 1400)
+            } else {
+                setTimeout(() => setSaveOverlay(null), 1400)
+            }
+        } catch {
+            setSaveOverlay(prev => prev ? { ...prev, failed: true, label: 'Save failed' } : null)
+        }
+    }, [onSave, flushViewport, onGoHome])
 
     // Edge colour is always derived from the source node's connector colour.
     const getNodeConnectorColor = useCallback((nodeId?: string | null): string => {
@@ -2341,38 +2361,16 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                     <div className="absolute top-full left-0 mt-2 flex flex-col gap-1 w-48 bg-white border border-gray-200 shadow-lg rounded-lg p-2">
                         {onGoHome && onSave && (
                             <button
-                                onClick={async () => {
-                                    setShowMenu(false)
-                                    setIsSaving(true)
-                                    try {
-                                        await wrappedSave()
-                                        setToast('Saved!')
-                                        if (toastTimeout) clearTimeout(toastTimeout)
-                                        toastTimeout = setTimeout(() => { setToast(null); onGoHome() }, 800)
-                                    } catch {
-                                        setToast('Save failed.')
-                                        if (toastTimeout) clearTimeout(toastTimeout)
-                                        toastTimeout = setTimeout(() => setToast(null), 3500)
-                                    } finally {
-                                        setIsSaving(false)
-                                    }
-                                }}
-                                disabled={isSaving}
+                                onClick={() => { setShowMenu(false); runSaveWithProgress(true) }}
+                                disabled={!!saveOverlay}
                                 className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors disabled:opacity-50"
                             >
                                 <span className="flex items-center gap-1.5">
-                                    {isSaving ? (
-                                        <svg className="animate-spin h-4 w-4 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                                        </svg>
-                                    ) : (
-                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-                                            <polyline points="9 22 9 12 15 12 15 22" />
-                                        </svg>
-                                    )}
-                                    {isSaving ? 'Saving…' : 'Save & Home'}
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                                        <polyline points="9 22 9 12 15 12 15 22" />
+                                    </svg>
+                                    Save & Home
                                 </span>
                             </button>
                         )}
@@ -2394,39 +2392,17 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                         )}
                         {onSave && (
                             <button
-                                onClick={async () => {
-                                    setShowMenu(false)
-                                    setIsSaving(true)
-                                    try {
-                                        await wrappedSave()
-                                        setToast('Saved!')
-                                        if (toastTimeout) clearTimeout(toastTimeout)
-                                        toastTimeout = setTimeout(() => setToast(null), 2500)
-                                    } catch {
-                                        setToast('Save failed.')
-                                        if (toastTimeout) clearTimeout(toastTimeout)
-                                        toastTimeout = setTimeout(() => setToast(null), 3500)
-                                    } finally {
-                                        setIsSaving(false)
-                                    }
-                                }}
-                                disabled={isSaving}
+                                onClick={() => { setShowMenu(false); runSaveWithProgress(false) }}
+                                disabled={!!saveOverlay}
                                 className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors disabled:opacity-50"
                             >
                                 <span className="flex items-center gap-1.5">
-                                    {isSaving ? (
-                                        <svg className="animate-spin h-4 w-4 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                                        </svg>
-                                    ) : (
-                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
-                                            <polyline points="17 21 17 13 7 13 7 21" />
-                                            <polyline points="7 3 7 8 15 8" />
-                                        </svg>
-                                    )}
-                                    {isSaving ? 'Saving…' : 'Save'}
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                                        <polyline points="17 21 17 13 7 13 7 21" />
+                                        <polyline points="7 3 7 8 15 8" />
+                                    </svg>
+                                    Save
                                 </span>
                             </button>
                         )}
@@ -2676,6 +2652,79 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                             <line x1="6" y1="6" x2="18" y2="18" />
                         </svg>
                     </button>
+                </div>
+            )}
+
+            {/* Save Progress Overlay */}
+            {saveOverlay && (
+                <div
+                    className="fixed inset-0 flex items-center justify-center"
+                    style={{ zIndex: 9998, background: 'rgba(15,23,42,0.60)', backdropFilter: 'blur(3px)' }}
+                >
+                    <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-xs w-full mx-4 flex flex-col items-center gap-5">
+                        {/* Icon */}
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center ${saveOverlay.failed ? 'bg-red-100' : 'bg-indigo-100'}`}>
+                            {saveOverlay.failed ? (
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                    <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                                </svg>
+                            ) : (
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-indigo-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                                    <polyline points="17 21 17 13 7 13 7 21" /><polyline points="7 3 7 8 15 8" />
+                                </svg>
+                            )}
+                        </div>
+
+                        {/* Title */}
+                        <p className="text-sm font-semibold text-gray-800 tracking-wide">
+                            {saveOverlay.failed ? 'Save failed' : saveOverlay.done ? 'Saved!' : 'Saving canvas\u2026'}
+                        </p>
+
+                        {/* Progress bar — shown while saving */}
+                        {!saveOverlay.done && !saveOverlay.failed && (
+                            <div className="w-full">
+                                <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                    <div
+                                        className="h-full bg-indigo-500 rounded-full"
+                                        style={{ width: `${saveOverlay.progress}%`, transition: 'width 0.38s ease' }}
+                                    />
+                                </div>
+                                <p className="mt-2 text-xs text-gray-400 text-center">{saveOverlay.label}</p>
+                            </div>
+                        )}
+
+                        {/* Done: animated checkmark */}
+                        {saveOverlay.done && (
+                            <div className="flex flex-col items-center gap-1.5">
+                                <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+                                    <circle cx="24" cy="24" r="20" stroke="#e0e7ff" strokeWidth="3" />
+                                    <polyline
+                                        className="save-checkmark-path"
+                                        points="14,25 21,32 35,17"
+                                        stroke="#6366f1"
+                                        strokeWidth="2.8"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        fill="none"
+                                    />
+                                </svg>
+                                {saveOverlay.goHome && (
+                                    <p className="text-xs text-gray-400">Returning home\u2026</p>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Failed: dismiss button */}
+                        {saveOverlay.failed && (
+                            <button
+                                onClick={() => setSaveOverlay(null)}
+                                className="px-4 py-1.5 text-xs font-medium text-white bg-gray-700 hover:bg-gray-800 rounded-lg transition-colors"
+                            >
+                                Dismiss
+                            </button>
+                        )}
+                    </div>
                 </div>
             )}
 

@@ -368,3 +368,17 @@ body.rf-connecting .react-flow__node .nodrag * {
 .drawing-tool-text {
   cursor: text !important;
 }
+
+/* ── Save progress overlay — checkmark draw animation ─────────────────────── */
+@keyframes draw-checkmark {
+  to { stroke-dashoffset: 0; }
+}
+
+.save-checkmark-path {
+  /* Total path length for points="14,25 21,32 35,17":
+     segment 1: sqrt((21-14)²+(32-25)²) ≈ 9.9
+     segment 2: sqrt((35-21)²+(17-32)²) ≈ 20.5  → total ≈ 31 */
+  stroke-dasharray: 32;
+  stroke-dashoffset: 32;
+  animation: draw-checkmark 0.55s cubic-bezier(0.22, 0.61, 0.36, 1) 0.12s forwards;
+}

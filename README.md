@@ -29,6 +29,334 @@ The result is a **visual knowledge map** of exactly what you understood, what co
 | **PDF Upload & Rendering** | Upload any PDF. Text is extracted locally with pypdf, converted to clean Markdown, and rendered as the central canvas node. |
 | **Highlight & Ask** | Select any text on the canvas and ask Gemini a question. The answer streams in real time as a connected node beside the highlighted passage. |
 | **Branching Q&A Tree** | Ask follow-up questions on any answer. Each response spawns a new node, building a visual tree of understanding. |
+| **Page Comprehension Checks** | Generate 2–4 adaptive questions on any individual page with instant, personalised feedback. Gemini intelligently scales the count to the richness of the page content. |
+| **Revision Quiz Mode** | Generate a personalised mixed MCQ + short-answer quiz from struggling nodes or the current page. |
+| **Flashcard Mode** | Turn struggling nodes or the current page into AI-generated flashcards for rapid-fire review. |
+| **Custom Flashcard Node** | Create blank flashcards manually from the left toolbar. Each side is independently edited via an inline edit mode — click the pencil icon to type, click the checkmark to save. The card spawns directly in edit mode. Flipping is blocked while editing to prevent accidental side-switches. |
+| **AI Answer Validation** | Short-answer quiz responses are graded by Gemini with constructive feedback. MCQ answers are validated instantly client-side. |
+| **Custom Prompt Node** | Drop a freeform AI chat node onto the canvas from the left toolbar. Page context is enabled by default — toggle it off or switch between Gemini Flash and Flash Lite per-node. |
+| **Page Summary Node** | One-click streaming summary of the current page, placed as a canvas node for at-a-glance review. |
+| **Sticky Note Nodes** | Add coloured sticky notes (6 pastel presets) anywhere on the canvas for freeform annotations and reminders. |
+| **Image Nodes** | Drag any image file from your computer onto the canvas via the left toolbar. Images are resizable and persist with the canvas save. |
+| **Pomodoro Study Timer** | Drop a timer node onto the canvas with Pomodoro, short-break, and long-break modes. Tracks completed sessions and supports custom durations. |
+| **Left Toolbar** | Quick-access toolbar to insert any node type: custom prompt, image, custom flashcard, sticky note, voice note, timer, or page summary. |
+| **Canvas Export (Save This Page)** | Export the entire canvas as a high-resolution PNG/PDF screenshot. Automatically fits all nodes into the frame with extra padding on all sides so no content is clipped. |
+| **Handwriting & Vision Support** | Quiz/flashcard generation always includes a rendered page image so Gemini can read handwritten notes, annotations, and diagrams that text extraction misses. |
+| **OCR Snipping Tool** | Draw a rectangle over any region of the canvas (Ctrl+Shift+S) to extract text via Gemini Vision and auto-ask a question about it. |
+| **Whiteboard & Drawing Tools** | Full drawing overlay with dual pens, highlighter, stroke & area erasers, text tool, and undo/redo — draw anywhere on the canvas or directly on PDF nodes. |
+| **Color Picker with Drag-to-Delete** | Choose from preset colors or enter custom hex values. Drag a color swatch to the trash bin to remove it. |
+| **Node-Attached Annotations** | Strokes drawn on a PDF/content node automatically attach to it — when the node moves, annotations follow. |
+| **Right-Click Pan** | Right-click and drag anywhere on the canvas to pan — works in every tool mode (pen, text, etc.) for quick canvas navigation without switching tools. |
+| **Keyboard Shortcuts** | `F` — fit view · `Ctrl+Shift+S` — snipping tool · `Ctrl+S` — save · `Ctrl+Space` — instantly switch to cursor mode from any tool · `Esc` — exit snipping mode. |
+| **Refined Trackpad & Scroll Zoom** | Ctrl+scroll and pinch-to-zoom use a finely tuned sensitivity curve to prevent overshooting. Two-finger pan is boosted for natural feel. |
+| **Modern Canvas Controls** | Bottom-left control buttons (zoom in/out, fit view, lock, dark mode) are clearly sized and styled with rounded corners and a subtle shadow. The minimap is fully opaque with proper borders and supports pan + zoom interaction. |
+| **Resize Warning for Annotated Nodes** | If you try to resize a node with drawing annotations, a safety warning appears to prevent accidental annotation displacement. |
+| **PDF Viewer Lock & Quality** | Lock a PDF node to prevent accidental dragging/resizing. Adjust the rendering resolution (DPR) via a quality slider for crisp or fast rendering. |
+| **Dual Model Tiers** | Every AI response includes a model indicator badge. Complex/analytical queries automatically route to Gemini 2.5 Flash; simpler tasks use the faster Flash Lite. Users can override the model per custom prompt node. |
+| **Streaming Responses** | All AI answers stream token-by-token using `fetch` + `ReadableStream` with a cancel button. |
+| **Folder & Canvas Management** | Organise canvases in folders. Name prompts on creation prevent accidental duplicates. |
+| **Local File Persistence** | Canvas state and PDFs are saved to a local folder you choose via the File System Access API. |
+| **Rate Limiting** | All heavy LLM routes are rate-limited with `slowapi` to protect against abuse. |
+| **Vercel Analytics** | Built-in Vercel Analytics and Speed Insights for production performance monitoring. |
+
+---
+
+## Keyboard Shortcuts
+
+| Shortcut | Action |
+|---|---|
+| `F` | Fit all nodes into view |
+| `Ctrl + S` | Save canvas |
+| `Ctrl + Shift + S` | Toggle snipping tool |
+| `Ctrl + Space` | Switch to cursor mode from any tool |
+| `Esc` | Exit snipping mode |
+| `Ctrl + Z` | Undo whiteboard stroke |
+| `Ctrl + Shift + Z` / `Ctrl + Y` | Redo whiteboard stroke |
+| `Backspace` / `Delete` | Delete selected node (cursor mode) |
+| Right-click + drag | Pan the canvas (works in all tool modes) |
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Frontend | React 19 + TypeScript + Vite 7 |
+| Canvas | @xyflow/react (React Flow v12) |
+| Styling | Tailwind CSS v3 + @tailwindcss/typography |
+| State Management | Zustand v5 |
+| Local Persistence | File System Access API + IndexedDB |
+| Routing | React Router v7 |
+| Markdown Rendering | react-markdown + remark-gfm + rehype-raw + rehype-sanitize |
+| HTTP — streaming | Native Fetch API + ReadableStream + AbortController |
+| HTTP — upload / quiz | Axios |
+| PDF Rendering | @react-pdf-viewer/core + pdf.js |
+| PDF Export | @react-pdf/renderer |
+| Screenshot Export | html-to-image + jsPDF |
+| Analytics | @vercel/analytics + @vercel/speed-insights |
+| Backend | Python 3.12 + FastAPI |
+| PDF Extraction | pypdf (Vercel / production) · pymupdf4llm (local dev, optional) |
+| AI Models | Gemini 2.5 Flash + Gemini 2.5 Flash Lite via `google-generativeai` |
+| Rate Limiting | slowapi |
+| Deployment | Vercel (frontend static + Python serverless function) |
+
+---
+
+## Project Structure
+
+```
+StudyCanvas/
+├── .python-version             # Python 3.12 — read by Vercel to pin runtime
+├── vercel.json                 # Vercel config: build command, routes, function runtime
+├── requirements.txt            # Python dependencies (pypdf, FastAPI, Gemini SDK)
+├── api/
+│   └── index.py                # Vercel serverless entry — re-exports FastAPI `app`
+├── backend/                    # FastAPI Python backend
+│   ├── main.py                 # App entry point, CORS, router registration
+│   ├── rate_limiter.py         # slowapi limiter with real-IP extraction
+│   ├── models/
+│   │   └── schemas.py          # Pydantic request/response models
+│   ├── routes/
+│   │   ├── upload.py           # POST /api/upload & /api/upload-text — PDF ingestion
+│   │   ├── query.py            # POST /api/query (streaming) & /api/generate-title
+│   │   ├── quiz.py             # POST /api/quiz & /api/validate
+│   │   ├── flashcards.py       # POST /api/flashcards
+│   │   ├── page_quiz.py        # POST /api/page-quiz & /api/grade-answer
+│   │   └── ocr.py              # POST /api/vision — Gemini Vision OCR
+│   └── services/
+│       ├── gemini_service.py   # All Gemini API calls (quiz, flashcards, grading, OCR)
+│       ├── pdf_service.py      # PDF text extraction + ligature/encoding correction
+│       └── file_service.py     # Temp file management
+└── frontend/                   # React + Vite frontend
+    ├── index.html
+    ├── package.json
+    ├── vite.config.ts
+    ├── tailwind.config.js
+    ├── public/
+    │   └── pdf.worker.min.mjs  # pdf.js worker (served as static asset)
+    └── src/
+        ├── App.tsx             # Router: / → HomePage, /canvas/:id → CanvasPage
+        ├── main.tsx
+        ├── index.css
+        ├── api/
+        │   └── studyApi.ts     # Axios + fetch API wrappers for all endpoints
+        ├── components/
+        │   ├── HomePage.tsx            # Canvas/folder browser with drag-and-drop
+        │   ├── CanvasCard.tsx          # Canvas thumbnail card
+        │   ├── FolderCard.tsx          # Folder card with drop target
+        │   ├── CanvasPage.tsx          # Route wrapper: load/save/autosave canvas
+        │   ├── Canvas.tsx              # Main ReactFlow canvas + all handlers
+        │   ├── ContentNode.tsx         # PDF content node (text + PDF viewer tabs)
+        │   ├── AnswerNode.tsx          # Q&A answer node with status tracking
+        │   ├── QuizQuestionNode.tsx    # Page quiz node with grading
+        │   ├── FlashcardNode.tsx       # Flashcard node (flip animation + inline edit for custom cards)
+        │   ├── CustomPromptNode.tsx    # Freeform AI chat node — model picker + context toggle (on by default)
+        │   ├── SummaryNode.tsx         # Streamed one-click page summary node
+        │   ├── ImageNode.tsx           # Drag-and-drop image node with resize support
+        │   ├── StickyNoteNode.tsx      # Coloured sticky note node (6 pastel presets)
+        │   ├── TimerNode.tsx           # Pomodoro timer node (3 modes, custom durations)
+        │   ├── LeftToolbar.tsx         # Toolbar: prompt / image / custom flashcard / sticky note / voice note / timer / summary
+        │   ├── AskGeminiPopup.tsx      # Floating "Ask Gemini" popup on text select
+        │   ├── QuestionModal.tsx       # Full question input modal
+        │   ├── RevisionModal.tsx       # Revision quiz modal (MCQ + short-answer)
+        │   ├── PdfUploadPopup.tsx      # PDF upload popup with drag-and-drop
+        │   ├── ModelIndicator.tsx      # Shows which Gemini model was used
+        │   ├── OnboardingModal.tsx     # First-run user details form
+        │   ├── ToolsModal.tsx          # User context / settings modal
+        │   ├── StudyNotePDF.tsx        # PDF export component (@react-pdf/renderer)
+        │   ├── PDFViewer/
+        │   │   ├── index.ts
+        │   │   └── PDFViewer.tsx       # pdf.js page renderer + snipping tool
+        │   └── whiteboard/
+        │       ├── index.ts
+        │       ├── DrawingCanvas.tsx   # HTML5 Canvas drawing overlay (pen, highlighter, eraser)
+        │       ├── DrawingToolbar.tsx  # Toolbar with tool selection, settings & undo/redo
+        │       ├── ColorPicker.tsx     # Color palette with custom hex & drag-to-delete
+        │       └── TextNode.tsx        # Draggable text annotations on the canvas
+        ├── hooks/
+        │   └── useTextSelection.ts     # Text selection detection hook
+        ├── services/
+        │   └── fileSystemService.ts    # File System Access API wrappers
+        ├── store/
+        │   ├── appStore.ts             # App-level state (canvas list, folders, auth)
+        │   └── canvasStore.ts          # Canvas-level state (nodes, edges, PDF data)
+        ├── types/
+        │   └── index.ts                # Shared TypeScript types
+        └── utils/
+            ├── buildQATree.ts          # Builds Q&A tree structure for PDF/study note export
+            ├── canvasExport.ts         # Exports the full canvas as a PNG screenshot or PDF
+            ├── pdfImageExtractor.ts    # Renders PDF page → base64 JPEG for Gemini Vision
+            ├── pdfStorage.ts           # IndexedDB helpers for PDF binary caching
+            ├── pdfTextExtractor.ts     # Client-side PDF text extraction via pdf.js (large file path)
+            └── positioning.ts         # Node placement & overlap-prevention helpers
+```
+
+---
+
+## Prerequisites
+
+- **Node.js** v18+ and **npm** v9+
+- **Python 3.12** (exact — Vercel pins to 3.12 via `.python-version`)
+- A **Google Gemini API key** — get one free at [aistudio.google.com](https://aistudio.google.com)
+
+---
+
+## Setup & Installation
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/AkshayReddyGujjula/StudyCanvas.git
+cd StudyCanvas
+```
+
+### 2. Backend setup
+
+```bash
+# Create and activate a virtual environment in the root directory
+python -m venv .venv
+
+# Windows
+.venv\Scripts\activate
+
+# macOS / Linux
+source .venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+Create a `.env` file inside the `backend/` directory:
+
+```env
+GEMINI_API_KEY=your_gemini_api_key_here
+```
+
+Start the backend server:
+
+```bash
+cd backend
+uvicorn main:app --port 8000 --reload
+```
+
+The API is now available at `http://localhost:8000`.  
+Interactive API docs: `http://localhost:8000/docs`
+
+### 3. Frontend setup
+
+Open a **new terminal** from the project root:
+
+```bash
+cd frontend
+
+# Install dependencies
+npm install
+
+# Start the development server
+npm run dev
+```
+
+The app will be available at `http://localhost:5173`.
+
+---
+
+## Deploying to Vercel
+
+The project is pre-configured for one-click Vercel deployment. The frontend (React/Vite) is built as static files and the backend (FastAPI) runs as a Python 3.12 serverless function.
+
+### 1. Import the repository
+
+1. Go to [vercel.com/new](https://vercel.com/new) and import the GitHub repository.
+2. Vercel will auto-detect the `vercel.json` configuration — **no framework preset changes needed**.
+
+### 2. Set environment variables
+
+In the Vercel project dashboard navigate to **Settings → Environment Variables** and add:
+
+| Variable | Value | Notes |
+|---|---|---|
+| `GEMINI_API_KEY` | Your Google Gemini API key | **Required** — the backend will not work without it |
+| `ALLOWED_ORIGINS` | Your production URL (e.g. `https://your-app.vercel.app`) | Optional — the CORS regex already permits `*.vercel.app` subdomains. Set this for custom domains. |
+
+### 3. Deploy
+
+Click **Deploy**. Vercel will:
+1. Install frontend dependencies and build the React app (`cd frontend && npm install && npm run build`)
+2. Bundle the Python 3.12 serverless function from `api/index.py` with `requirements.txt`
+3. Route `/api/*` requests to the serverless function and everything else to the SPA
+
+### Architecture notes
+
+- **Python version** is pinned to 3.12 via `.python-version` (read by Vercel's `@vercel/python` builder) and explicitly declared as `"runtime": "python3.12"` in `vercel.json`.
+- **PDF extraction** uses `pypdf` (pure Python, no native binaries) on Vercel. The optional `pymupdf4llm` library ships ~150 MB of native binaries which exceed Vercel's 250 MB Lambda limit — excluded from `requirements.txt`. Install it locally if you want higher-quality Markdown extraction (`pip install pymupdf4llm`); `pdf_service.py` auto-detects it at runtime.
+- **Large PDF uploads** (> 4 MB) are handled client-side: the frontend extracts text via pdf.js and POSTs it as JSON to `/api/upload-text`, staying under Vercel's 4.5 MB request body limit.
+- **Handwriting & image content** — quiz, flashcard, and revision quiz generation always sends the rendered page image alongside extracted text. Gemini reads handwritten notes and annotations directly from the image, preventing nonsense questions when text extraction misses handwritten content.
+- **Adaptive quiz length** — page comprehension checks generate between 2 and 4 questions. Gemini scales the count to the density and complexity of the page content rather than always generating a fixed number.
+- **Canvas screenshot padding** — the "Save this page" export fits all nodes into the frame and then zooms out an additional 5% on each side, ensuring no content is clipped at the edge.
+- **Streaming AI** responses use FastAPI's `StreamingResponse` over ASGI.
+- **Rate limiting** uses `slowapi` with in-memory storage. On serverless, rate state resets per cold start — this still provides flood protection per container lifetime.
+
+---
+
+## Environment Variables
+
+| Variable | Location | Description |
+|---|---|---|
+| `GEMINI_API_KEY` | `backend/.env` (local) · Vercel dashboard (production) | Google Gemini API key — **required** |
+| `ALLOWED_ORIGINS` | Vercel dashboard (production only) | Comma-separated allowed CORS origins (optional, defaults to `http://localhost:5173`) |
+
+---
+
+## API Endpoints
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/upload` | Upload a PDF (≤ 4 MB); returns Markdown, raw text, page count |
+| `POST` | `/api/upload-text` | Upload pre-extracted page text for large PDFs (> 4 MB) |
+| `POST` | `/api/query` | Stream AI answer for a highlighted-text question |
+| `POST` | `/api/generate-title` | Generate a concise document title from content |
+| `POST` | `/api/quiz` | Generate mixed MCQ + short-answer quiz (page or struggling mode) |
+| `POST` | `/api/validate` | Validate a quiz answer (short-answer via Gemini, MCQ by index) |
+| `POST` | `/api/flashcards` | Generate flashcards (page or struggling mode) |
+| `POST` | `/api/page-quiz` | Generate 2–4 adaptive comprehension questions for a single page |
+| `POST` | `/api/grade-answer` | Grade a page-quiz answer with personalised feedback |
+| `POST` | `/api/vision` | Extract text from a base64 image via Gemini Vision OCR |
+| `GET` | `/api/health` | Health check |
+
+---
+
+## License
+
+[MIT](LICENSE)
+
+
+StudyCanvas is an AI-powered, spatial study tool that transforms your PDF lecture notes and textbooks into an interactive, visual knowledge graph. Instead of scrolling through a linear chat window, you build a tree of understanding directly anchored to your source material — on an infinite, zoomable canvas.
+
+---
+
+## The Problem
+
+Traditional AI study tools give you a chatbot. You ask a question, get a wall of text, lose your place in the original material, and start over. Every clarification creates an ever-longer thread that becomes impossible to navigate.
+
+Worse, your actual source material — the lecture slides, the textbook chapter — lives in a separate window, forcing constant context-switching that fractures your concentration and breaks your flow.
+
+---
+
+## The Solution
+
+StudyCanvas makes your document the centrepiece. Upload a PDF and it becomes the **root node** on an infinite canvas. Highlight any passage, click **✨ Ask Gemini**, and your AI-generated answer appears as a **connected node** right next to the text that prompted it. Highlight text inside that answer and ask a follow-up — another connected node branches out. Every question deepens the tree.
+
+The result is a **visual knowledge map** of exactly what you understood, what confused you, and how the concepts connect — all anchored to the original material.
+
+---
+
+## Features
+
+| Feature | Description |
+|---|---|
+| **PDF Upload & Rendering** | Upload any PDF. Text is extracted locally with pypdf, converted to clean Markdown, and rendered as the central canvas node. |
+| **Highlight & Ask** | Select any text on the canvas and ask Gemini a question. The answer streams in real time as a connected node beside the highlighted passage. |
+| **Branching Q&A Tree** | Ask follow-up questions on any answer. Each response spawns a new node, building a visual tree of understanding. |
 | **Page Comprehension Checks** | Generate 3–5 short-answer questions on any individual page with instant, personalised feedback. |
 | **Revision Quiz Mode** | Generate a personalised mixed MCQ + short-answer quiz from struggling nodes or the current page. |
 | **Flashcard Mode** | Turn struggling nodes or the current page into flashcards for rapid-fire review. |

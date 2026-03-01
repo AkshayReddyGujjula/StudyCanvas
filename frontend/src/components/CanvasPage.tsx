@@ -42,10 +42,12 @@ export default function CanvasPage() {
     const autoSaveInterval = useAppStore((s) => s.autoSaveInterval)
 
     // ── Save current canvas to the local folder ──────────────────────────────
-    const saveCanvas = useCallback(async () => {
+    const saveCanvas = useCallback(async (onProgress?: (pct: number, label: string) => void) => {
         if (!directoryHandle || !canvasId || savingRef.current) return
         savingRef.current = true
         try {
+            onProgress?.(5, 'Preparing to save…')
+
             // Resolve the correct parent directory for this canvas (may be inside a folder)
             const appState = useAppStore.getState()
             const canvasMeta = appState.canvasList.find(c => c.id === canvasId)
@@ -54,6 +56,8 @@ export default function CanvasPage() {
                 appState.folderList,
                 canvasMeta?.parentFolderId,
             )
+
+            onProgress?.(12, 'Reading canvas state…')
 
             const store = useCanvasStore.getState()
             const {
@@ -81,6 +85,8 @@ export default function CanvasPage() {
             })
             const stateObj = { nodes: lightNodes, edges, fileData: lightFileData, highlights, userDetails, currentPage, pageMarkdowns, zoomLevel, scrollPositions, canvasViewport, drawingStrokes, savedColors, toolSettings }
             
+            onProgress?.(20, 'Serializing canvas…')
+
             // Use a Web Worker (via Blob URL) to JSON.stringify off the main thread
             const jsonString: string = await new Promise((resolve, reject) => {
                 const workerCode = `self.onmessage = function(e) { try { self.postMessage(JSON.stringify(e.data)); } catch(err) { self.postMessage('__SERIALIZE_ERROR__'); } };`
@@ -101,9 +107,12 @@ export default function CanvasPage() {
                 }
                 worker.postMessage(stateObj)
             })
+
+            onProgress?.(45, 'Writing canvas data…')
             await saveCanvasState(parentHandle, canvasId, jsonString as any)
 
             // 2. Save PDF to the local folder (if we have it in memory or IndexedDB)
+            onProgress?.(58, 'Saving PDF…')
             const pdfBuffer = store.pdfArrayBuffer
             if (pdfBuffer) {
                 await fsSavePdf(parentHandle, canvasId, pdfBuffer)
@@ -117,6 +126,7 @@ export default function CanvasPage() {
             }
 
             // 3. Capture thumbnail
+            onProgress?.(70, 'Capturing thumbnail…')
             try {
                 const rfEl = document.querySelector('.react-flow') as HTMLElement | null
                 if (rfEl) {
@@ -151,18 +161,22 @@ export default function CanvasPage() {
             }
 
             // 4. Update manifest timestamp
+            onProgress?.(86, 'Updating manifest…')
             await touchCanvas(canvasId)
 
             // 5. Also update localStorage cache
+            onProgress?.(93, 'Finishing up…')
             store.persistToLocalStorage()
 
             // 6. Save IndexedDB backup for crash recovery
             const backupState = { nodes, edges, fileData, highlights, userDetails, currentPage, pageMarkdowns, zoomLevel, scrollPositions, canvasViewport, drawingStrokes, savedColors, toolSettings }
-            saveCanvasBackup(canvasId, backupState).catch(() => {})
+            await saveCanvasBackup(canvasId, backupState).catch(() => {})
 
+            onProgress?.(100, 'Done!')
             setDirty(false)
         } catch (err) {
             console.error('[CanvasPage] save failed:', err)
+            throw err
         } finally {
             savingRef.current = false
         }
