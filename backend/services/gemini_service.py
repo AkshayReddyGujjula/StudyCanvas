@@ -965,3 +965,48 @@ async def image_to_text(base64_image: str) -> str:
             return response.candidates[0].content.parts[0].text.strip()
         except Exception:
             return ""
+
+
+# ── Audio Transcription ───────────────────────────────────────────────────────
+
+async def transcribe_audio(audio_base64: str, mime_type: str) -> str:
+    """
+    Transcribes a base64-encoded audio clip using Gemini Flash Lite.
+
+    Flash Lite is deliberately chosen over Flash here: transcription is a
+    mechanical task (no reasoning, no analysis) that does not benefit from the
+    smarter model. The cost saving is ~4x on audio tokens.
+
+    Args:
+        audio_base64: Raw base64 string (no data-URL prefix) of the audio file.
+        mime_type   : MIME type of the audio, e.g. 'audio/webm' or 'audio/mp4'.
+
+    Returns:
+        The transcribed text, stripped of leading/trailing whitespace.
+    """
+    model = GenerativeModel(MODEL_LITE)
+
+    prompt = (
+        "You are a precise transcription assistant. "
+        "Transcribe the following audio clip exactly as spoken. "
+        "Do not add punctuation that was not clearly spoken. "
+        "Do not add commentary, labels, or explanations — output only the transcription text."
+    )
+
+    response = await asyncio.to_thread(
+        lambda: model.generate_content(
+            [
+                {"mime_type": mime_type, "data": audio_base64},
+                prompt,
+            ],
+            generation_config=GenerationConfig(temperature=0.0),
+        )
+    )
+
+    try:
+        return response.text.strip()
+    except ValueError:
+        try:
+            return response.candidates[0].content.parts[0].text.strip()
+        except Exception:
+            return ""

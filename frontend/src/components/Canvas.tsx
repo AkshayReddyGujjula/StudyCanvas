@@ -29,6 +29,7 @@ import StickyNoteNode from './StickyNoteNode'
 import TimerNode from './TimerNode'
 import SummaryNode from './SummaryNode'
 import VoiceNoteNode from './VoiceNoteNode'
+import TranscriptionNode from './TranscriptionNode'
 import LeftToolbar from './LeftToolbar'
 import AskGeminiPopup from './AskGeminiPopup'
 import QuestionModal from './QuestionModal'
@@ -60,6 +61,7 @@ const NODE_TYPES = {
     timerNode: TimerNode,
     summaryNode: SummaryNode,
     voiceNoteNode: VoiceNoteNode,
+    transcriptionNode: TranscriptionNode,
 }
 
 // StudyCanvas Minimalist Colour Palette

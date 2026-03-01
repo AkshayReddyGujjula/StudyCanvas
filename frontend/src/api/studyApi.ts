@@ -207,3 +207,14 @@ export const streamPageSummary = async (
     })
     return response
 }
+
+export const transcribeAudio = async (
+    audioBase64: string,
+    mimeType: string,
+): Promise<{ text: string; model_used: string }> => {
+    const response = await api.post<{ text: string; model_used: string }>(
+        '/api/transcribe',
+        { audio_base64: audioBase64, mime_type: mimeType },
+    )
+    return response.data
+}

@@ -4,6 +4,7 @@ import type { NodeProps } from '@xyflow/react'
 import type { VoiceNoteNodeData } from '../types'
 import { useCanvasStore } from '../store/canvasStore'
 import { saveAudio, loadAudio, deleteAudio } from '../utils/audioStorage'
+import { transcribeAudio } from '../api/studyApi'
 
 type VoiceNoteNodeProps = NodeProps & { data: VoiceNoteNodeData }
 
@@ -54,6 +55,10 @@ export default function VoiceNoteNode({ id, data }: VoiceNoteNodeProps) {
     // Refs for playback
     const audioRef = useRef<HTMLAudioElement | null>(null)
     const blobUrlRef = useRef<string | null>(null)
+
+    // Transcription state
+    const [isTranscribing, setIsTranscribing] = useState(false)
+    const [transcribeError, setTranscribeError] = useState<string | null>(null)
 
     // Label editing
     const [editingLabel, setEditingLabel] = useState(false)
@@ -290,6 +295,93 @@ export default function VoiceNoteNode({ id, data }: VoiceNoteNodeProps) {
         persistToLocalStorage()
     }, [confirmDelete, isRecording, stopRecording, data.audioId, id, setNodes, setEdges, persistToLocalStorage])
 
+    // ── Transcription ─────────────────────────────────────────────────────
+    const handleTranscribe = useCallback(async () => {
+        if (!hasAudio || !data.audioId || data.transcriptionNodeId || isTranscribing) return
+        setIsTranscribing(true)
+        setTranscribeError(null)
+        try {
+            const blob = await loadAudio(data.audioId)
+            if (!blob) throw new Error('Audio not found in storage')
+
+            // Convert Blob → raw base64 (strip the data-URL prefix)
+            const base64 = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader()
+                reader.onload = () => {
+                    const result = reader.result as string
+                    resolve(result.split(',')[1])
+                }
+                reader.onerror = reject
+                reader.readAsDataURL(blob)
+            })
+
+            const { text } = await transcribeAudio(base64, blob.type)
+
+            // Get current node position and measured height directly from store
+            // (avoids stale closure; no new subscription needed)
+            const storeNodes = useCanvasStore.getState().nodes
+            const thisNode = storeNodes.find((n) => n.id === id)
+            const nodeHeight = (thisNode as any)?.measured?.height ?? 260
+            const nodePos = thisNode?.position ?? { x: 0, y: 0 }
+
+            const transcriptionNodeId = `transcription-${Date.now()}`
+
+            const transcriptionNode = {
+                id: transcriptionNodeId,
+                type: 'transcriptionNode' as const,
+                position: { x: nodePos.x, y: nodePos.y + nodeHeight + 40 },
+                data: {
+                    text,
+                    isMinimized: false,
+                    isPinned: data.isPinned ?? false,
+                    pageIndex: data.pageIndex,
+                    sourceVoiceNoteId: id,
+                    savedWidth: 280,
+                    savedHeight: 160,
+                },
+            }
+
+            const connectingEdge = {
+                id: `edge-transcription-${Date.now()}`,
+                source: id,
+                target: transcriptionNodeId,
+                sourceHandle: 'bottom',
+                targetHandle: 'top',
+                type: 'smoothstep',
+                animated: false,
+                style: { stroke: '#7C3AED', strokeWidth: 2 },
+            }
+
+            setNodes((prev) => [...prev, transcriptionNode])
+            setEdges((prev) => [...prev, connectingEdge])
+            updateNodeData(id, { transcriptionNodeId })
+            persistToLocalStorage()
+        } catch (err: unknown) {
+            console.error('VoiceNoteNode: transcription failed', err)
+            const msg =
+                (err as any)?.response?.data?.detail ??
+                (err as any)?.message ??
+                'Transcription failed. Please try again.'
+            setTranscribeError(msg)
+            // Auto-clear error after 5 s
+            setTimeout(() => setTranscribeError(null), 5000)
+        } finally {
+            setIsTranscribing(false)
+        }
+    }, [
+        hasAudio,
+        data.audioId,
+        data.transcriptionNodeId,
+        data.isPinned,
+        data.pageIndex,
+        isTranscribing,
+        id,
+        setNodes,
+        setEdges,
+        updateNodeData,
+        persistToLocalStorage,
+    ])
+
     // ── Label save ───────────────────────────────────────────────────────
     const commitLabel = useCallback(() => {
         setEditingLabel(false)
@@ -399,57 +491,93 @@ export default function VoiceNoteNode({ id, data }: VoiceNoteNodeProps) {
                 </div>
             </div>
 
-            {/* ── Minimized view: skip + play/pause + skip ─────────── */}
+            {/* ── Minimized view: skip + play/pause + skip + transcribe ────── */}
             {data.isMinimized ? (
-                <div className="flex items-center justify-center gap-3 py-2.5 px-2 nodrag">
-                    {/* Skip back 5s */}
-                    <button
-                        onClick={skipBack}
-                        disabled={!hasAudio}
-                        title="Skip back 5s"
-                        className="flex items-center justify-center w-9 h-9 rounded-full hover:bg-white/70 transition-colors nodrag disabled:opacity-30"
-                        style={{ color: COLORS.text }}
-                    >
-                        <svg className="w-8 h-8" viewBox="0 0 36 36" fill="none">
-                            <path d="M18 7A11 11 0 1 0 27 12.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/>
-                            <polyline points="10,4 10,10 16,10" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
-                            <text x="18" y="22" fontSize="10" fontWeight="800" fill="currentColor" textAnchor="middle" dominantBaseline="auto">5</text>
-                        </svg>
-                    </button>
+                <div className="relative flex items-center px-3 py-2.5 nodrag">
+                    {/* Invisible left spacer mirrors the transcribe button width so the
+                        skip/play/skip trio is perfectly centred over the node. */}
+                    <div className="w-7 h-7 shrink-0" />
 
-                    {/* Play / Pause */}
+                    {/* Centred playback group */}
+                    <div className="flex-1 flex items-center justify-center gap-3">
+                        {/* Skip back 5s */}
+                        <button
+                            onClick={skipBack}
+                            disabled={!hasAudio}
+                            title="Skip back 5s"
+                            className="flex items-center justify-center w-9 h-9 rounded-full hover:bg-white/70 transition-colors nodrag disabled:opacity-30"
+                            style={{ color: COLORS.text }}
+                        >
+                            <svg className="w-8 h-8" viewBox="0 0 36 36" fill="none">
+                                <path d="M18 7A11 11 0 1 0 27 12.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/>
+                                <polyline points="10,4 10,10 16,10" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
+                                <text x="18" y="22" fontSize="10" fontWeight="800" fill="currentColor" textAnchor="middle" dominantBaseline="auto">5</text>
+                            </svg>
+                        </button>
+
+                        {/* Play / Pause */}
+                        <button
+                            onClick={togglePlayPause}
+                            disabled={!hasAudio}
+                            title={isPlaying ? 'Pause' : 'Play'}
+                            className="p-3 rounded-full text-white shadow-md hover:shadow-lg transition-all active:scale-95 nodrag disabled:opacity-40"
+                            style={{ backgroundColor: COLORS.accent }}
+                        >
+                            {isPlaying ? (
+                                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                                    <rect x="6" y="4" width="4" height="16" rx="1" />
+                                    <rect x="14" y="4" width="4" height="16" rx="1" />
+                                </svg>
+                            ) : (
+                                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                                    <polygon points="5 3 19 12 5 21 5 3" />
+                                </svg>
+                            )}
+                        </button>
+
+                        {/* Skip forward 10s */}
+                        <button
+                            onClick={skipForward}
+                            disabled={!hasAudio}
+                            title="Skip forward 10s"
+                            className="flex items-center justify-center w-9 h-9 rounded-full hover:bg-white/70 transition-colors nodrag disabled:opacity-30"
+                            style={{ color: COLORS.text }}
+                        >
+                            <svg className="w-8 h-8" viewBox="0 0 36 36" fill="none">
+                                <path d="M18 7A11 11 0 1 1 9 12.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/>
+                                <polyline points="26,4 26,10 20,10" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
+                                <text x="18" y="22" fontSize="9" fontWeight="800" fill="currentColor" textAnchor="middle" dominantBaseline="auto">10</text>
+                            </svg>
+                        </button>
+                    </div>
+
+                    {/* Transcribe — flush right */}
                     <button
-                        onClick={togglePlayPause}
-                        disabled={!hasAudio}
-                        title={isPlaying ? 'Pause' : 'Play'}
-                        className="p-3 rounded-full text-white shadow-md hover:shadow-lg transition-all active:scale-95 nodrag disabled:opacity-40"
-                        style={{ backgroundColor: COLORS.accent }}
+                        onClick={handleTranscribe}
+                        disabled={!hasAudio || !!data.transcriptionNodeId || isTranscribing}
+                        title={
+                            data.transcriptionNodeId
+                                ? 'Transcription already generated — delete it to re-transcribe'
+                                : isTranscribing
+                                ? 'Transcribing…'
+                                : 'Transcribe voice note'
+                        }
+                        className="flex items-center justify-center w-7 h-7 shrink-0 rounded-full hover:bg-white/70 transition-colors nodrag disabled:opacity-30"
+                        style={{ color: data.transcriptionNodeId ? '#7C3AED' : COLORS.text }}
                     >
-                        {isPlaying ? (
-                            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                                <rect x="6" y="4" width="4" height="16" rx="1" />
-                                <rect x="14" y="4" width="4" height="16" rx="1" />
+                        {isTranscribing ? (
+                            <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" strokeLinecap="round"/>
                             </svg>
                         ) : (
-                            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                                <polygon points="5 3 19 12 5 21 5 3" />
+                            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                <polyline points="14 2 14 8 20 8"/>
+                                <line x1="16" y1="13" x2="8" y2="13"/>
+                                <line x1="16" y1="17" x2="8" y2="17"/>
+                                <line x1="10" y1="9" x2="8" y2="9"/>
                             </svg>
                         )}
-                    </button>
-
-                    {/* Skip forward 10s */}
-                    <button
-                        onClick={skipForward}
-                        disabled={!hasAudio}
-                        title="Skip forward 10s"
-                        className="flex items-center justify-center w-9 h-9 rounded-full hover:bg-white/70 transition-colors nodrag disabled:opacity-30"
-                        style={{ color: COLORS.text }}
-                    >
-                        <svg className="w-8 h-8" viewBox="0 0 36 36" fill="none">
-                            <path d="M18 7A11 11 0 1 1 9 12.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/>
-                            <polyline points="26,4 26,10 20,10" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
-                            <text x="18" y="22" fontSize="9" fontWeight="800" fill="currentColor" textAnchor="middle" dominantBaseline="auto">10</text>
-                        </svg>
                     </button>
                 </div>
             ) : (
@@ -511,57 +639,100 @@ export default function VoiceNoteNode({ id, data }: VoiceNoteNodeProps) {
                     )}
 
                     {/* ── Playback Controls ────────────────────────────── */}
-                    <div className="flex items-center justify-center gap-3 pt-2 pb-2 nodrag">
-                        {/* Skip back 5s */}
-                        <button
-                            onClick={skipBack}
-                            disabled={!hasAudio || isRecording}
-                            title="Skip back 5s"
-                            className="flex items-center justify-center w-9 h-9 rounded-full hover:bg-white/70 transition-colors nodrag disabled:opacity-30"
-                            style={{ color: COLORS.text }}
-                        >
-                            <svg className="w-8 h-8" viewBox="0 0 36 36" fill="none">
-                                <path d="M18 7A11 11 0 1 0 27 12.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/>
-                                <polyline points="10,4 10,10 16,10" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
-                                <text x="18" y="22" fontSize="10" fontWeight="800" fill="currentColor" textAnchor="middle" dominantBaseline="auto">5</text>
-                            </svg>
-                        </button>
+                    <div className="relative flex items-center px-3 pt-2 pb-2 nodrag">
+                        {/* Invisible left spacer mirrors the transcribe button so the
+                            skip/play/skip trio is perfectly centred over the node. */}
+                        <div className="w-7 h-7 shrink-0" />
 
-                        {/* Play / Pause */}
+                        {/* Centred playback group */}
+                        <div className="flex-1 flex items-center justify-center gap-3">
+                            {/* Skip back 5s */}
+                            <button
+                                onClick={skipBack}
+                                disabled={!hasAudio || isRecording}
+                                title="Skip back 5s"
+                                className="flex items-center justify-center w-9 h-9 rounded-full hover:bg-white/70 transition-colors nodrag disabled:opacity-30"
+                                style={{ color: COLORS.text }}
+                            >
+                                <svg className="w-8 h-8" viewBox="0 0 36 36" fill="none">
+                                    <path d="M18 7A11 11 0 1 0 27 12.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/>
+                                    <polyline points="10,4 10,10 16,10" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
+                                    <text x="18" y="22" fontSize="10" fontWeight="800" fill="currentColor" textAnchor="middle" dominantBaseline="auto">5</text>
+                                </svg>
+                            </button>
+
+                            {/* Play / Pause */}
+                            <button
+                                onClick={togglePlayPause}
+                                disabled={!hasAudio || isRecording}
+                                title={isPlaying ? 'Pause' : 'Play'}
+                                className="p-3 rounded-full text-white shadow-md hover:shadow-lg transition-all active:scale-95 nodrag disabled:opacity-40"
+                                style={{ backgroundColor: COLORS.accent }}
+                            >
+                                {isPlaying ? (
+                                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                                        <rect x="6" y="4" width="4" height="16" rx="1" />
+                                        <rect x="14" y="4" width="4" height="16" rx="1" />
+                                    </svg>
+                                ) : (
+                                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                                        <polygon points="5 3 19 12 5 21 5 3" />
+                                    </svg>
+                                )}
+                            </button>
+
+                            {/* Skip forward 10s */}
+                            <button
+                                onClick={skipForward}
+                                disabled={!hasAudio || isRecording}
+                                title="Skip forward 10s"
+                                className="flex items-center justify-center w-9 h-9 rounded-full hover:bg-white/70 transition-colors nodrag disabled:opacity-30"
+                                style={{ color: COLORS.text }}
+                            >
+                                <svg className="w-8 h-8" viewBox="0 0 36 36" fill="none">
+                                    <path d="M18 7A11 11 0 1 1 9 12.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/>
+                                    <polyline points="26,4 26,10 20,10" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
+                                    <text x="18" y="22" fontSize="9" fontWeight="800" fill="currentColor" textAnchor="middle" dominantBaseline="auto">10</text>
+                                </svg>
+                            </button>
+                        </div>
+
+                        {/* Transcribe — flush right */}
                         <button
-                            onClick={togglePlayPause}
-                            disabled={!hasAudio || isRecording}
-                            title={isPlaying ? 'Pause' : 'Play'}
-                            className="p-3 rounded-full text-white shadow-md hover:shadow-lg transition-all active:scale-95 nodrag disabled:opacity-40"
-                            style={{ backgroundColor: COLORS.accent }}
+                            onClick={handleTranscribe}
+                            disabled={!hasAudio || isRecording || !!data.transcriptionNodeId || isTranscribing}
+                            title={
+                                data.transcriptionNodeId
+                                    ? 'Transcription already generated — delete it to re-transcribe'
+                                    : isTranscribing
+                                    ? 'Transcribing…'
+                                    : 'Transcribe voice note'
+                            }
+                            className="flex items-center justify-center w-7 h-7 shrink-0 rounded-full hover:bg-white/70 transition-colors nodrag disabled:opacity-30"
+                            style={{ color: data.transcriptionNodeId ? '#7C3AED' : COLORS.text }}
                         >
-                            {isPlaying ? (
-                                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                                    <rect x="6" y="4" width="4" height="16" rx="1" />
-                                    <rect x="14" y="4" width="4" height="16" rx="1" />
+                            {isTranscribing ? (
+                                <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" strokeLinecap="round"/>
                                 </svg>
                             ) : (
-                                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                                    <polygon points="5 3 19 12 5 21 5 3" />
+                                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                    <polyline points="14 2 14 8 20 8"/>
+                                    <line x1="16" y1="13" x2="8" y2="13"/>
+                                    <line x1="16" y1="17" x2="8" y2="17"/>
+                                    <line x1="10" y1="9" x2="8" y2="9"/>
                                 </svg>
                             )}
                         </button>
-
-                        {/* Skip forward 10s */}
-                        <button
-                            onClick={skipForward}
-                            disabled={!hasAudio || isRecording}
-                            title="Skip forward 10s"
-                            className="flex items-center justify-center w-9 h-9 rounded-full hover:bg-white/70 transition-colors nodrag disabled:opacity-30"
-                            style={{ color: COLORS.text }}
-                        >
-                            <svg className="w-8 h-8" viewBox="0 0 36 36" fill="none">
-                                <path d="M18 7A11 11 0 1 1 9 12.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/>
-                                <polyline points="26,4 26,10 20,10" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
-                                <text x="18" y="22" fontSize="9" fontWeight="800" fill="currentColor" textAnchor="middle" dominantBaseline="auto">10</text>
-                            </svg>
-                        </button>
                     </div>
+
+                    {/* Transcription error banner */}
+                    {transcribeError && (
+                        <div className="mx-2.5 mb-1.5 px-2 py-1 rounded-md bg-red-50 border border-red-200 text-[10px] text-red-600 nodrag nopan">
+                            {transcribeError}
+                        </div>
+                    )}
 
                     {/* ── Record / Stop button — only shown before first recording ── */}
                     {!hasAudio && (

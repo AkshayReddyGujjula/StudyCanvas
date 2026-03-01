@@ -202,6 +202,27 @@ export interface VoiceNoteNodeData {
     isMinimized: boolean
     isPinned?: boolean
     pageIndex?: number
+    /**
+     * ID of the TranscriptionNode spawned from this voice note.
+     * When set, the Transcribe button is locked — user must delete the
+     * TranscriptionNode first before generating a new transcription.
+     */
+    transcriptionNodeId?: string | null
+}
+
+export interface TranscriptionNodeData {
+    /** The full transcribed text returned by Gemini */
+    text: string
+    /** Whether the node is collapsed to show only the header bar */
+    isMinimized: boolean
+    isPinned?: boolean
+    pageIndex?: number
+    /** Node ID of the parent VoiceNoteNode — used to clear the lock on delete */
+    sourceVoiceNoteId: string
+    /** Persisted width after user resize (px) */
+    savedWidth?: number
+    /** Persisted height after user resize (px) */
+    savedHeight?: number
 }
 // ─── Whiteboard / Drawing types ──────────────────────────────────────────────
 
