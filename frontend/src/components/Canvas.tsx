@@ -902,6 +902,11 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                     state.setIsSnippingMode(false)
                 }
             }
+            // Ctrl+Space — switch to cursor mode from any tool
+            if ((e.ctrlKey || e.metaKey) && e.code === 'Space') {
+                e.preventDefault()
+                useCanvasStore.getState().setActiveTool('cursor')
+            }
         }
         document.addEventListener('keydown', handleKeyDown)
         return () => document.removeEventListener('keydown', handleKeyDown)
@@ -970,6 +975,68 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
 
         el.addEventListener('wheel', handleWheel, { passive: false, capture: true })
         return () => el.removeEventListener('wheel', handleWheel, { capture: true })
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [setViewport, getViewport])
+
+    // Right-click drag to pan — works in any tool mode (pen, text, etc.) so the
+    // user can quickly reposition the canvas without switching to cursor mode.
+    useEffect(() => {
+        const el = containerRef.current
+        if (!el) return
+
+        let isDragging = false
+        let didDrag = false
+        let lastX = 0
+        let lastY = 0
+
+        const onMouseDown = (e: MouseEvent) => {
+            if (e.button !== 2) return
+            // Don't steal right-clicks on interactive node chrome (buttons, inputs, etc.)
+            const target = e.target as Element
+            if (target.closest('button, input, textarea, select, [role="button"]')) return
+            isDragging = true
+            didDrag = false
+            lastX = e.clientX
+            lastY = e.clientY
+            el.style.cursor = 'grabbing'
+            e.preventDefault()
+        }
+
+        const onMouseMove = (e: MouseEvent) => {
+            if (!isDragging) return
+            const dx = e.clientX - lastX
+            const dy = e.clientY - lastY
+            lastX = e.clientX
+            lastY = e.clientY
+            if (Math.abs(dx) > 1 || Math.abs(dy) > 1) didDrag = true
+            const vp = getViewport()
+            setViewport({ zoom: vp.zoom, x: vp.x + dx, y: vp.y + dy })
+        }
+
+        const onMouseUp = (e: MouseEvent) => {
+            if (e.button !== 2) return
+            isDragging = false
+            el.style.cursor = ''
+        }
+
+        // Suppress the context menu only when we actually dragged (not a plain right-click)
+        const onContextMenu = (e: MouseEvent) => {
+            if (didDrag) {
+                e.preventDefault()
+                didDrag = false
+            }
+        }
+
+        el.addEventListener('mousedown', onMouseDown)
+        document.addEventListener('mousemove', onMouseMove)
+        document.addEventListener('mouseup', onMouseUp)
+        el.addEventListener('contextmenu', onContextMenu)
+        return () => {
+            el.removeEventListener('mousedown', onMouseDown)
+            document.removeEventListener('mousemove', onMouseMove)
+            document.removeEventListener('mouseup', onMouseUp)
+            el.removeEventListener('contextmenu', onContextMenu)
+        }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [setViewport, getViewport])
 
