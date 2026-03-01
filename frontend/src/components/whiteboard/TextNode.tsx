@@ -10,6 +10,8 @@ type TextNodeProps = NodeProps & { data: TextNodeData }
  * Double-click to edit; click outside to commit.
  * In cursor mode: click to select, Backspace to delete (handled by Canvas.tsx).
  */
+const DEFAULT_TEXT_WIDTH = 220
+
 export default function TextNode({ id, data, selected }: TextNodeProps) {
     const [isEditing, setIsEditing] = useState(false)
     const [localText, setLocalText] = useState(data.text || '')
@@ -39,6 +41,21 @@ export default function TextNode({ id, data, selected }: TextNodeProps) {
         }
     }, [])
 
+    // Persist dimensions when user resizes the textarea
+    useEffect(() => {
+        if (!isEditing || !textRef.current) return
+        const el = textRef.current
+        const ro = new ResizeObserver(() => {
+            const newW = el.offsetWidth + 16   // add back padding
+            const newH = el.offsetHeight + 8
+            if (newW !== data.width || newH !== data.height) {
+                updateNodeData(id, { width: newW, height: newH } as unknown as Partial<Record<string, unknown>>)
+            }
+        })
+        ro.observe(el)
+        return () => ro.disconnect()
+    }, [isEditing, id, data.width, data.height, updateNodeData])
+
     const commitText = useCallback(() => {
         setIsEditing(false)
         const trimmed = localText.trim()
@@ -67,6 +84,8 @@ export default function TextNode({ id, data, selected }: TextNodeProps) {
     const fontSize = data.fontSize || 16
     const color = data.color || '#000000'
     const minWidth = Math.max(60, fontSize * 3)
+    const storedWidth = data.width || DEFAULT_TEXT_WIDTH
+    const storedHeight = data.height
 
     return (
         <div
@@ -75,6 +94,7 @@ export default function TextNode({ id, data, selected }: TextNodeProps) {
             style={{
                 minWidth,
                 minHeight: fontSize + 16,
+                width: isEditing ? undefined : storedWidth,
                 padding: '4px 8px',
                 borderRadius: 4,
                 background: isEditing ? 'rgba(255,255,255,0.95)' : 'transparent',
@@ -104,10 +124,14 @@ export default function TextNode({ id, data, selected }: TextNodeProps) {
                         resize: 'both',
                         minWidth: minWidth - 16,
                         minHeight: fontSize + 8,
-                        width: data.width ? data.width - 16 : 'auto',
-                        overflow: 'hidden',
+                        width: storedWidth - 16,
+                        height: storedHeight ? storedHeight - 8 : undefined,
+                        overflow: 'auto',
                         lineHeight: 1.4,
                         padding: 0,
+                        wordBreak: 'break-word',
+                        whiteSpace: 'pre-wrap',
+                        boxSizing: 'border-box',
                     }}
                     placeholder="Type here…"
                 />
@@ -121,8 +145,9 @@ export default function TextNode({ id, data, selected }: TextNodeProps) {
                         wordBreak: 'break-word',
                         lineHeight: 1.4,
                         minHeight: fontSize + 8,
-                        userSelect: 'none',  // Prevent browser text selection so ReactFlow can select the node
-                        pointerEvents: 'none', // Let clicks pass through to the ReactFlow node wrapper
+                        width: storedWidth - 16,
+                        userSelect: 'none',
+                        pointerEvents: 'none',
                     }}
                 >
                     {localText || (
