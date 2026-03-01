@@ -78,6 +78,10 @@ export interface FlashcardNodeData {
     isLoading: boolean
     /** Which Gemini model produced this flashcard */
     modelUsed?: string
+    /** True when this flashcard was created manually by the user (enables inline editing) */
+    isCustom?: boolean
+    /** True while the user is editing the currently-visible face */
+    isEditing?: boolean
 }
 
 export interface QuizQuestionNodeData {

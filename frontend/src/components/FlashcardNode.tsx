@@ -22,6 +22,10 @@ export default function FlashcardNode({ id, data }: FlashcardNodeProps) {
     const setNodes = useCanvasStore((s) => s.setNodes)
     const setEdges = useCanvasStore((s) => s.setEdges)
     const [confirmDelete, setConfirmDelete] = useState(false)
+    // Seed editDraft from current face content if the card mounts already in edit mode
+    const [editDraft, setEditDraft] = useState(() =>
+        data.isEditing ? (data.isFlipped ? data.answer : data.question) : ''
+    )
 
     const borderClass = STATUS_BORDER_CLASSES[data.status] || 'border-secondary-500'
 
@@ -49,10 +53,28 @@ export default function FlashcardNode({ id, data }: FlashcardNodeProps) {
     }
 
     const handleFlip = useCallback(() => {
-        if (data.isLoading) return
+        if (data.isLoading || data.isEditing) return
         updateNodeData(id, { isFlipped: !data.isFlipped })
         persistToLocalStorage()
-    }, [id, data.isFlipped, data.isLoading, updateNodeData, persistToLocalStorage])
+    }, [id, data.isFlipped, data.isLoading, data.isEditing, updateNodeData, persistToLocalStorage])
+
+    const handleEditToggle = useCallback(() => {
+        if (!data.isEditing) {
+            // Enter edit mode — seed the draft from whichever face is currently visible
+            const draft = data.isFlipped ? data.answer : data.question
+            setEditDraft(draft)
+            updateNodeData(id, { isEditing: true })
+            persistToLocalStorage()
+        } else {
+            // Save mode — write draft back to the correct face field
+            if (data.isFlipped) {
+                updateNodeData(id, { answer: editDraft, isEditing: false })
+            } else {
+                updateNodeData(id, { question: editDraft, isEditing: false })
+            }
+            persistToLocalStorage()
+        }
+    }, [id, data.isEditing, data.isFlipped, data.question, data.answer, editDraft, updateNodeData, persistToLocalStorage])
 
     return (
         <>
@@ -119,8 +141,33 @@ export default function FlashcardNode({ id, data }: FlashcardNodeProps) {
                         </button>
                     </div>
 
-                    {/* Right: delete / minimize / pin */}
+                    {/* Right: edit (custom only) / delete / minimize / pin */}
                     <div className="flex items-center gap-0.5">
+                        {/* Edit button — only shown for user-created custom flashcards */}
+                        {data.isCustom && (
+                            <button
+                                title={data.isEditing ? 'Save changes' : 'Edit this side'}
+                                onClick={handleEditToggle}
+                                className={`p-1 rounded-md transition-colors ${
+                                    data.isEditing
+                                        ? 'text-white bg-teal-500 hover:bg-teal-600'
+                                        : 'text-gray-400 hover:text-teal-600 hover:bg-teal-50'
+                                }`}
+                            >
+                                {data.isEditing ? (
+                                    /* Save / checkmark icon */
+                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                                    </svg>
+                                ) : (
+                                    /* Pencil / edit icon */
+                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                    </svg>
+                                )}
+                            </button>
+                        )}
+
                         {/* Delete button — two-step */}
                         {confirmDelete ? (
                             <div
@@ -229,37 +276,66 @@ export default function FlashcardNode({ id, data }: FlashcardNodeProps) {
                             >
                                 {/* ── Front: Question ── */}
                                 <div
-                                    className="flashcard-face nodrag nopan cursor-pointer custom-scrollbar"
-                                    onClick={handleFlip}
+                                    className="flashcard-face nodrag nopan custom-scrollbar"
+                                    style={{ cursor: data.isEditing ? 'default' : 'pointer' }}
+                                    onClick={data.isEditing ? undefined : handleFlip}
                                     onWheelCapture={(e) => e.stopPropagation()}
                                 >
                                     <div className="flex flex-col items-center justify-center text-center h-full px-3 py-3 min-h-0">
                                         <p className="text-xs font-semibold text-teal-700 uppercase tracking-widest mb-2 flex-shrink-0">Question</p>
-                                        <p className="text-sm font-bold text-gray-800 leading-snug overflow-y-auto w-full custom-scrollbar" style={{ maxHeight: 130 }} onWheelCapture={(e) => e.stopPropagation()}>{data.question}</p>
-                                        <p className="mt-2 text-[10px] text-gray-400 italic flex-shrink-0">Click to reveal answer ↩</p>
+                                        {data.isEditing && !data.isFlipped ? (
+                                            <textarea
+                                                autoFocus
+                                                className="w-full flex-1 resize-none bg-transparent text-sm font-bold text-gray-800 text-center outline-none border-b-2 border-teal-300 focus:border-teal-500 custom-scrollbar py-1 placeholder-gray-300"
+                                                style={{ maxHeight: 130 }}
+                                                value={editDraft}
+                                                onChange={(e) => setEditDraft(e.target.value)}
+                                                onClick={(e) => e.stopPropagation()}
+                                                onWheelCapture={(e) => e.stopPropagation()}
+                                                placeholder="Enter question..."
+                                            />
+                                        ) : (
+                                            <>
+                                                <p className="text-sm font-bold text-gray-800 leading-snug overflow-y-auto w-full custom-scrollbar" style={{ maxHeight: 130 }} onWheelCapture={(e) => e.stopPropagation()}>{data.question}</p>
+                                                <p className="mt-2 text-[10px] text-gray-400 italic flex-shrink-0">Click to reveal answer ↩</p>
+                                            </>
+                                        )}
                                     </div>
                                 </div>
 
                                 {/* ── Back: Answer ── */}
                                 <div
-                                    className="flashcard-face flashcard-face-back nodrag nopan cursor-pointer custom-scrollbar"
-                                    onClick={handleFlip}
+                                    className="flashcard-face flashcard-face-back nodrag nopan custom-scrollbar"
+                                    style={{ cursor: data.isEditing ? 'default' : 'pointer' }}
+                                    onClick={data.isEditing ? undefined : handleFlip}
                                     onWheelCapture={(e) => e.stopPropagation()}
                                 >
                                     <div className="flex flex-col h-full px-2 py-3 min-h-0">
                                         <p className="text-xs font-semibold text-teal-700 uppercase tracking-widest mb-1.5 flex-shrink-0">Answer</p>
-                                        <div
-                                            className="prose prose-sm max-w-none text-gray-700 overflow-y-auto flex-1 custom-scrollbar"
-                                            style={{ overflowWrap: 'break-word', wordBreak: 'break-word' }}
-                                            onWheelCapture={(e) => e.stopPropagation()}
-                                        >
-                                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                                {data.answer}
-                                            </ReactMarkdown>
-                                        </div>
+                                        {data.isEditing && data.isFlipped ? (
+                                            <textarea
+                                                autoFocus
+                                                className="w-full flex-1 resize-none bg-transparent text-sm text-gray-700 outline-none border-b-2 border-teal-300 focus:border-teal-500 custom-scrollbar py-1 placeholder-gray-300"
+                                                value={editDraft}
+                                                onChange={(e) => setEditDraft(e.target.value)}
+                                                onClick={(e) => e.stopPropagation()}
+                                                onWheelCapture={(e) => e.stopPropagation()}
+                                                placeholder="Enter answer... (Markdown supported)"
+                                            />
+                                        ) : (
+                                            <div
+                                                className="prose prose-sm max-w-none text-gray-700 overflow-y-auto flex-1 custom-scrollbar"
+                                                style={{ overflowWrap: 'break-word', wordBreak: 'break-word' }}
+                                                onWheelCapture={(e) => e.stopPropagation()}
+                                            >
+                                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                                    {data.answer}
+                                                </ReactMarkdown>
+                                            </div>
+                                        )}
                                         <div className="flex items-center justify-between mt-1.5 flex-shrink-0">
                                             <ModelIndicator model={data.modelUsed} />
-                                            <p className="text-[10px] text-gray-400 italic">Click to flip back ↩</p>
+                                            {!data.isEditing && <p className="text-[10px] text-gray-400 italic">Click to flip back ↩</p>}
                                         </div>
                                     </div>
                                 </div>

@@ -688,6 +688,32 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
         persistToLocalStorage()
     }, [getViewportCenter, currentPage, nodes, setNodes, persistToLocalStorage])
 
+    const handleSpawnCustomFlashcard = useCallback(() => {
+        const center = getViewportCenter()
+        const pos = findNonOverlappingPosition(center, 380, 260, nodes)
+        const nodeId = `flashcard-custom-${Date.now()}`
+        const newNode: Node = {
+            id: nodeId,
+            type: 'flashcardNode',
+            position: pos,
+            data: {
+                question: 'Your question here…',
+                answer: 'Your answer here…',
+                isFlipped: false,
+                status: 'unread',
+                isMinimized: false,
+                isPinned: false,
+                pageIndex: currentPage,
+                isLoading: false,
+                isCustom: true,
+                isEditing: true,
+            } as unknown as Record<string, unknown>,
+            style: { width: 380 },
+        }
+        setNodes((prev) => [...prev, newNode])
+        persistToLocalStorage()
+    }, [getViewportCenter, currentPage, nodes, setNodes, persistToLocalStorage])
+
     const handleSpawnTimer = useCallback(() => {
         const center = getViewportCenter()
         const nodeWidth = 240
@@ -2169,6 +2195,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 onCustomPrompt={handleSpawnCustomPrompt}
                 onSnip={() => setIsSnippingMode(true)}
                 onAddImage={handleSpawnImage}
+                onCustomFlashcard={handleSpawnCustomFlashcard}
                 onStickyNote={handleSpawnStickyNote}
                 onVoiceNote={handleSpawnVoiceNote}
                 onTimer={handleSpawnTimer}

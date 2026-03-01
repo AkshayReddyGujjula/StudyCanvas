@@ -346,7 +346,7 @@ async def generate_quiz(
             "- The page image is the PRIMARY and most reliable source of content. The extracted text may miss "
             "handwritten content entirely.\n\n"
             "Format Rules:\n"
-            "  • Generate a default of 4 questions total. If there is a lot of content or complex concepts, intelligently decide to ask up to a maximum of 7 questions.\n"
+            "  • Generate between 2 and 4 questions total. For sparse or simple content (few facts or a short paragraph) generate only 2 questions. Scale up to a maximum of 4 for pages with rich, dense, or complex content. Let the amount and depth of the content drive the count — never pad with trivial questions just to reach 4.\n"
             "  • Mix question types intelligently:\n"
             "      - Use 'mcq' when the concept has clearly defined, distinct alternatives "
             "(definitions, comparisons, cause-effect, best/worst choice).\n"

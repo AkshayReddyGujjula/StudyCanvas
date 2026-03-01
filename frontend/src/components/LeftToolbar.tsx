@@ -4,6 +4,7 @@ interface LeftToolbarProps {
     onCustomPrompt: () => void
     onSnip: () => void
     onAddImage: (dataUrl: string, fileName: string) => void
+    onCustomFlashcard: () => void
     onStickyNote: () => void
     onVoiceNote: () => void
     onTimer: () => void
@@ -14,6 +15,7 @@ export default function LeftToolbar({
     onCustomPrompt,
     onSnip,
     onAddImage,
+    onCustomFlashcard,
     onStickyNote,
     onVoiceNote,
     onTimer,
@@ -71,6 +73,16 @@ export default function LeftToolbar({
                 className="hidden"
                 onChange={handleImageSelect}
             />
+
+            {/* Custom Flashcard */}
+            <button onClick={onCustomFlashcard} className={btnClass} title="Custom Flashcard">
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="2" y="6" width="20" height="13" rx="2" />
+                    <path d="M2 10h20" />
+                    <path d="M7 14h4" />
+                    <path d="M15 14h2" />
+                </svg>
+            </button>
 
             {/* Sticky Note */}
             <button onClick={onStickyNote} className={btnClass} title="Sticky Note">

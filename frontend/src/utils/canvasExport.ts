@@ -377,7 +377,7 @@ export async function exportCurrentPage(options: ExportOptions): Promise<Blob | 
         const scale = computeSafeScale(w, h, DEFAULT_SCALE)
 
         // ── 1. Fit all visible nodes so nothing is off-screen ──────────────
-        fitView({ padding: 0.05, duration: 0 })
+        fitView({ padding: 0.10, duration: 0 })
 
         // Wait for React Flow viewport CSS transform + DrawingCanvas redraw
         await new Promise((r) => setTimeout(r, SETTLE_DELAY_MS))
