@@ -8,6 +8,7 @@ import rehypeSanitize, { defaultSchema, type Options as SanitizeOptions } from '
 import type { CustomPromptNodeData, ChatMessage, PromptModel } from '../types'
 import { useCanvasStore } from '../store/canvasStore'
 import { streamQuery } from '../api/studyApi'
+import { extractPageImageBase64 } from '../utils/pdfImageExtractor'
 import ModelIndicator from './ModelIndicator'
 
 const customSchema: SanitizeOptions = {
@@ -37,6 +38,7 @@ export default function CustomPromptNode({ id, data }: CustomPromptNodeProps) {
     const userDetails = useCanvasStore((s) => s.userDetails)
     const currentPage = useCanvasStore((s) => s.currentPage)
     const pageMarkdowns = useCanvasStore((s) => s.pageMarkdowns)
+    const pdfArrayBuffer = useCanvasStore((s) => s.pdfArrayBuffer)
 
     const [input, setInput] = useState('')
     const [isLoading, setIsLoading] = useState(false)
@@ -98,9 +100,22 @@ export default function CustomPromptNode({ id, data }: CustomPromptNodeProps) {
         // Determine context
         let rawText = ''
         let highlightedText = ''
+        let imageBase64: string | undefined = undefined
         if (data.useContext && fileData) {
-            rawText = fileData.raw_text
-            highlightedText = pageMarkdowns[currentPage - 1] ?? ''
+            // Use only the current page's text — NOT the entire PDF.
+            // The page image is also extracted so the AI can see diagrams,
+            // handwriting, and any content that text extraction misses.
+            const pageText = pageMarkdowns[currentPage - 1] ?? ''
+            rawText = pageText
+            highlightedText = pageText
+            if (pdfArrayBuffer) {
+                try {
+                    const b64 = await extractPageImageBase64(pdfArrayBuffer, currentPage - 1)
+                    if (b64) imageBase64 = b64
+                } catch {
+                    // image extraction is best-effort; continue without it
+                }
+            }
         }
 
         try {
@@ -113,6 +128,7 @@ export default function CustomPromptNode({ id, data }: CustomPromptNodeProps) {
                 chat_history: fullHistoryForApi.length > 1 ? fullHistoryForApi.slice(0, -1) : undefined,
                 user_details: userDetails,
                 preferred_model: data.selectedModel,
+                image_base64: imageBase64,
             }, controller.signal)
 
             const modelUsed = response.headers.get('X-Model-Used') || undefined
@@ -153,7 +169,7 @@ export default function CustomPromptNode({ id, data }: CustomPromptNodeProps) {
             setIsLoading(false)
             persistToLocalStorage()
         }
-    }, [input, isLoading, data, fileData, userDetails, currentPage, pageMarkdowns, updateNodeData, persistToLocalStorage, id])
+    }, [input, isLoading, data, fileData, userDetails, currentPage, pageMarkdowns, pdfArrayBuffer, updateNodeData, persistToLocalStorage, id])
 
     const toggleModel = useCallback(() => {
         const newModel: PromptModel = data.selectedModel === 'gemini-2.5-flash' ? 'gemini-2.5-flash-lite' : 'gemini-2.5-flash'

@@ -169,6 +169,7 @@ async def stream_query(
     user_details=None,
     chat_history: list | None = None,
     model_name: str | None = None,
+    image_base64: str | None = None,
 ):
     """
     Asynchronous generator that streams the Gemini response for a student query.
@@ -239,7 +240,14 @@ Student's question:
     full_prompt += f"\n\nNew follow-up question: {question}" if chat_history else ""
 
     try:
-        response = await model.generate_content_async(full_prompt, stream=True)
+        # Build a multimodal request when a page image is available.
+        # The image gives Gemini visual context for diagrams, handwriting, and
+        # layout that raw text extraction may miss entirely.
+        contents: list = []
+        if image_base64:
+            contents.append({"mime_type": "image/jpeg", "data": image_base64})
+        contents.append(full_prompt)
+        response = await model.generate_content_async(contents, stream=True)
         async for chunk in response:
             try:
                 text = chunk.text

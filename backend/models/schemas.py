@@ -44,6 +44,7 @@ class QueryRequest(BaseModel):
     user_details: Optional[UserDetails] = None
     chat_history: Optional[list[ChatMessage]] = None
     preferred_model: Optional[str] = Field(None, description="Override model selection: 'gemini-2.5-flash' or 'gemini-2.5-flash-lite'")
+    image_base64: Optional[str] = Field(None, description="Current page rendered as base64 JPEG for vision context")
 
 
 class QuizNode(BaseModel):

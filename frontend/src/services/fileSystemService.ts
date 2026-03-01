@@ -572,6 +572,49 @@ export async function loadPdf(rootHandle: FileSystemDirectoryHandle, canvasId: s
     }
 }
 
+// ─── Voice Note Audio files ──────────────────────────────────────────────────
+
+const AUDIO_FOLDER = 'audio'
+
+/**
+ * Save a voice note audio Blob to the canvas folder on disk.
+ * Stored as canvas_<id>/audio/<audioId> (no extension — the Blob type carries
+ * the MIME info and we keep the key simple).
+ */
+export async function saveVoiceAudio(
+    rootHandle: FileSystemDirectoryHandle,
+    canvasId: string,
+    audioId: string,
+    blob: Blob,
+): Promise<void> {
+    const folder = await getCanvasFolder(rootHandle, canvasId, true)
+    const audioDir = await folder.getDirectoryHandle(AUDIO_FOLDER, { create: true })
+    const fileHandle = await audioDir.getFileHandle(audioId, { create: true })
+    const writable = await fileHandle.createWritable()
+    await writable.write(blob)
+    await writable.close()
+}
+
+/**
+ * Load a voice note audio Blob from the canvas folder on disk.
+ * Returns null if the file does not exist.
+ */
+export async function loadVoiceAudio(
+    rootHandle: FileSystemDirectoryHandle,
+    canvasId: string,
+    audioId: string,
+): Promise<Blob | null> {
+    try {
+        const folder = await getCanvasFolder(rootHandle, canvasId)
+        const audioDir = await folder.getDirectoryHandle(AUDIO_FOLDER)
+        const fileHandle = await audioDir.getFileHandle(audioId)
+        const file = await fileHandle.getFile()
+        return file
+    } catch {
+        return null
+    }
+}
+
 // ─── Thumbnail ───────────────────────────────────────────────────────────────
 
 const THUMB_FILE = 'thumbnail.png'

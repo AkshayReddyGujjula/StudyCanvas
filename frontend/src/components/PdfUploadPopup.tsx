@@ -67,6 +67,8 @@ export default function PdfUploadPopup({ onClose, onUploaded }: Props) {
                         filename: data.filename,
                         page_count: data.page_count,
                         pdf_id: data.pdf_id,
+                        // Always open in PDF mode for a fresh upload
+                        pdfViewerState: { viewMode: 'pdf' },
                     },
                     style: { width: 700 },
                 }

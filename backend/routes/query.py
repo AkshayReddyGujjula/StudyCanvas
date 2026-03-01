@@ -35,6 +35,7 @@ async def query_stream(request: Request, payload: QueryRequest):
         user_details=payload.user_details,
         chat_history=payload.chat_history,
         model_name=model_name,
+        image_base64=payload.image_base64,
     )
     return StreamingResponse(
         generator, media_type="text/plain",

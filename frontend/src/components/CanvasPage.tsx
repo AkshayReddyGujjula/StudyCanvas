@@ -11,10 +11,13 @@ import {
     savePdf as fsSavePdf,
     saveThumbnail,
     resolveParentHandle,
+    saveVoiceAudio as fsSaveVoiceAudio,
+    loadVoiceAudio as fsLoadVoiceAudio,
 } from '../services/fileSystemService'
 import { savePdfToLocal, loadPdfFromLocal } from '../utils/pdfStorage'
 import { extractPdfPagesTextFromBuffer } from '../utils/pdfTextExtractor'
 import { saveCanvasBackup, loadCanvasBackup } from '../utils/canvasBackup'
+import { saveAudio, loadAudio } from '../utils/audioStorage'
 import { toPng } from 'html-to-image'
 
 /**
@@ -125,8 +128,23 @@ export default function CanvasPage() {
                 }
             }
 
-            // 3. Capture thumbnail
-            onProgress?.(70, 'Capturing thumbnail…')
+            // 3. Save voice note audio blobs to the file system
+            onProgress?.(65, 'Saving audio…')
+            try {
+                const voiceNodes = nodes.filter((n: any) => n.type === 'voiceNoteNode' && n.data?.audioId)
+                for (const node of voiceNodes) {
+                    const audioId = (node.data as any).audioId as string
+                    const blob = await loadAudio(audioId)
+                    if (blob) {
+                        await fsSaveVoiceAudio(parentHandle, canvasId, audioId, blob).catch(() => {})
+                    }
+                }
+            } catch {
+                // Audio saving is best-effort
+            }
+
+            // 4. Capture thumbnail
+            onProgress?.(72, 'Capturing thumbnail…')
             try {
                 const rfEl = document.querySelector('.react-flow') as HTMLElement | null
                 if (rfEl) {
@@ -268,6 +286,24 @@ export default function CanvasPage() {
                 } else if (stateObj?.fileData) {
                     // Try IndexedDB
                     await store.loadPdfFromStorage()
+                }
+
+                // Re-hydrate voice note audio blobs from file system into IndexedDB
+                // (handles the case where IndexedDB was cleared, e.g. after logout/login
+                // or on a different browser session).
+                const loadedNodes = stateObj?.nodes ?? []
+                const voiceNodesToHydrate = (loadedNodes as any[]).filter(
+                    (n: any) => n.type === 'voiceNoteNode' && n.data?.audioId
+                )
+                for (const node of voiceNodesToHydrate) {
+                    const audioId = node.data.audioId as string
+                    const existingBlob = await loadAudio(audioId).catch(() => null)
+                    if (!existingBlob) {
+                        const blob = await fsLoadVoiceAudio(parentHandle, canvasId, audioId).catch(() => null)
+                        if (blob) {
+                            await saveAudio(audioId, blob).catch(() => {})
+                        }
+                    }
                 }
 
                 // Re-derive raw_text & markdown_content if they were stripped during save.

@@ -190,7 +190,9 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
             })
             setSaveOverlay(prev => prev ? { ...prev, progress: 100, label: 'Saved!', done: true } : null)
             if (goHome) {
-                setTimeout(() => { setSaveOverlay(null); onGoHome?.() }, 1400)
+                // Keep the overlay visible during navigation — it disappears naturally
+                // when the Canvas component unmounts, eliminating the brief canvas flash.
+                setTimeout(() => { onGoHome?.() }, 1400)
             } else {
                 setTimeout(() => setSaveOverlay(null), 1400)
             }
