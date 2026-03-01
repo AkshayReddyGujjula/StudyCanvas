@@ -14,6 +14,7 @@ import {
     type Edge,
     type Connection,
     type EdgeChange,
+    type OnConnectStartParams,
     type Viewport,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
@@ -87,6 +88,16 @@ interface ModalState {
 }
 
 let toastTimeout: ReturnType<typeof setTimeout> | null = null
+const DEFAULT_EDGE_COLOR = '#1E3A5F'
+const EDGE_STROKE_WIDTH = 2
+const STICKY_NOTE_BORDER_COLORS: Record<string, string> = {
+    '#FFF9C4': '#F9E547',
+    '#FFCDD2': '#EF9A9A',
+    '#C8E6C9': '#81C784',
+    '#BBDEFB': '#64B5F6',
+    '#E1BEE7': '#BA68C8',
+    '#FFE0B2': '#FFB74D',
+}
 
 export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; onSave?: () => Promise<void> }) {
     const { setCenter, getZoom, fitView, setViewport, getViewport, screenToFlowPosition } = useReactFlow()
@@ -107,6 +118,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
     const [isExportingPage, setIsExportingPage] = useState(false)
     const [isExportingAll, setIsExportingAll] = useState(false)
     const [exportProgress, setExportProgress] = useState<string | null>(null)
+    const [connectingFromNodeId, setConnectingFromNodeId] = useState<string | null>(null)
     const exportAbortRef = useRef<AbortController | null>(null)
     const streamingNodesRef = useRef<Set<string>>(new Set())
     const containerRef = useRef<HTMLDivElement>(null)
@@ -167,6 +179,66 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
         await onSave()
     }, [onSave, flushViewport])
 
+    // Edge colour is always derived from the source node's connector colour.
+    const getNodeConnectorColor = useCallback((nodeId?: string | null): string => {
+        if (!nodeId) return DEFAULT_EDGE_COLOR
+
+        const sourceNode = nodes.find((node) => node.id === nodeId)
+        if (!sourceNode) return DEFAULT_EDGE_COLOR
+
+        switch (sourceNode.type) {
+            case 'contentNode':
+            case 'summaryNode':
+                return '#1E3A5F'
+            case 'answerNode':
+            case 'quizQuestionNode':
+            case 'flashcardNode':
+            case 'customPromptNode':
+                return '#2D9CDB'
+            case 'imageNode':
+                return '#6B7280'
+            case 'stickyNoteNode': {
+                const stickyData = sourceNode.data as unknown as StickyNoteNodeData
+                const stickyColor = stickyData.color ?? '#FFF9C4'
+                return STICKY_NOTE_BORDER_COLORS[stickyColor] ?? stickyColor
+            }
+            case 'timerNode': {
+                const timerData = sourceNode.data as unknown as TimerNodeData
+                if (timerData.mode === 'shortBreak') return '#22C55E'
+                if (timerData.mode === 'longBreak') return '#3B82F6'
+                return '#EF4444'
+            }
+            case 'voiceNoteNode':
+            case 'transcriptionNode':
+                return '#7C3AED'
+            case 'textNode': {
+                const textData = sourceNode.data as unknown as TextNodeData
+                return textData.color ?? '#6B7280'
+            }
+            default:
+                return DEFAULT_EDGE_COLOR
+        }
+    }, [nodes])
+
+    const buildEdgeStyle = useCallback(
+        (sourceId?: string | null, style: Edge['style'] = {}) => ({
+            ...style,
+            stroke: getNodeConnectorColor(sourceId),
+            strokeWidth: EDGE_STROKE_WIDTH,
+        }),
+        [getNodeConnectorColor]
+    )
+
+    const handleConnectStart = useCallback((_event: unknown, params: OnConnectStartParams) => {
+        document.body.classList.add('rf-connecting')
+        setConnectingFromNodeId(params.handleType === 'source' ? (params.nodeId ?? null) : null)
+    }, [])
+
+    const handleConnectEnd = useCallback(() => {
+        document.body.classList.remove('rf-connecting')
+        setConnectingFromNodeId(null)
+    }, [])
+
     const onConnect = useCallback((connection: Connection) => {
         const newEdgeId = `user-edge-${Date.now()}`
         const newEdge: Edge = {
@@ -176,7 +248,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
             target: connection.target ?? '',
             type: 'smoothstep',
             animated: false,
-            style: { stroke: '#1E3A5F', strokeWidth: 2 },
+            style: buildEdgeStyle(connection.source),
         }
 
         // Use a timeout to ensure React Flow finishes its internal connection state cleanup 
@@ -185,7 +257,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
             setEdges((prev) => [...prev.filter((e) => e.id !== newEdgeId), newEdge])
             persistToLocalStorage()
         }, 0)
-    }, [setEdges, persistToLocalStorage])
+    }, [setEdges, persistToLocalStorage, buildEdgeStyle])
 
     const currentPage = useCanvasStore((s) => s.currentPage)
     const pageMarkdowns = useCanvasStore((s) => s.pageMarkdowns)
@@ -348,7 +420,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                     targetHandle: 'top',
                     type: 'smoothstep',
                     animated: false,
-                    style: { stroke: '#2D9CDB', strokeWidth: 2 },
+                    style: buildEdgeStyle(contentNodeId),
                 }
             }
             return {
@@ -359,7 +431,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 targetHandle: 'left',
                 type: 'smoothstep',
                 animated: false,
-                style: { stroke: '#2D9CDB', strokeWidth: 2 },
+                style: buildEdgeStyle(quizNodes[i - 1].id),
             }
         })
 
@@ -377,7 +449,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
     }, [
         fileData, currentPage, pageMarkdowns, nodes, contentNodeId,
         getQuizNodesForPage, setNodes, setEdges, setCenter, getZoom,
-        updateQuizNodeData, persistToLocalStorage,
+        updateQuizNodeData, persistToLocalStorage, buildEdgeStyle,
     ])
 
     // Text selection hook
@@ -476,10 +548,13 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
     )
 
     const visibleEdges = useMemo(() => {
-        return edges.filter(
-            (e) => visibleNodeIds.has(e.source) && visibleNodeIds.has(e.target)
-        )
-    }, [edges, visibleNodeIds])
+        return edges
+            .filter((e) => visibleNodeIds.has(e.source) && visibleNodeIds.has(e.target))
+            .map((e) => ({
+                ...e,
+                style: buildEdgeStyle(e.source, e.style),
+            }))
+    }, [edges, visibleNodeIds, buildEdgeStyle])
 
     // Navigate to a given page: update the contentNode display and set currentPage.
     const goToPage = useCallback(
@@ -810,7 +885,10 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
     // suppression can't get stuck if onConnectEnd doesn't fire (e.g. drag released
     // outside the window or over an invalid target).
     useEffect(() => {
-        const cleanup = () => document.body.classList.remove('rf-connecting')
+        const cleanup = () => {
+            document.body.classList.remove('rf-connecting')
+            setConnectingFromNodeId(null)
+        }
         document.addEventListener('mouseup', cleanup)
         return () => document.removeEventListener('mouseup', cleanup)
     }, [])
@@ -1187,7 +1265,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 targetHandle,
                 type: 'smoothstep',
                 animated: true,
-                style: { strokeDasharray: '5,5', stroke: '#1E3A5F', strokeWidth: 2 },
+                style: buildEdgeStyle(sourceNodeId, { strokeDasharray: '5,5' }),
             }
 
             setNodes((prev) => [...prev, newNode])
@@ -1265,7 +1343,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                             ? {
                                 ...e,
                                 animated: false,
-                                style: { stroke: '#1E3A5F', strokeWidth: 2 },
+                                style: buildEdgeStyle(sourceNodeId),
                             }
                             : e
                     )
@@ -1302,6 +1380,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
             setActiveAbortController,
             updateNodeData,
             persistToLocalStorage,
+            buildEdgeStyle,
         ]
     )
 
@@ -1641,7 +1720,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 targetHandle: 'left',
                 type: 'smoothstep',
                 animated: true,
-                style: { stroke: '#2D9CDB', strokeWidth: 2 },
+                style: buildEdgeStyle(srcId),
             }))
 
         setNodes((prev) => [...prev, ...flashcardNodes])
@@ -1654,7 +1733,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
             setCenter(mid.position.x + cardWidth / 2, mid.position.y + 100, { zoom: getZoom(), duration: 700 })
         }
         showToast(`${cards.length} flashcards created!`)
-    }, [nodes, fileData, currentPage, setNodes, setEdges, persistToLocalStorage, setCenter, getZoom, showToast])
+    }, [nodes, fileData, currentPage, setNodes, setEdges, persistToLocalStorage, setCenter, getZoom, showToast, buildEdgeStyle])
 
     // Download Q&A as a PDF (text-based export — legacy)
     const handleDownloadPDF = useCallback(async () => {
@@ -1998,11 +2077,11 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                     }
                 }}
                 onConnect={onConnect}
-                onConnectStart={() => document.body.classList.add('rf-connecting')}
-                onConnectEnd={() => document.body.classList.remove('rf-connecting')}
+                onConnectStart={handleConnectStart}
+                onConnectEnd={handleConnectEnd}
                 connectionMode={ConnectionMode.Loose}
                 connectionLineType={ConnectionLineType.SmoothStep}
-                connectionLineStyle={{ stroke: '#1E3A5F', strokeWidth: 2 }}
+                connectionLineStyle={buildEdgeStyle(connectingFromNodeId)}
                 fitView={false}
                 zoomOnScroll={false}
                 panOnScroll={false}
