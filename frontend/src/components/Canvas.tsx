@@ -347,24 +347,36 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
     // Only rebuilds when a node's colour-relevant data changes (type, colour,
     // timer mode), NOT on every position change. This is the key optimisation
     // that prevents edge style recalculation on every drag tick.
-    const nodeColorFingerprint = useMemo(() => {
-        return nodes.map((n) => {
+    //
+    // We compute a fingerprint of colour-relevant fields only, then compare
+    // it to the previous value via a ref. The useMemo on `nodes` runs the
+    // lightweight map+join, but the expensive Map rebuild (used by edges)
+    // only happens when the fingerprint actually changes.
+    const nodeColorMapRef = useRef(new Map<string, string>())
+    const prevColorFpRef = useRef('')
+    // A version counter that bumps only when colour-relevant data changes.
+    // Used as a dependency for visibleEdges so edge styles update when e.g.
+    // a sticky note colour changes, without rebuilding on every drag tick.
+    const [colorVersion, setColorVersion] = useState(0)
+    useMemo(() => {
+        let fp = ''
+        for (let i = 0; i < nodes.length; i++) {
+            const n = nodes[i]
             let extra = ''
             if (n.type === 'stickyNoteNode') extra = (n.data as unknown as StickyNoteNodeData).color ?? ''
             else if (n.type === 'timerNode') extra = (n.data as unknown as TimerNodeData).mode ?? ''
             else if (n.type === 'textNode') extra = (n.data as unknown as TextNodeData).color ?? ''
-            return `${n.id}:${n.type}:${extra}`
-        }).join('|')
+            fp += `${n.id}:${n.type}:${extra}|`
+        }
+        // Only rebuild the map if colour-relevant data actually changed
+        if (fp !== prevColorFpRef.current) {
+            prevColorFpRef.current = fp
+            const map = new Map<string, string>()
+            nodes.forEach((n) => map.set(n.id, computeNodeColor(n)))
+            nodeColorMapRef.current = map
+            setColorVersion((v) => v + 1)
+        }
     }, [nodes])
-
-    const nodeColorMapRef = useRef(new Map<string, string>())
-    useMemo(() => {
-        const map = new Map<string, string>()
-        nodes.forEach((n) => map.set(n.id, computeNodeColor(n)))
-        nodeColorMapRef.current = map
-        return map
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [nodeColorFingerprint])
 
     // Edge colour: O(1) map lookup via ref — stable identity, never changes on drag
     const getNodeConnectorColor = useCallback((nodeId?: string | null): string => {
@@ -739,7 +751,10 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 ...e,
                 style: buildEdgeStyle(e.source, e.style),
             }))
-    }, [edges, visibleNodeIds, buildEdgeStyle])
+        // colorVersion triggers rebuild when node colours change (e.g. sticky note
+        // colour update) without rebuilding on every position change during drag.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [edges, visibleNodeIds, buildEdgeStyle, colorVersion])
 
     // ── Stable context value ─────────────────────────────────────────────────
     // All four members are produced by useCallback([], []) — either directly or
@@ -1819,16 +1834,9 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                     )
                 )
             } else {
-                // Valid drop — commit the final position to our Zustand store
-                setNodes((prev) =>
-                    prev.map((n) =>
-                        n.id === draggedNode.id
-                            ? { ...n, position: finalPos, measured: draggedNode.measured ?? n.measured }
-                            : n
-                    )
-                )
-
-                // Reroute edges for answer nodes
+                // Valid drop — position was already applied by onNodesChange during
+                // drag, so no need for a redundant setNodes. Just reroute edges
+                // for answer nodes so arrows take the shortest path.
                 if (draggedNode.type === 'answerNode') {
                     const freshNodes = useCanvasStore.getState().nodes.map((n) =>
                         n.id === draggedNode.id

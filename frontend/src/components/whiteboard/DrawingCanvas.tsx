@@ -202,20 +202,13 @@ export default function DrawingCanvas() {
             return parts.join('|')
         }
 
-        // ── Adaptive-rate viewport/position polling ────────────────────────
-        // Uses requestAnimationFrame for smooth redraws during active canvas
-        // pan/drag (native refresh rate, typically 60fps), then automatically
-        // drops to a slow idle check (~4fps) when nothing is changing.
-        // This avoids the CPU burn of a fixed high-rate interval while
-        // keeping stroke rendering buttery-smooth during interaction.
+        // Poll viewport & node positions at native refresh rate (rAF) so
+        // strokes track smoothly on high-refresh-rate monitors (e.g. 165 Hz).
         let lastVp = getViewport()
         let lastNodePos = getPositionKey()
-        let idleFrames = 0          // counts consecutive frames with no change
-        const IDLE_THRESHOLD = 10   // after 10 unchanged frames, switch to slow poll
         let rafId = 0
-        let idleTimerId: ReturnType<typeof setInterval> | null = null
 
-        const checkForChanges = () => {
+        const pollTick = () => {
             const nowVp = getViewport()
             const vpChanged = nowVp.x !== lastVp.x || nowVp.y !== lastVp.y || nowVp.zoom !== lastVp.zoom
             const nowNodePos = attachedNodeIds.size > 0 ? getPositionKey() : ''
@@ -224,58 +217,17 @@ export default function DrawingCanvas() {
             if (vpChanged || posChanged) {
                 lastVp = nowVp
                 lastNodePos = nowNodePos
-                idleFrames = 0
                 onViewportChange()
-                // Ensure we're in fast (rAF) mode
-                startFastPoll()
-            } else {
-                idleFrames++
-                if (idleFrames >= IDLE_THRESHOLD) {
-                    // Switch to slow idle polling to save CPU
-                    stopFastPoll()
-                    startIdlePoll()
-                }
             }
+
+            rafId = requestAnimationFrame(pollTick)
         }
 
-        const fastPollTick = () => {
-            checkForChanges()
-            rafId = requestAnimationFrame(fastPollTick)
-        }
-
-        const startFastPoll = () => {
-            // Stop idle timer if running
-            if (idleTimerId !== null) {
-                clearInterval(idleTimerId)
-                idleTimerId = null
-            }
-            // Start rAF loop if not already running
-            if (rafId === 0) {
-                rafId = requestAnimationFrame(fastPollTick)
-            }
-        }
-
-        const stopFastPoll = () => {
-            if (rafId !== 0) {
-                cancelAnimationFrame(rafId)
-                rafId = 0
-            }
-        }
-
-        const startIdlePoll = () => {
-            if (idleTimerId !== null) return // already running
-            idleTimerId = setInterval(() => {
-                checkForChanges()
-            }, 250) // ~4fps idle check — just enough to detect when panning starts
-        }
-
-        // Start in fast mode
-        startFastPoll()
+        rafId = requestAnimationFrame(pollTick)
 
         return () => {
             cancelAnimationFrame(animFrame)
-            stopFastPoll()
-            if (idleTimerId !== null) clearInterval(idleTimerId)
+            cancelAnimationFrame(rafId)
         }
     }, [getViewport, redrawAll, pageStrokes])
 
