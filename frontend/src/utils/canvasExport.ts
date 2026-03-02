@@ -383,6 +383,25 @@ export async function exportCurrentPage(options: ExportOptions): Promise<Blob | 
         await new Promise((r) => setTimeout(r, SETTLE_DELAY_MS))
         if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError')
 
+        // ── 1b. Zoom out an additional 12% beyond the minimum fit, keeping the
+        //        same centre — this creates a uniform padding-like ring around
+        //        all nodes in the captured image.
+        const EXTRA_ZOOM_OUT = 0.88 // 12% extra pull-back
+        const fv = getViewport()
+        const cx = containerEl.offsetWidth / 2
+        const cy = containerEl.offsetHeight / 2
+        setViewport(
+            {
+                zoom: fv.zoom * EXTRA_ZOOM_OUT,
+                x: cx - (cx - fv.x) * EXTRA_ZOOM_OUT,
+                y: cy - (cy - fv.y) * EXTRA_ZOOM_OUT,
+            },
+            { duration: 0 },
+        )
+        // Let the React Flow transform + DrawingCanvas fully settle before capture
+        await new Promise((r) => setTimeout(r, 500))
+        if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError')
+
         onProgress?.('Capturing canvas…')
 
         // ── 2. Capture (overlay hiding + flashcard fix handled internally) ─
