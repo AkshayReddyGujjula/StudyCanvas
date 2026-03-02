@@ -1017,6 +1017,8 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
             // Don't steal right-clicks on interactive node chrome (buttons, inputs, etc.)
             const target = e.target as Element
             if (target.closest('button, input, textarea, select, [role="button"]')) return
+            // Don't steal right-clicks inside the PDF scroll container — it has its own pan
+            if (target.closest('[data-pdf-scroll-container]')) return
             isDragging = true
             didDrag = false
             lastX = e.clientX

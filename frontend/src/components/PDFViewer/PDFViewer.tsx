@@ -72,6 +72,51 @@ export default function PDFViewer({
 
     const renderTaskRef = useRef<pdfjsLib.RenderTask | null>(null)
     const fitScaleRef = useRef<number>(1.0)
+
+    // ── Right-click drag-to-pan ──────────────────────────────────────────────
+    const isPanningRef   = useRef(false)
+    const panStartRef    = useRef({ mouseX: 0, mouseY: 0, scrollLeft: 0, scrollTop: 0 })
+    const hasPannedRef   = useRef(false)  // distinguish drag from plain right-click
+
+    const handleOuterMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+        if (e.button !== 2) return
+        const el = outerRef.current
+        if (!el) return
+        isPanningRef.current  = true
+        hasPannedRef.current  = false
+        panStartRef.current   = {
+            mouseX:     e.clientX,
+            mouseY:     e.clientY,
+            scrollLeft: el.scrollLeft,
+            scrollTop:  el.scrollTop,
+        }
+        el.style.cursor = 'grabbing'
+        e.preventDefault()
+        e.stopPropagation()  // prevent canvas right-click pan from firing simultaneously
+    }, [])
+
+    const handleOuterMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+        if (!isPanningRef.current) return
+        const el = outerRef.current
+        if (!el) return
+        const dx = e.clientX - panStartRef.current.mouseX
+        const dy = e.clientY - panStartRef.current.mouseY
+        if (Math.abs(dx) > 2 || Math.abs(dy) > 2) hasPannedRef.current = true
+        el.scrollLeft = panStartRef.current.scrollLeft - dx
+        el.scrollTop  = panStartRef.current.scrollTop  - dy
+    }, [])
+
+    const stopPanning = useCallback(() => {
+        if (!isPanningRef.current) return
+        isPanningRef.current = false
+        const el = outerRef.current
+        if (el) el.style.cursor = ''
+    }, [])
+
+    const handleOuterContextMenu = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+        // Suppress context menu when the right-button was used to pan
+        if (hasPannedRef.current) e.preventDefault()
+    }, [])
     // Fixed height of the scroll viewport at fit scale. Locked so zooming never
     // resizes the panel. viewerHeightProp overrides this when ContentNode controls height.
     const [, setFitViewerHeight] = useState<number>(600)
@@ -523,8 +568,13 @@ export default function PDFViewer({
               */}
             <div
                 ref={outerRef}
+                data-pdf-scroll-container="true"
                 className="overflow-auto bg-gray-100 nopan flex-1 min-h-0"
-                onMouseUp={handleMouseUp}
+                onMouseUp={(e) => { stopPanning(); handleMouseUp(e) }}
+                onMouseDown={handleOuterMouseDown}
+                onMouseMove={handleOuterMouseMove}
+                onMouseLeave={stopPanning}
+                onContextMenu={handleOuterContextMenu}
             >
                 {/* Inner centering wrapper — must be ≥ scroll-container width.
                   * Uses width:fit-content + margin:0 auto on the page card instead of
