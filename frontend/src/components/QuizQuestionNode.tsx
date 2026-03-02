@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, memo } from 'react'
 import { Handle, Position } from '@xyflow/react'
 import type { NodeProps } from '@xyflow/react'
 import ReactMarkdown from 'react-markdown'
@@ -7,6 +7,7 @@ import rehypeRaw from 'rehype-raw'
 import rehypeSanitize, { defaultSchema, type Options as SanitizeOptions } from 'rehype-sanitize'
 import type { QuizQuestionNodeData, ChatMessage, NodeStatus } from '../types'
 import { useCanvasStore } from '../store/canvasStore'
+import { useCanvasCallbacks } from './CanvasCallbackContext'
 import { streamQuery } from '../api/studyApi'
 import ModelIndicator from './ModelIndicator'
 
@@ -20,13 +21,14 @@ const customSchema: SanitizeOptions = {
 }
 
 type QuizQuestionNodeProps = NodeProps & {
-    data: QuizQuestionNodeData & {
-        onGradeAnswer: (nodeId: string, question: string, answer: string) => Promise<void>
-        pageMarkdown: string
-    }
+    data: QuizQuestionNodeData
 }
 
-export default function QuizQuestionNode({ id, data }: QuizQuestionNodeProps) {
+function QuizQuestionNode({ id, data }: QuizQuestionNodeProps) {
+    const { onGradeAnswer } = useCanvasCallbacks()
+    const pageMarkdowns = useCanvasStore((s) => s.pageMarkdowns)
+    // Read page markdown directly from store — avoids injecting it into node data
+    const pageMarkdown = pageMarkdowns[(data.pageIndex ?? 1) - 1] ?? ''
     const updateQuizNodeData = useCanvasStore((s) => s.updateQuizNodeData)
     const persistToLocalStorage = useCanvasStore((s) => s.persistToLocalStorage)
     const fileData = useCanvasStore((s) => s.fileData)
@@ -68,8 +70,8 @@ export default function QuizQuestionNode({ id, data }: QuizQuestionNodeProps) {
         if (!answer || data.isGrading) return
         // Save the draft answer on the node immediately
         updateQuizNodeData(id, { userAnswer: answer, isGrading: true })
-        await data.onGradeAnswer(id, data.question, answer)
-    }, [draftAnswer, data, id, updateQuizNodeData])
+        await onGradeAnswer(id, data.question, answer)
+    }, [draftAnswer, data.isGrading, data.question, id, updateQuizNodeData, onGradeAnswer])
 
     const handleFollowUpSubmit = useCallback(async (e: React.FormEvent) => {
         e.preventDefault()
@@ -98,7 +100,7 @@ export default function QuizQuestionNode({ id, data }: QuizQuestionNodeProps) {
                 {
                     question: q,
                     highlighted_text: data.question,
-                    raw_text: data.pageMarkdown || (fileData.raw_text ?? '').slice(0, 50000),
+                    raw_text: pageMarkdown || (fileData.raw_text ?? '').slice(0, 50000),
                     parent_response: data.feedback || null,
                     chat_history: fullHistory,
                     user_details: userDetails,
@@ -417,3 +419,5 @@ export default function QuizQuestionNode({ id, data }: QuizQuestionNodeProps) {
         </div>
     )
 }
+
+export default memo(QuizQuestionNode)

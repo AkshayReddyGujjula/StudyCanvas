@@ -529,9 +529,9 @@ export function findNonOverlappingPosition(
 
         for (const node of existingNodes) {
             const nLeft = node.position.x
-            const nWidth = typeof node.style?.width === 'number'
-                ? node.style.width as number
-                : (node.measured?.width ?? 360)
+            // Prefer measured (actual DOM size) over style.width which may be stale
+            const nWidth = node.measured?.width
+                ?? (typeof node.style?.width === 'number' ? node.style.width as number : 360)
             const nRight = nLeft + nWidth
             const nTop = node.position.y
             const nHeight = node.measured?.height ?? 300
@@ -584,10 +584,10 @@ export function isOverlapping(
     if (!targetNode) return false
 
     const aLeft = proposedPosition.x
-    const aWidth = typeof targetNode.style?.width === 'number'
-        ? targetNode.style.width
-        : (targetNode.measured?.width ?? 360)
-    const aRight = aLeft + (aWidth as number)
+    // Prefer measured (actual DOM size) over style.width which may be stale
+    const aWidth = targetNode.measured?.width
+        ?? (typeof targetNode.style?.width === 'number' ? targetNode.style.width as number : 360)
+    const aRight = aLeft + aWidth
 
     const aTop = proposedPosition.y
     const aHeight = targetNode.measured?.height ?? 200
@@ -600,10 +600,10 @@ export function isOverlapping(
         if (other.id === nodeId) continue
 
         const bLeft = other.position.x
-        const bWidth = typeof other.style?.width === 'number'
-            ? other.style.width
-            : (other.measured?.width ?? 360)
-        const bRight = bLeft + (bWidth as number)
+        // Prefer measured (actual DOM size) over style.width which may be stale
+        const bWidth = other.measured?.width
+            ?? (typeof other.style?.width === 'number' ? other.style.width as number : 360)
+        const bRight = bLeft + bWidth
 
         const bTop = other.position.y
         const bHeight = other.measured?.height ?? 200

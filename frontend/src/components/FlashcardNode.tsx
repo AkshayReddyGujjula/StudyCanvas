@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, memo } from 'react'
 import { Handle, Position } from '@xyflow/react'
 import type { NodeProps } from '@xyflow/react'
 import ReactMarkdown from 'react-markdown'
@@ -16,7 +16,7 @@ const STATUS_BORDER_CLASSES: Record<string, string> = {
 
 type FlashcardNodeProps = NodeProps & { data: FlashcardNodeData }
 
-export default function FlashcardNode({ id, data }: FlashcardNodeProps) {
+function FlashcardNode({ id, data }: FlashcardNodeProps) {
     const updateNodeData = useCanvasStore((s) => s.updateNodeData)
     const persistToLocalStorage = useCanvasStore((s) => s.persistToLocalStorage)
     const setNodes = useCanvasStore((s) => s.setNodes)
@@ -77,37 +77,11 @@ export default function FlashcardNode({ id, data }: FlashcardNodeProps) {
     }, [id, data.isEditing, data.isFlipped, data.question, data.answer, editDraft, updateNodeData, persistToLocalStorage])
 
     return (
-        <>
-            {/* Flip animation styles — injected once per node render */}
-            <style>{`
-                .flashcard-scene { perspective: 900px; height: 100%; }
-                .flashcard-inner {
-                    position: relative;
-                    width: 100%;
-                    height: 100%;
-                    transition: transform 0.55s cubic-bezier(0.4, 0, 0.2, 1);
-                    transform-style: preserve-3d;
-                }
-                .flashcard-inner.is-flipped { transform: rotateY(180deg); }
-                .flashcard-face {
-                    position: absolute;
-                    top: 0; left: 0; width: 100%; height: 100%;
-                    backface-visibility: hidden;
-                    -webkit-backface-visibility: hidden;
-                    overflow-y: auto;
-                    overflow-x: hidden;
-                    word-break: break-word;
-                    overflow-wrap: break-word;
-                    white-space: normal;
-                }
-                .flashcard-face-back { transform: rotateY(180deg); }
-            `}</style>
-
-            <div
-                data-nodeid={id}
-                className={`bg-white rounded-lg shadow-lg border-t-4 ${borderClass} border border-gray-200 relative flex flex-col`}
-                style={{ width: 380, overflow: 'hidden' }}
-            >
+        <div
+            data-nodeid={id}
+            className={`bg-white rounded-lg shadow-lg border-t-4 ${borderClass} border border-gray-200 relative flex flex-col`}
+            style={{ width: 380, overflow: 'hidden' }}
+        >
                 {/* ── Header ─────────────────────────────────────────────── */}
                 <div className="px-2 py-1.5 border-b border-gray-100 flex items-center justify-between rounded-t-md" style={headerBgStyle}>
                     {/* Left: label + status buttons */}
@@ -350,6 +324,7 @@ export default function FlashcardNode({ id, data }: FlashcardNodeProps) {
                 <Handle type="source" position={Position.Left} id="left" className="!w-3 !h-3 !bg-secondary-500 !border-2 !border-white hover:!scale-125 !transition-transform" />
                 <Handle type="source" position={Position.Right} id="right" className="!w-3 !h-3 !bg-secondary-500 !border-2 !border-white hover:!scale-125 !transition-transform" />
             </div>
-        </>
     )
 }
+
+export default memo(FlashcardNode)

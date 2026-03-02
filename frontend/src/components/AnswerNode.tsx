@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, memo } from 'react'
 import { Handle, Position } from '@xyflow/react'
 import type { NodeProps } from '@xyflow/react'
 import ReactMarkdown from 'react-markdown'
@@ -7,6 +7,7 @@ import rehypeRaw from 'rehype-raw'
 import rehypeSanitize, { defaultSchema, type Options as SanitizeOptions } from 'rehype-sanitize'
 import type { AnswerNodeData, ChatMessage } from '../types'
 import { useCanvasStore } from '../store/canvasStore'
+import { useCanvasCallbacks } from './CanvasCallbackContext'
 import { streamQuery } from '../api/studyApi'
 import ModelIndicator from './ModelIndicator'
 
@@ -28,7 +29,8 @@ const STATUS_BORDER_CLASSES: Record<string, string> = {
 
 type AnswerNodeProps = NodeProps & { data: AnswerNodeData }
 
-export default function AnswerNode({ id, data }: AnswerNodeProps) {
+function AnswerNode({ id, data }: AnswerNodeProps) {
+    const { onCollapseNode } = useCanvasCallbacks()
     const updateNodeData = useCanvasStore((s) => s.updateNodeData)
     const persistToLocalStorage = useCanvasStore((s) => s.persistToLocalStorage)
     const setNodes = useCanvasStore((s) => s.setNodes)
@@ -236,6 +238,25 @@ export default function AnswerNode({ id, data }: AnswerNodeProps) {
                         )}
                     </button>
 
+                    {/* Collapse / expand child subtree button */}
+                    <button
+                        title={data.isCollapsed ? 'Expand children' : 'Collapse children'}
+                        onClick={() => onCollapseNode(id)}
+                        className={`p-1 rounded-md transition-colors ${
+                            data.isCollapsed
+                                ? 'text-amber-500 bg-amber-50 hover:bg-amber-100'
+                                : 'text-gray-400 hover:text-amber-500 hover:bg-amber-50'
+                        }`}
+                    >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            {data.isCollapsed ? (
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            ) : (
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                            )}
+                        </svg>
+                    </button>
+
                     {/* Pin button — pin this node to appear on ALL pages */}
                     <button
                         title={data.isPinned ? "Unpin from all pages" : "Pin to all pages"}
@@ -354,3 +375,5 @@ export default function AnswerNode({ id, data }: AnswerNodeProps) {
         </div>
     )
 }
+
+export default memo(AnswerNode)

@@ -3,6 +3,7 @@ import type { Node, Edge } from '@xyflow/react'
 import type { HighlightEntry, DrawingStroke, StrokePoint, ToolSettings, WhiteboardTool, WhiteboardUndoAction } from '../types'
 import { DEFAULT_TOOL_SETTINGS, DEFAULT_SAVED_COLORS } from '../types'
 import { savePdfToLocal, loadPdfFromLocal, deletePdfFromLocal } from '../utils/pdfStorage'
+import { invalidatePdfProxyCache } from '../utils/pdfImageExtractor'
 
 /** Split markdown into per-page chunks using the '## Page N' headers injected by Gemini. */
 function splitMarkdownByPage(markdown: string): string[] {
@@ -241,8 +242,10 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
     },
 
     persistToLocalStorage: () => {
-        // Debounce: only persist once every 2 seconds to avoid main-thread freezes
-        // from repeated JSON.stringify of large state
+        // Adaptive debounce: longer delay for larger canvases to reduce JSON.stringify
+        // frequency when the node count grows. 2s for ≤15 nodes, 3s for 16-30, 4s for 31+.
+        const nodeCount = get().nodes.length
+        const delay = nodeCount > 30 ? 4000 : nodeCount > 15 ? 3000 : PERSIST_DEBOUNCE_MS
         if (_persistTimer) clearTimeout(_persistTimer)
         _persistTimer = setTimeout(() => {
             _persistTimer = null
@@ -275,7 +278,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
                     console.error('[canvasStore] localStorage write failed even with minimal state')
                 }
             }
-        }, PERSIST_DEBOUNCE_MS)
+        }, delay)
     },
 
     setUserDetails: (details) => set({ userDetails: details }),
@@ -315,7 +318,10 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
         })
     },
 
-    setPdfArrayBuffer: (buffer) => set({ pdfArrayBuffer: buffer }),
+    setPdfArrayBuffer: (buffer) => {
+        invalidatePdfProxyCache()
+        set({ pdfArrayBuffer: buffer })
+    },
 
     loadPdfFromStorage: async () => {
         const { fileData } = get()

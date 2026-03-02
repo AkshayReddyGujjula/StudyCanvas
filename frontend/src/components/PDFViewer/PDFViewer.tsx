@@ -129,7 +129,7 @@ export default function PDFViewer({
     const nativeDpr = typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1
     const minDpr = Math.max(Math.round(nativeDpr * 5) / 10, 1) // half native, min 1, rounded to 0.5
     const maxDpr = 6
-    const defaultDpr = initialRenderDpr ?? Math.max(nativeDpr, 4)
+    const defaultDpr = initialRenderDpr ?? Math.min(nativeDpr * 1.5, 3)
     const [renderDpr, setRenderDpr] = useState<number>(Math.min(Math.max(defaultDpr, minDpr), maxDpr))
     const onRenderDprChangeRef = useRef(onRenderDprChange)
     useEffect(() => { onRenderDprChangeRef.current = onRenderDprChange }, [onRenderDprChange])

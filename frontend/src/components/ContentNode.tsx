@@ -1,4 +1,4 @@
-import { useMemo, useCallback, useState, useEffect, useRef } from 'react'
+import { useMemo, useCallback, useState, useEffect, useRef, memo } from 'react'
 import { Handle, Position, useReactFlow, useUpdateNodeInternals } from '@xyflow/react'
 import type { NodeProps } from '@xyflow/react'
 import ReactMarkdown from 'react-markdown'
@@ -7,6 +7,7 @@ import rehypeRaw from 'rehype-raw'
 import rehypeSanitize, { defaultSchema, type Options as SanitizeOptions } from 'rehype-sanitize'
 import type { ContentNodeData } from '../types'
 import { useCanvasStore } from '../store/canvasStore'
+import { useCanvasCallbacks } from './CanvasCallbackContext'
 import PDFViewer from './PDFViewer'
 
 // Custom schema: extends defaultSchema to allow <mark> elements with className and data-highlight-id
@@ -77,11 +78,11 @@ function replaceOutsideCodeBlocks(
 
 type ContentNodeProps = NodeProps & { data: ExtendedContentNodeData }
 
-export default function ContentNode({ id, data }: ContentNodeProps) {
+function ContentNode({ id, data }: ContentNodeProps) {
     const { setCenter } = useReactFlow()
+    const { onTestMePage, onManualSelection } = useCanvasCallbacks()
     const updateNodeInternals = useUpdateNodeInternals()
     const highlights = useCanvasStore((s) => s.highlights)
-    const nodes = useCanvasStore((s) => s.nodes)
     const currentPage = useCanvasStore((s) => s.currentPage)
     const scrollPositions = useCanvasStore((s) => s.scrollPositions)
     const updateScrollPosition = useCanvasStore((s) => s.updateScrollPosition)
@@ -126,7 +127,8 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
     // When the user attempts to resize a node that has drawing annotations,
     // show a warning popup. Store the pending resize event params so we can
     // proceed after confirmation.
-    const drawingStrokes = useCanvasStore((s) => s.drawingStrokes)
+    // Only re-render when strokes go from 0→N or N→0 (not on every stroke change)
+    const hasDrawingStrokes = useCanvasStore((s) => s.drawingStrokes.length > 0)
     const [showResizeWarning, setShowResizeWarning] = useState(false)
     const pendingResizeRef = useRef<{ startX: number; startY: number; mode: 'w' | 'h' | 'wh'; cursor?: string; startW: number; startH: number; minW: number } | null>(null)
     // Track whether the user already acknowledged the warning for this resize session
@@ -192,8 +194,8 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
 
     // Handle text selection from PDF viewer - triggers Ask Gemini popup
     const handlePdfTextSelection = useCallback((text: string, rect?: DOMRect, mousePos?: { x: number; y: number }, autoAsk?: boolean) => {
-        if (data.onManualSelection && text && rect && mousePos) {
-            data.onManualSelection({
+        if (text && rect && mousePos) {
+            onManualSelection({
                 selectedText: text,
                 sourceNodeId: id,
                 rect,
@@ -201,7 +203,7 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
                 autoAsk,
             })
         }
-    }, [data.onManualSelection, id])
+    }, [onManualSelection, id])
 
     // Handle PDF load - set natural dims, auto-size node to fit PDF perfectly
     const handlePdfLoad = useCallback((dimensions: { width: number; height: number }) => {
@@ -334,7 +336,7 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
         const startH = userNodeHeight ?? currentRenderedH
 
         // Check if there are any drawing strokes attached to this node
-        const hasAttachedStrokes = drawingStrokes.some((s) => s.nodeId === id)
+        const hasAttachedStrokes = hasDrawingStrokes && useCanvasStore.getState().drawingStrokes.some((s) => s.nodeId === id)
 
         if (hasAttachedStrokes && !resizeWarningAckedRef.current) {
             // Store pending resize params and show warning
@@ -345,7 +347,7 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
 
         // No annotations or already acknowledged — proceed directly
         executeResize(startX, startY, startW, startH, minW, mode, cursor)
-    }, [nodeWidth, userNodeHeight, drawingStrokes, id, executeResize])
+    }, [nodeWidth, userNodeHeight, hasDrawingStrokes, id, executeResize])
 
     // ── Warning popup handlers ──────────────────────────────────────────────
     const handleResizeWarningConfirm = useCallback(() => {
@@ -375,7 +377,9 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
             const highlight = highlights.find((h) => h.id === highlightId)
             if (!highlight) return
 
-            const targetNode = nodes.find((n) => n.id === highlight.nodeId)
+            // Lazy read: avoids subscribing to the full nodes array.
+            // This only runs on user click, so reading from getState() is fine.
+            const targetNode = useCanvasStore.getState().nodes.find((n) => n.id === highlight.nodeId)
             if (!targetNode) return
 
             setCenter(
@@ -384,14 +388,14 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
                 { duration: 600 }
             )
         },
-        [highlights, nodes, setCenter]
+        [highlights, setCenter]
     )
 
     // Calculate the effective height for the node
     // In PDF mode: height auto-tracks the PDF page's fit-to-width size
     // unless the user has manually resized (userNodeHeight).
     // In text mode: use auto height (content determines height)
-    const hasFooter = !!data.onTestMePage
+    const hasFooter = true
     const headerHeight = 44
     const toolbarHeight = 40
     const footerHeight = hasFooter ? 36 : 0
@@ -556,23 +560,21 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
             )}
 
             {/* "Test me on this page" pill button — absolutely pinned to bottom so it is never clipped */}
-            {data.onTestMePage && (
-                <div
-                    className="nodrag flex-shrink-0 z-10 border-t border-gray-100 flex justify-center items-center bg-gray-50 rounded-b-lg"
-                    style={{ height: footerHeight }}
+            <div
+                className="nodrag flex-shrink-0 z-10 border-t border-gray-100 flex justify-center items-center bg-gray-50 rounded-b-lg"
+                style={{ height: footerHeight }}
+            >
+                <button
+                    data-tutorial="test-me-btn"
+                    onClick={(e) => { e.stopPropagation(); onTestMePage() }}
+                    className="inline-flex items-center gap-1 px-3 py-1 bg-violet-600 hover:bg-violet-700 active:bg-violet-800 text-white text-[11px] font-semibold rounded-full shadow-sm transition-colors select-none"
                 >
-                    <button
-                        data-tutorial="test-me-btn"
-                        onClick={(e) => { e.stopPropagation(); data.onTestMePage!() }}
-                        className="inline-flex items-center gap-1 px-3 py-1 bg-violet-600 hover:bg-violet-700 active:bg-violet-800 text-white text-[11px] font-semibold rounded-full shadow-sm transition-colors select-none"
-                    >
-                        <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                        </svg>
-                        Test me on this page
-                    </button>
-                </div>
-            )}
+                    <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                    </svg>
+                    Test me on this page
+                </button>
+            </div>
 
             {/* 10 source handles per side, evenly spaced */}
             {Array.from({ length: 10 }, (_, i) => (
@@ -750,3 +752,5 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
         </div>
     )
 }
+
+export default memo(ContentNode)

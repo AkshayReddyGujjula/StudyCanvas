@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef, useEffect, memo } from 'react'
 import { Handle, Position } from '@xyflow/react'
 import type { NodeProps } from '@xyflow/react'
 import type { TranscriptionNodeData } from '../types'
@@ -25,7 +25,7 @@ function computeFontSize(width: number): number {
     return Math.round(12 + t * 5)
 }
 
-export default function TranscriptionNode({ id, data }: TranscriptionNodeProps) {
+function TranscriptionNode({ id, data }: TranscriptionNodeProps) {
     const setNodes = useCanvasStore((s) => s.setNodes)
     const setEdges = useCanvasStore((s) => s.setEdges)
     const updateNodeData = useCanvasStore((s) => s.updateNodeData)
@@ -349,3 +349,5 @@ export default function TranscriptionNode({ id, data }: TranscriptionNodeProps) 
         </div>
     )
 }
+
+export default memo(TranscriptionNode)

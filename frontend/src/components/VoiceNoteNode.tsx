@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef, memo } from 'react'
 import { Handle, Position } from '@xyflow/react'
 import type { NodeProps } from '@xyflow/react'
 import type { VoiceNoteNodeData } from '../types'
@@ -21,7 +21,7 @@ const COLORS = {
 // Number of waveform bars — thin iPhone-style columns
 const NUM_BARS = 50
 
-export default function VoiceNoteNode({ id, data }: VoiceNoteNodeProps) {
+function VoiceNoteNode({ id, data }: VoiceNoteNodeProps) {
     const setNodes = useCanvasStore((s) => s.setNodes)
     const setEdges = useCanvasStore((s) => s.setEdges)
     const updateNodeData = useCanvasStore((s) => s.updateNodeData)
@@ -801,3 +801,5 @@ export default function VoiceNoteNode({ id, data }: VoiceNoteNodeProps) {
         </div>
     )
 }
+
+export default memo(VoiceNoteNode)

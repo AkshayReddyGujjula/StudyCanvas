@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef, memo } from 'react'
 import { Handle, Position } from '@xyflow/react'
 import type { NodeProps } from '@xyflow/react'
 import type { TimerNodeData, TimerMode } from '../types'
@@ -19,7 +19,7 @@ const MODE_COLORS: Record<TimerMode, { bg: string; border: string; text: string;
     longBreak: { bg: '#EFF6FF', border: '#93C5FD', text: '#1E40AF', button: '#3B82F6' },
 }
 
-export default function TimerNode({ id, data }: TimerNodeProps) {
+function TimerNode({ id, data }: TimerNodeProps) {
     const setNodes = useCanvasStore((s) => s.setNodes)
     const setEdges = useCanvasStore((s) => s.setEdges)
     const updateNodeData = useCanvasStore((s) => s.updateNodeData)
@@ -391,3 +391,5 @@ export default function TimerNode({ id, data }: TimerNodeProps) {
         </div>
     )
 }
+
+export default memo(TimerNode)

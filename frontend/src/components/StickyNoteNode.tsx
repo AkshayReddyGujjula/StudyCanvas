@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, memo } from 'react'
 import { Handle, Position } from '@xyflow/react'
 import type { NodeProps } from '@xyflow/react'
 import type { StickyNoteNodeData } from '../types'
@@ -17,7 +17,7 @@ const COLOR_BORDERS: Record<string, string> = {
     '#FFE0B2': '#FFB74D',
 }
 
-export default function StickyNoteNode({ id, data }: StickyNoteNodeProps) {
+function StickyNoteNode({ id, data }: StickyNoteNodeProps) {
     const setNodes = useCanvasStore((s) => s.setNodes)
     const setEdges = useCanvasStore((s) => s.setEdges)
     const updateNodeData = useCanvasStore((s) => s.updateNodeData)
@@ -192,3 +192,5 @@ export default function StickyNoteNode({ id, data }: StickyNoteNodeProps) {
         </div>
     )
 }
+
+export default memo(StickyNoteNode)

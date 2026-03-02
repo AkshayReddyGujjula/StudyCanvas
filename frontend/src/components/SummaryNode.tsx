@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, memo } from 'react'
 import { Handle, Position } from '@xyflow/react'
 import type { NodeProps } from '@xyflow/react'
 import ReactMarkdown from 'react-markdown'
@@ -29,7 +29,7 @@ const STATUS_BORDER_CLASSES: Record<string, string> = {
 
 type SummaryNodeProps = NodeProps & { data: SummaryNodeData }
 
-export default function SummaryNode({ id, data }: SummaryNodeProps) {
+function SummaryNode({ id, data }: SummaryNodeProps) {
     const updateNodeData = useCanvasStore((s) => s.updateNodeData)
     const persistToLocalStorage = useCanvasStore((s) => s.persistToLocalStorage)
     const setNodes = useCanvasStore((s) => s.setNodes)
@@ -268,3 +268,5 @@ export default function SummaryNode({ id, data }: SummaryNodeProps) {
         </div>
     )
 }
+
+export default memo(SummaryNode)

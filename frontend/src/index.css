@@ -449,3 +449,44 @@ body.rf-connecting .react-flow__node .nodrag * {
     transform: translateY(100vh) rotate(720deg);
   }
 }
+
+/* ── FlashcardNode 3-D flip animation ─────────────────────────────────────────
+   Moved here from FlashcardNode.tsx to avoid per-render <style> injection.
+   These classes are static — they were the same on every render anyway.
+*/
+.flashcard-scene { perspective: 900px; height: 100%; }
+.flashcard-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transition: transform 0.55s cubic-bezier(0.4, 0, 0.2, 1);
+  transform-style: preserve-3d;
+}
+.flashcard-inner.is-flipped { transform: rotateY(180deg); }
+.flashcard-face {
+  position: absolute;
+  top: 0; left: 0; width: 100%; height: 100%;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  white-space: normal;
+}
+.flashcard-face-back { transform: rotateY(180deg); }
+
+/* ── Custom Prompt nodes always paint above all other canvas nodes ──────────────
+   React Flow appends .react-flow__node-{type} to each node wrapper.
+   Setting a high z-index here covers both freshly spawned and restored nodes
+   without requiring any change to the node data shape or component.
+   The !important beats React Flow's drag-elevation (which uses inline style).
+*/
+.react-flow__node-customPromptNode {
+  z-index: 1000 !important;
+}
+/* While a custom prompt node is selected/being dragged, keep it on top */
+.react-flow__node-customPromptNode.selected,
+.react-flow__node-customPromptNode.dragging {
+  z-index: 1001 !important;
+}

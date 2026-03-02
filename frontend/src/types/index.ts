@@ -28,6 +28,8 @@ export interface AnswerNodeData {
     parentResponseText?: string
     isMinimized?: boolean
     isExpanding?: boolean
+    /** When true, all descendant nodes are hidden (collapsed subtree) */
+    isCollapsed?: boolean
     chatHistory?: ChatMessage[]
     /** Which PDF page this node belongs to (1-based) */
     pageIndex?: number

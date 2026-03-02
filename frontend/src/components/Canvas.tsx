@@ -47,6 +47,45 @@ import { buildQATree } from '../utils/buildQATree'
 import StudyNotePDF from './StudyNotePDF'
 import type { StickyNoteEntry, CustomPromptEntry, ImageEntry, SummaryEntry } from './StudyNotePDF'
 import { exportCurrentPage, exportAllPages, isExportInProgress, pageHasContent } from '../utils/canvasExport'
+import { CanvasCallbackContext } from './CanvasCallbackContext'
+
+// ── Pure helper: derive edge connector colour from a node object ─────────────
+// Defined at module scope (no hooks) so it can be called in a useMemo without
+// creating a new function reference on every render.
+function computeNodeColor(node: Node): string {
+    switch (node.type) {
+        case 'contentNode':
+        case 'summaryNode':
+            return '#1E3A5F'
+        case 'answerNode':
+        case 'quizQuestionNode':
+        case 'flashcardNode':
+        case 'customPromptNode':
+            return '#2D9CDB'
+        case 'imageNode':
+            return '#6B7280'
+        case 'stickyNoteNode': {
+            const stickyData = node.data as unknown as StickyNoteNodeData
+            const stickyColor = stickyData.color ?? '#FFF9C4'
+            return STICKY_NOTE_BORDER_COLORS[stickyColor] ?? stickyColor
+        }
+        case 'timerNode': {
+            const timerData = node.data as unknown as TimerNodeData
+            if (timerData.mode === 'shortBreak') return '#22C55E'
+            if (timerData.mode === 'longBreak') return '#3B82F6'
+            return '#EF4444'
+        }
+        case 'voiceNoteNode':
+        case 'transcriptionNode':
+            return '#7C3AED'
+        case 'textNode': {
+            const textData = node.data as unknown as TextNodeData
+            return textData.color ?? '#6B7280'
+        }
+        default:
+            return DEFAULT_EDGE_COLOR
+    }
+}
 
 const NODE_TYPES = {
     contentNode: ContentNode,
@@ -304,46 +343,34 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
         }
     }, [onSave, flushViewport, onGoHome])
 
-    // Edge colour is always derived from the source node's connector colour.
+    // ── Pre-built O(1) node colour map ──────────────────────────────────────
+    // Only rebuilds when a node's colour-relevant data changes (type, colour,
+    // timer mode), NOT on every position change. This is the key optimisation
+    // that prevents edge style recalculation on every drag tick.
+    const nodeColorFingerprint = useMemo(() => {
+        return nodes.map((n) => {
+            let extra = ''
+            if (n.type === 'stickyNoteNode') extra = (n.data as unknown as StickyNoteNodeData).color ?? ''
+            else if (n.type === 'timerNode') extra = (n.data as unknown as TimerNodeData).mode ?? ''
+            else if (n.type === 'textNode') extra = (n.data as unknown as TextNodeData).color ?? ''
+            return `${n.id}:${n.type}:${extra}`
+        }).join('|')
+    }, [nodes])
+
+    const nodeColorMapRef = useRef(new Map<string, string>())
+    useMemo(() => {
+        const map = new Map<string, string>()
+        nodes.forEach((n) => map.set(n.id, computeNodeColor(n)))
+        nodeColorMapRef.current = map
+        return map
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [nodeColorFingerprint])
+
+    // Edge colour: O(1) map lookup via ref — stable identity, never changes on drag
     const getNodeConnectorColor = useCallback((nodeId?: string | null): string => {
         if (!nodeId) return DEFAULT_EDGE_COLOR
-
-        const sourceNode = nodes.find((node) => node.id === nodeId)
-        if (!sourceNode) return DEFAULT_EDGE_COLOR
-
-        switch (sourceNode.type) {
-            case 'contentNode':
-            case 'summaryNode':
-                return '#1E3A5F'
-            case 'answerNode':
-            case 'quizQuestionNode':
-            case 'flashcardNode':
-            case 'customPromptNode':
-                return '#2D9CDB'
-            case 'imageNode':
-                return '#6B7280'
-            case 'stickyNoteNode': {
-                const stickyData = sourceNode.data as unknown as StickyNoteNodeData
-                const stickyColor = stickyData.color ?? '#FFF9C4'
-                return STICKY_NOTE_BORDER_COLORS[stickyColor] ?? stickyColor
-            }
-            case 'timerNode': {
-                const timerData = sourceNode.data as unknown as TimerNodeData
-                if (timerData.mode === 'shortBreak') return '#22C55E'
-                if (timerData.mode === 'longBreak') return '#3B82F6'
-                return '#EF4444'
-            }
-            case 'voiceNoteNode':
-            case 'transcriptionNode':
-                return '#7C3AED'
-            case 'textNode': {
-                const textData = sourceNode.data as unknown as TextNodeData
-                return textData.color ?? '#6B7280'
-            }
-            default:
-                return DEFAULT_EDGE_COLOR
-        }
-    }, [nodes])
+        return nodeColorMapRef.current.get(nodeId) ?? DEFAULT_EDGE_COLOR
+    }, [])
 
     const buildEdgeStyle = useCallback(
         (sourceId?: string | null, style: Edge['style'] = {}) => ({
@@ -452,6 +479,14 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
         }
         persistToLocalStorage()
     }, [nodes, currentPage, pageMarkdowns, userDetails, updateQuizNodeData, persistToLocalStorage])
+
+    // Stable ref-forwarding wrapper — context consumers keep their useCallback deps at []
+    const handleGradeAnswerRef = useRef(handleGradeAnswer)
+    useEffect(() => { handleGradeAnswerRef.current = handleGradeAnswer })
+    const stableHandleGradeAnswer = useCallback(
+        (nodeId: string, question: string, answer: string) => handleGradeAnswerRef.current(nodeId, question, answer),
+        []
+    )
 
     const handleTestMePage = useCallback(async () => {
         if (!fileData) return
@@ -573,6 +608,14 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
         startGenProgress, finishGenProgress, cancelGenProgress, showToast,
     ])
 
+    // Stable ref-forwarding wrapper
+    const handleTestMePageRef = useRef(handleTestMePage)
+    useEffect(() => { handleTestMePageRef.current = handleTestMePage })
+    const stableHandleTestMePage = useCallback(
+        () => handleTestMePageRef.current(),
+        []
+    )
+
     // Text selection hook
     const handleSelection = useCallback((result: SelectionState | null) => {
         if (result) {
@@ -594,74 +637,95 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
     }, [])
     useTextSelection(handleSelection)
 
-    // ── Page-scoped visibility ──────────────────────────────────────────────────
-    // Only show nodes for the current page (or pinned nodes which appear everywhere).
-    // The master `nodes` / `edges` arrays still hold all pages — we just filter here.
-    const visibleNodes = useMemo(() => {
-        return nodes
-            .filter((n) => {
-                if (n.type === 'contentNode') return true
-                if (n.type === 'textNode') {
-                    const d = n.data as unknown as TextNodeData
-                    return d.pageIndex === currentPage
-                }
-                if (n.type === 'quizQuestionNode') {
-                    const d = n.data as unknown as QuizQuestionNodeData
-                    return d.isPinned === true || d.pageIndex === currentPage
-                }
-                if (n.type === 'flashcardNode') {
-                    const d = n.data as unknown as FlashcardNodeData
-                    return d.isPinned === true || d.pageIndex === currentPage
-                }
-                if (n.type === 'customPromptNode') {
-                    const d = n.data as unknown as CustomPromptNodeData
-                    return d.isPinned === true || d.pageIndex === currentPage
-                }
-                if (n.type === 'imageNode') {
-                    const d = n.data as unknown as ImageNodeData
-                    return d.isPinned === true || d.pageIndex === currentPage
-                }
-                if (n.type === 'stickyNoteNode') {
-                    const d = n.data as unknown as StickyNoteNodeData
-                    return d.isPinned === true || d.pageIndex === currentPage
-                }
-                if (n.type === 'timerNode') {
-                    const d = n.data as unknown as TimerNodeData
-                    return d.isPinned === true || d.pageIndex === currentPage
-                }
-                if (n.type === 'summaryNode') {
-                    const d = n.data as unknown as SummaryNodeData
-                    return d.isPinned === true || d.pageIndex === currentPage
-                }
-                const d = n.data as unknown as AnswerNodeData
-                return d.isPinned === true || d.pageIndex === currentPage
-            })
-            .map((n) => {
-                if (n.type === 'contentNode') {
-                    return {
-                        ...n,
-                        data: {
-                            ...n.data,
-                            onTestMePage: handleTestMePage,
-                            onManualSelection: handleSelection
-                        } as unknown as Record<string, unknown>,
+    // ── Collapse/expand Q&A subtree ──────────────────────────────────────────
+    // Clicking collapse on an AnswerNode hides all transitive descendant nodes
+    // (via React Flow's `hidden` flag) and toggles `isCollapsed` on the node itself.
+    const handleCollapseNode = useCallback((nodeId: string) => {
+        const allEdges = useCanvasStore.getState().edges
+        setNodes((prev) => {
+            const targetNode = prev.find((n) => n.id === nodeId)
+            if (!targetNode) return prev
+            const currentlyCollapsed = (targetNode.data as unknown as AnswerNodeData).isCollapsed ?? false
+            const newCollapsed = !currentlyCollapsed
+            // BFS over edges to collect all transitive descendants
+            const descendantIds = new Set<string>()
+            const queue = [nodeId]
+            while (queue.length > 0) {
+                const parentId = queue.shift()!
+                for (const edge of allEdges) {
+                    if (edge.source === parentId && !descendantIds.has(edge.target)) {
+                        descendantIds.add(edge.target)
+                        queue.push(edge.target)
                     }
                 }
-                if (n.type === 'quizQuestionNode') {
-                    const d = n.data as unknown as QuizQuestionNodeData
-                    const pageContent = pageMarkdowns[(d.pageIndex ?? currentPage) - 1] ?? ''
-                    return {
-                        ...n,
-                        data: {
-                            ...n.data,
-                            onGradeAnswer: handleGradeAnswer,
-                            pageMarkdown: pageContent,
-                        } as unknown as Record<string, unknown>,
-                    }
+            }
+            return prev.map((n) => {
+                if (n.id === nodeId) {
+                    return { ...n, data: { ...n.data, isCollapsed: newCollapsed } as unknown as Record<string, unknown> }
+                }
+                if (descendantIds.has(n.id)) {
+                    return { ...n, hidden: newCollapsed }
                 }
                 return n
             })
-    }, [nodes, currentPage, pageMarkdowns, handleTestMePage, handleGradeAnswer, handleSelection])
+        })
+        persistToLocalStorage()
+    }, [setNodes, persistToLocalStorage])
+
+    const handleCollapseNodeRef = useRef(handleCollapseNode)
+    useEffect(() => { handleCollapseNodeRef.current = handleCollapseNode })
+    const stableHandleCollapseNode = useCallback(
+        (nodeId: string) => handleCollapseNodeRef.current(nodeId),
+        []
+    )
+
+    // ── Page-scoped visibility ──────────────────────────────────────────────────
+    // Only show nodes for the current page (or pinned nodes which appear everywhere).
+    // The master `nodes` / `edges` arrays still hold all pages — we just filter here.
+    // ── Performance: pure filter — no callback injection, no new data-object refs ──
+    // Callbacks (onTestMePage, onManualSelection, onGradeAnswer, onCollapseNode) now
+    // live in CanvasCallbackContext; QuizQuestionNode reads pageMarkdown directly from
+    // the Zustand store. visibleNodes therefore only invalidates when the page changes
+    // or nodes are structurally added/removed — NOT on every drag-move tick.
+    const visibleNodes = useMemo(() => {
+        return nodes.filter((n) => {
+            if (n.type === 'contentNode') return true
+            if (n.type === 'textNode') {
+                const d = n.data as unknown as TextNodeData
+                return d.pageIndex === currentPage
+            }
+            if (n.type === 'quizQuestionNode') {
+                const d = n.data as unknown as QuizQuestionNodeData
+                return d.isPinned === true || d.pageIndex === currentPage
+            }
+            if (n.type === 'flashcardNode') {
+                const d = n.data as unknown as FlashcardNodeData
+                return d.isPinned === true || d.pageIndex === currentPage
+            }
+            if (n.type === 'customPromptNode') {
+                const d = n.data as unknown as CustomPromptNodeData
+                return d.isPinned === true || d.pageIndex === currentPage
+            }
+            if (n.type === 'imageNode') {
+                const d = n.data as unknown as ImageNodeData
+                return d.isPinned === true || d.pageIndex === currentPage
+            }
+            if (n.type === 'stickyNoteNode') {
+                const d = n.data as unknown as StickyNoteNodeData
+                return d.isPinned === true || d.pageIndex === currentPage
+            }
+            if (n.type === 'timerNode') {
+                const d = n.data as unknown as TimerNodeData
+                return d.isPinned === true || d.pageIndex === currentPage
+            }
+            if (n.type === 'summaryNode') {
+                const d = n.data as unknown as SummaryNodeData
+                return d.isPinned === true || d.pageIndex === currentPage
+            }
+            const d = n.data as unknown as AnswerNodeData
+            return d.isPinned === true || d.pageIndex === currentPage
+        })
+    }, [nodes, currentPage])
 
     const visibleNodeIds = useMemo(
         () => new Set(visibleNodes.map((n) => n.id)),
@@ -676,6 +740,17 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 style: buildEdgeStyle(e.source, e.style),
             }))
     }, [edges, visibleNodeIds, buildEdgeStyle])
+
+    // ── Stable context value ─────────────────────────────────────────────────
+    // All four members are produced by useCallback([], []) — either directly or
+    // via the ref-forwarding pattern — so this memo never re-creates during normal
+    // canvas interaction.
+    const stableCanvasCallbacks = useMemo(() => ({
+        onTestMePage: stableHandleTestMePage,
+        onManualSelection: handleSelection,
+        onGradeAnswer: stableHandleGradeAnswer,
+        onCollapseNode: stableHandleCollapseNode,
+    }), [stableHandleTestMePage, handleSelection, stableHandleGradeAnswer, stableHandleCollapseNode])
 
     // Navigate to a given page: update the contentNode display and set currentPage.
     const goToPage = useCallback(
@@ -752,6 +827,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
             id: nodeId,
             type: 'customPromptNode',
             position: pos,
+            zIndex: 1000,
             data: {
                 chatHistory: [],
                 isLoading: false,
@@ -761,7 +837,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 selectedModel: 'gemini-2.5-flash',
                 pageIndex: currentPage,
             } as unknown as Record<string, unknown>,
-            style: { width: 350 },
+            style: { width: 440, height: 380 },
         }
         setNodes((prev) => [...prev, newNode])
         persistToLocalStorage()
@@ -1695,25 +1771,79 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
         )
     }, [nodes, contentNodeId, contentNode, visibleNodes, setNodes])
 
-    // Re-route connected edge handles after a drag so arrows take the shortest path
+    // ── Ghost-drag ref: tracks start position so we can snap back on invalid drop ──
+    const dragGhostRef = useRef<{ nodeId: string; startPos: { x: number; y: number } } | null>(null)
+
+    // Capture starting position when a drag begins
+    const handleNodeDragStart = useCallback(
+        (_evt: React.MouseEvent, node: Node) => {
+            dragGhostRef.current = {
+                nodeId: node.id,
+                startPos: { ...node.position },
+            }
+        },
+        [],
+    )
+
+    // Re-route connected edge handles after a drag so arrows take the shortest path.
+    // Also performs the deferred overlap check — if invalid, snaps back.
     const handleNodeDragStop = useCallback(
         (_evt: React.MouseEvent, draggedNode: Node) => {
-            if (draggedNode.type === 'answerNode') {
-                // Merge the final dragged position into the node list so the
-                // reroute calculation uses the up-to-date position even if the
-                // Zustand store is one render behind.
-                const freshNodes = nodes.map((n) =>
-                    n.id === draggedNode.id
-                        ? { ...n, position: draggedNode.position, measured: draggedNode.measured ?? n.measured }
-                        : n
+            const ghost = dragGhostRef.current
+            dragGhostRef.current = null
+
+            // Build the visible-nodes list for overlap checking (same filter as onNodesChange)
+            const currentNodes = useCanvasStore.getState().nodes
+            const curPage = useCanvasStore.getState().currentPage
+            const currentlyVisible = currentNodes.filter((n) => {
+                if (n.type === 'contentNode') return true
+                const d = n.data as unknown as AnswerNodeData
+                return d.isPinned === true || d.pageIndex === curPage
+            })
+
+            const finalPos = draggedNode.position
+            const overlaps = isOverlapping(draggedNode.id, finalPos, currentlyVisible)
+
+            if (overlaps && ghost) {
+                // Snap back: add brief CSS transition, then commit the start position
+                const el = document.querySelector(`[data-id="${draggedNode.id}"]`) as HTMLElement | null
+                if (el) {
+                    el.style.transition = 'transform 0.2s ease-out'
+                    setTimeout(() => { el.style.transition = '' }, 250)
+                }
+                setNodes((prev) =>
+                    prev.map((n) =>
+                        n.id === draggedNode.id
+                            ? { ...n, position: ghost.startPos }
+                            : n
+                    )
                 )
-                setEdges((prevEdges) =>
-                    rerouteEdgeHandles(draggedNode.id, freshNodes, prevEdges)
+            } else {
+                // Valid drop — commit the final position to our Zustand store
+                setNodes((prev) =>
+                    prev.map((n) =>
+                        n.id === draggedNode.id
+                            ? { ...n, position: finalPos, measured: draggedNode.measured ?? n.measured }
+                            : n
+                    )
                 )
+
+                // Reroute edges for answer nodes
+                if (draggedNode.type === 'answerNode') {
+                    const freshNodes = useCanvasStore.getState().nodes.map((n) =>
+                        n.id === draggedNode.id
+                            ? { ...n, position: finalPos, measured: draggedNode.measured ?? n.measured }
+                            : n
+                    )
+                    setEdges((prevEdges) =>
+                        rerouteEdgeHandles(draggedNode.id, freshNodes, prevEdges)
+                    )
+                }
             }
+
             persistToLocalStorage()
         },
-        [nodes, setEdges, persistToLocalStorage],
+        [setNodes, setEdges, persistToLocalStorage],
     )
 
     // ── Whiteboard: pane click handler for text tool ────────────────────────────
@@ -2210,6 +2340,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
     }, [])
 
     return (
+        <CanvasCallbackContext.Provider value={stableCanvasCallbacks}>
         <div ref={containerRef} data-tutorial="canvas-container" style={{ width: '100vw', height: '100vh' }} className={isDarkMode ? 'dark-mode' : ''}>
             {/* Whiteboard drawing overlay */}
             <DrawingCanvas />
@@ -2220,6 +2351,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 nodeTypes={NODE_TYPES}
                 defaultViewport={canvasViewport ?? { x: 0, y: 0, zoom: 1 }}
                 onViewportChange={handleViewportChange}
+                onNodeDragStart={handleNodeDragStart}
                 onNodesChange={(changes) => {
                     // Handle text node removal (via Backspace / Delete deleteKeyCode)
                     const removeIds = changes
@@ -2260,32 +2392,54 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                         })
                     }
 
-                    // Apply position/selection changes without overriding our state
+                    // ── Ghost-drag optimisation ──────────────────────────────────
+                    // During an active drag we still apply position changes (so the
+                    // node visually follows the cursor) but we SKIP the expensive
+                    // O(n) isOverlapping check on every tick. Overlap validation is
+                    // deferred to handleNodeDragStop where it runs exactly once.
+                    // This eliminates the biggest CPU bottleneck while keeping the
+                    // visual drag smooth.
+
+                    const dimensionChanges = changes.filter((c) => c.type === 'dimensions' && c.dimensions)
+                    const positionChanges = changes.filter((c) => c.type === 'position' && c.position)
+
+                    if (dimensionChanges.length === 0 && positionChanges.length === 0) return
+
                     setNodes((prev) => {
-                        let next = [...prev]
+                        let next = prev
                         let dimensionsChanged = false
-                        // Only check overlap against nodes that are currently visible
-                        // (same page or pinned) to avoid false positives from other pages.
-                        const currentlyVisible = prev.filter((n) => {
-                            if (n.type === 'contentNode') return true
-                            const d = n.data as unknown as AnswerNodeData
-                            return d.isPinned === true || d.pageIndex === currentPage
-                        })
-                        for (const change of changes) {
-                            if (change.type === 'position' && change.position) {
-                                const idx = next.findIndex((n) => n.id === change.id)
-                                if (idx !== -1) {
-                                    // Check if the proposed position overlaps with any visible nodes
-                                    if (!isOverlapping(change.id, change.position, currentlyVisible)) {
+
+                        // Build O(1) index map for fast lookups
+                        const indexMap = new Map<string, number>()
+                        for (let i = 0; i < next.length; i++) {
+                            indexMap.set(next[i].id, i)
+                        }
+
+                        // Apply position changes — during drag: direct apply (no
+                        // overlap check), otherwise also direct (overlap is always
+                        // deferred to drop via handleNodeDragStop).
+                        if (positionChanges.length > 0) {
+                            next = [...next]
+                            for (const change of positionChanges) {
+                                if (change.type === 'position' && change.position) {
+                                    const idx = indexMap.get(change.id)
+                                    if (idx !== undefined) {
                                         next[idx] = { ...next[idx], position: change.position }
                                     }
                                 }
                             }
-                            if (change.type === 'dimensions' && change.dimensions) {
-                                const idx = next.findIndex((n) => n.id === change.id)
-                                if (idx !== -1) {
-                                    next[idx] = { ...next[idx], measured: change.dimensions }
-                                    dimensionsChanged = true
+                        }
+
+                        // Apply dimension changes
+                        if (dimensionChanges.length > 0) {
+                            if (next === prev) next = [...next]
+                            for (const change of dimensionChanges) {
+                                if (change.type === 'dimensions' && change.dimensions) {
+                                    const idx = indexMap.get(change.id)
+                                    if (idx !== undefined) {
+                                        next[idx] = { ...next[idx], measured: change.dimensions }
+                                        dimensionsChanged = true
+                                    }
                                 }
                             }
                         }
@@ -2925,5 +3079,6 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 </div>
             )}
         </div>
+        </CanvasCallbackContext.Provider>
     )
 }

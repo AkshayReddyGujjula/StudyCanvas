@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef, useEffect, memo } from 'react'
 import { Handle, Position } from '@xyflow/react'
 import type { NodeProps } from '@xyflow/react'
 import ReactMarkdown from 'react-markdown'
@@ -29,7 +29,7 @@ const STATUS_BORDER_CLASSES: Record<string, string> = {
 
 type CustomPromptNodeProps = NodeProps & { data: CustomPromptNodeData }
 
-export default function CustomPromptNode({ id, data }: CustomPromptNodeProps) {
+function CustomPromptNode({ id, data }: CustomPromptNodeProps) {
     const updateNodeData = useCanvasStore((s) => s.updateNodeData)
     const persistToLocalStorage = useCanvasStore((s) => s.persistToLocalStorage)
     const setNodes = useCanvasStore((s) => s.setNodes)
@@ -45,9 +45,21 @@ export default function CustomPromptNode({ id, data }: CustomPromptNodeProps) {
     const [confirmDelete, setConfirmDelete] = useState(false)
     const chatEndRef = useRef<HTMLDivElement>(null)
 
-    // Resizing state
+    // Resizing state — initialise from saved style if available so size survives reload
     const [size, setSize] = useState({ width: 440, height: 380 })
     const resizingRef = useRef<{ corner: string; startX: number; startY: number; startW: number; startH: number } | null>(null)
+
+    // Keep React Flow's node style.width/height in sync with internal size so
+    // the overlap-prevention logic in onNodesChange always uses the real dimensions.
+    useEffect(() => {
+        setNodes((prev) =>
+            prev.map((n) =>
+                n.id === id
+                    ? { ...n, style: { ...n.style, width: size.width, height: size.height } }
+                    : n
+            )
+        )
+    }, [size, id, setNodes])
 
     // Auto-scroll to bottom on new messages
     useEffect(() => {
@@ -440,3 +452,5 @@ export default function CustomPromptNode({ id, data }: CustomPromptNodeProps) {
         </div>
     )
 }
+
+export default memo(CustomPromptNode)

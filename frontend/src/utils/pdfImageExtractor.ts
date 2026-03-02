@@ -13,6 +13,42 @@ import * as pdfjsLib from 'pdfjs-dist'
 // potentially breaking PDF rendering if the resolved URL differs.
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs'
 
+// ── PDF document proxy cache ────────────────────────────────────────────────
+// Avoids re-parsing the entire PDF from scratch on every quiz/flashcard/summary
+// generation call. The cache stores the last-used PDF document proxy and reuses
+// it when the same ArrayBuffer is provided (matched by byte length + first 64
+// bytes as a fast fingerprint rather than comparing the entire buffer).
+let _cachedProxy: { fingerprint: string; proxy: ReturnType<typeof pdfjsLib.getDocument>['promise'] extends Promise<infer T> ? T : never } | null = null
+
+function getFingerprint(data: ArrayBuffer): string {
+    const view = new Uint8Array(data, 0, Math.min(64, data.byteLength))
+    let fp = `${data.byteLength}:`
+    for (let i = 0; i < view.length; i++) fp += String.fromCharCode(view[i])
+    return fp
+}
+
+async function getCachedPdfProxy(pdfData: ArrayBuffer) {
+    const fp = getFingerprint(pdfData)
+    if (_cachedProxy && _cachedProxy.fingerprint === fp) {
+        return _cachedProxy.proxy
+    }
+    // Destroy old proxy if exists
+    if (_cachedProxy) {
+        try { _cachedProxy.proxy.destroy() } catch { /* ignore */ }
+    }
+    const proxy = await pdfjsLib.getDocument({ data: pdfData.slice(0) }).promise
+    _cachedProxy = { fingerprint: fp, proxy }
+    return proxy
+}
+
+/** Call when a new PDF is uploaded to invalidate the cache. */
+export function invalidatePdfProxyCache() {
+    if (_cachedProxy) {
+        try { _cachedProxy.proxy.destroy() } catch { /* ignore */ }
+        _cachedProxy = null
+    }
+}
+
 /**
  * Renders a specific page of a PDF to a base64-encoded JPEG string.
  * @param pdfData - The raw PDF as an ArrayBuffer.
@@ -26,9 +62,8 @@ export async function extractPageImageBase64(
     dpi: number = 150
 ): Promise<string | null> {
     try {
-        const pdf = await pdfjsLib.getDocument({ data: pdfData.slice(0) }).promise
+        const pdf = await getCachedPdfProxy(pdfData)
         if (pageIndex < 0 || pageIndex >= pdf.numPages) {
-            pdf.destroy()
             return null
         }
 
@@ -43,7 +78,6 @@ export async function extractPageImageBase64(
         canvas.height = Math.floor(viewport.height)
         const ctx = canvas.getContext('2d')
         if (!ctx) {
-            pdf.destroy()
             return null
         }
 
@@ -54,7 +88,6 @@ export async function extractPageImageBase64(
         // Strip the "data:image/jpeg;base64," prefix
         const base64 = dataUrl.split(',')[1]
 
-        pdf.destroy()
         return base64
     } catch (err) {
         console.error('[pdfImageExtractor] Error extracting page image:', err)
