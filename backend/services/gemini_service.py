@@ -299,7 +299,8 @@ async def generate_quiz(
     source_type: str = "struggling",
     page_index: int | None = None,
     page_content: str | None = None,
-    image_base64: str | None = None
+    image_base64: str | None = None,
+    canvas_context: str | None = None
 ) -> list[dict]:
     """
     Generates between 3 and 15 mixed-format (MCQ + short-answer) questions.
@@ -444,6 +445,23 @@ async def generate_quiz(
                 if page_indexes:
                     prompt += "\n\n(Images of the relevant pages are provided since text was unavailable.)"
 
+    # Inject canvas context (sticky notes, summaries, transcriptions, custom prompts)
+    if canvas_context and canvas_context.strip():
+        prompt += (
+            "\n\nCANVAS STUDY NOTES (student's workspace materials):\n"
+            "The student has the following notes and conversations on their study canvas "
+            "(sticky notes, AI-generated summaries, voice transcriptions, and Q&A conversations "
+            "from their learning session):\n\n"
+            f"{canvas_context.strip()}\n\n"
+            "CANVAS CONTEXT ALLOCATION RULE (CRITICAL):\n"
+            "  \u2022 You MAY use at most 50% of the total questions to test topics from the canvas notes above.\n"
+            "  \u2022 The REMAINING questions (at least 50%) MUST be based on the primary content "
+            "(page content or struggling nodes).\n"
+            "  \u2022 Only include canvas-inspired questions if those topics are genuinely educationally significant.\n"
+            "  \u2022 Do NOT force canvas topics \u2014 only include them if they represent meaningful learning material.\n"
+            "  \u2022 If the canvas context is sparse or trivial, use 0% \u2014 derive all questions from the primary source.\n"
+        )
+
     contents.append(prompt)
     response = await asyncio.to_thread(lambda: model.generate_content(contents))
     text = response.text.strip()
@@ -464,7 +482,8 @@ async def generate_flashcards(
     page_index: int | None = None,
     page_content: str | None = None,
     existing_flashcards: list[str] | None = None,
-    image_base64: str | None = None
+    image_base64: str | None = None,
+    canvas_context: str | None = None
 ) -> list[dict]:
     """
     Generates flashcards based on struggling topics or page context depending on source_type.
@@ -580,6 +599,23 @@ async def generate_flashcards(
                 if page_indexes:
                     prompt += "\n\n(Images of the relevant pages are provided since text was unavailable.)"
 
+    # Inject canvas context (sticky notes, summaries, transcriptions, custom prompts)
+    if canvas_context and canvas_context.strip():
+        prompt += (
+            "\n\nCANVAS STUDY NOTES (student's workspace materials):\n"
+            "The student has the following notes and conversations on their study canvas "
+            "(sticky notes, AI-generated summaries, voice transcriptions, and Q&A conversations "
+            "from their learning session):\n\n"
+            f"{canvas_context.strip()}\n\n"
+            "CANVAS CONTEXT ALLOCATION RULE (CRITICAL):\n"
+            "  \u2022 You MAY draw at most 50% of flashcards from topics found in the canvas notes above.\n"
+            "  \u2022 The REMAINING flashcards (at least 50%) MUST be based on the primary content "
+            "(page content or struggling nodes).\n"
+            "  \u2022 Only include canvas-inspired flashcards if those topics are genuinely educationally significant.\n"
+            "  \u2022 Do NOT force canvas topics \u2014 only include them if they represent meaningful learning material.\n"
+            "  \u2022 If the canvas context is sparse or trivial, use 0% \u2014 derive all flashcards from the primary source.\n"
+        )
+
     contents.append(prompt)
     response = await asyncio.to_thread(lambda: model.generate_content(contents))
     text = response.text.strip()
@@ -671,7 +707,7 @@ async def generate_page_summary(
         yield f"\n\n[Error generating summary: {str(e)}]"
 
 
-async def generate_page_quiz(page_content: str, pdf_id: str | None = None, page_index: int | None = None, image_base64: str | None = None, user_details: dict | None = None) -> list[str]:
+async def generate_page_quiz(page_content: str, pdf_id: str | None = None, page_index: int | None = None, image_base64: str | None = None, user_details: dict | None = None, canvas_context: str | None = None) -> list[str]:
     """
     Generates 3-5 short-answer questions based ONLY on the provided page content.
     No struggling nodes, no user context — pure page comprehension test.
@@ -777,6 +813,22 @@ async def generate_page_quiz(page_content: str, pdf_id: str | None = None, page_
         "- Example: [\"Why does increasing temperature shift the equilibrium position to the right in this endothermic reaction?\", \"Calculate the energy change for the reaction given the bond energies shown.\"]\n\n"
         f"{context_section}"
     )
+
+    # Inject canvas context (sticky notes, summaries, transcriptions, custom prompts)
+    if canvas_context and canvas_context.strip():
+        prompt += (
+            "\n\nCANVAS STUDY NOTES (student's workspace materials):\n"
+            "The student has the following notes and conversations on their study canvas "
+            "(sticky notes, AI-generated summaries, voice transcriptions, and Q&A conversations "
+            "from their learning session):\n\n"
+            f"{canvas_context.strip()}\n\n"
+            "CANVAS CONTEXT ALLOCATION RULE (CRITICAL):\n"
+            "  \u2022 You MAY use at most 50% of the total questions to test topics from the canvas notes above.\n"
+            "  \u2022 The REMAINING questions (at least 50%) MUST be based on the page content.\n"
+            "  \u2022 Only include canvas-inspired questions if those topics are genuinely educationally significant.\n"
+            "  \u2022 Do NOT force canvas topics \u2014 only include them if they represent meaningful learning material.\n"
+            "  \u2022 If the canvas context is sparse or trivial, use 0% \u2014 derive all questions from the page content.\n"
+        )
 
     contents.append(prompt)
     response = await asyncio.to_thread(lambda: model.generate_content(contents))

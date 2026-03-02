@@ -62,6 +62,7 @@ class QuizRequest(BaseModel):
     page_index: Optional[int] = None
     page_content: Optional[str] = None
     image_base64: Optional[str] = None  # Client-side rendered page image
+    canvas_context: Optional[str] = Field(None, max_length=100000)  # Sticky notes, summaries, transcriptions, custom prompts
 
 
 class QuizQuestion(BaseModel):
@@ -93,6 +94,7 @@ class FlashcardsRequest(BaseModel):
     page_content: Optional[str] = None
     existing_flashcards: list[str] = Field(default_factory=list)
     image_base64: Optional[str] = None  # Client-side rendered page image
+    canvas_context: Optional[str] = Field(None, max_length=100000)  # Sticky notes, summaries, transcriptions, custom prompts
 
 
 class Flashcard(BaseModel):

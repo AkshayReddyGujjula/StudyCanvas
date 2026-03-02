@@ -46,7 +46,8 @@ export const generateQuiz = async (
     source_type: 'struggling' | 'page' = 'struggling',
     page_index?: number,
     page_content?: string,
-    image_base64?: string
+    image_base64?: string,
+    canvas_context?: string
 ): Promise<{ questions: QuizQuestion[]; model_used: string }> => {
     const response = await api.post<{ questions: QuizQuestion[]; model_used: string }>('/api/quiz', {
         struggling_nodes,
@@ -55,7 +56,8 @@ export const generateQuiz = async (
         source_type,
         page_index,
         page_content,
-        image_base64
+        image_base64,
+        canvas_context
     })
     return response.data
 }
@@ -93,9 +95,10 @@ export const generatePageQuiz = async (
     pdf_id?: string,
     page_index?: number,
     image_base64?: string,
-    user_details?: { name: string; age: string; status: string; educationLevel: string }
+    user_details?: { name: string; age: string; status: string; educationLevel: string },
+    canvas_context?: string
 ): Promise<{ questions: string[]; model_used: string }> => {
-    const response = await api.post<{ questions: string[]; model_used: string }>('/api/page-quiz', { page_content, pdf_id, page_index, image_base64, user_details })
+    const response = await api.post<{ questions: string[]; model_used: string }>('/api/page-quiz', { page_content, pdf_id, page_index, image_base64, user_details, canvas_context })
     return response.data
 }
 
@@ -134,7 +137,8 @@ export const generateFlashcards = async (
     page_index?: number,
     page_content?: string,
     existing_flashcards?: string[],
-    image_base64?: string
+    image_base64?: string,
+    canvas_context?: string
 ): Promise<{ flashcards: { question: string; answer: string }[]; model_used: string }> => {
     const response = await api.post<{ flashcards: { question: string; answer: string }[]; model_used: string }>('/api/flashcards', {
         struggling_nodes,
@@ -144,7 +148,8 @@ export const generateFlashcards = async (
         page_index,
         page_content,
         existing_flashcards,
-        image_base64
+        image_base64,
+        canvas_context
     })
     return response.data
 }

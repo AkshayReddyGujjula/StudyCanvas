@@ -14,6 +14,8 @@ interface RevisionModalProps {
     sourceType?: 'struggling' | 'page'
     pageIndex?: number
     pageContent?: string
+    /** Collected text from sticky notes, summaries, transcriptions, custom prompts */
+    canvasContext?: string
 }
 
 interface QuestionState {
@@ -35,7 +37,8 @@ export default function RevisionModal({
     onClose,
     sourceType = 'struggling',
     pageIndex,
-    pageContent
+    pageContent,
+    canvasContext,
 }: RevisionModalProps) {
     const [questions, setQuestions] = useState<QuizQuestion[] | null>(null)
     const [loading, setLoading] = useState(true)
@@ -89,7 +92,7 @@ export default function RevisionModal({
             }
 
             try {
-                const quizResult = await generateQuiz(input, rawText, pdfId, sourceType, pageIndex, pageContent, imageBase64)
+                const quizResult = await generateQuiz(input, rawText, pdfId, sourceType, pageIndex, pageContent, imageBase64, canvasContext)
                 setQuestions(quizResult.questions)
                 setQuizModelUsed(quizResult.model_used)
                 setQuestionStates(quizResult.questions.map(() => emptyQuestionState()))

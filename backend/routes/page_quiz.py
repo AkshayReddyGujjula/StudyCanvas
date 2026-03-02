@@ -16,6 +16,7 @@ class PageQuizRequest(BaseModel):
     page_index: int | None = None
     image_base64: str | None = None
     user_details: dict | None = None
+    canvas_context: str | None = Field(None, max_length=100000)
 
 
 class PageQuizResponse(BaseModel):
@@ -44,7 +45,7 @@ async def generate_page_quiz(request: Request, payload: PageQuizRequest):
     """Generate 3-5 short-answer questions based solely on a single page's content."""
     try:
         questions = await gemini_service.generate_page_quiz(
-            payload.page_content, pdf_id=payload.pdf_id, page_index=payload.page_index, image_base64=payload.image_base64, user_details=payload.user_details
+            payload.page_content, pdf_id=payload.pdf_id, page_index=payload.page_index, image_base64=payload.image_base64, user_details=payload.user_details, canvas_context=payload.canvas_context
         )
         return PageQuizResponse(questions=questions, model_used=MODEL_FLASH)
     except HTTPException:

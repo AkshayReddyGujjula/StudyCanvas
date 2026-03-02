@@ -43,7 +43,7 @@ import { useCanvasStore } from '../store/canvasStore'
 import { extractPageImageBase64 } from '../utils/pdfImageExtractor'
 import { streamQuery, streamPageSummary, generateTitle, generatePageQuiz, gradeAnswer, generateFlashcards } from '../api/studyApi'
 import { getNewNodePosition, recalculateSiblingPositions, resolveOverlaps, isOverlapping, rerouteEdgeHandles, getQuizNodePositions, getFlashcardPositions, findNonOverlappingPosition } from '../utils/positioning'
-import type { AnswerNodeData, QuizQuestionNodeData, FlashcardNodeData, TextNodeData, CustomPromptNodeData, ImageNodeData, StickyNoteNodeData, TimerNodeData, SummaryNodeData } from '../types'
+import type { AnswerNodeData, QuizQuestionNodeData, FlashcardNodeData, TextNodeData, CustomPromptNodeData, ImageNodeData, StickyNoteNodeData, TimerNodeData, SummaryNodeData, TranscriptionNodeData, ChatMessage } from '../types'
 import { pdf } from '@react-pdf/renderer'
 import { buildQATree } from '../utils/buildQATree'
 import StudyNotePDF from './StudyNotePDF'
@@ -99,6 +99,60 @@ const STICKY_NOTE_BORDER_COLORS: Record<string, string> = {
     '#FFE0B2': '#FFB74D',
 }
 
+// ── Canvas Context Collection ────────────────────────────────────────────────
+// Gathers text content from sticky notes, AI summaries, voice transcriptions,
+// and custom prompt Q&A conversations present on the canvas.
+// Passed to Gemini so it can generate up to 50% canvas-inspired quiz questions.
+function collectCanvasContext(nodes: Node[]): string {
+    const parts: string[] = []
+
+    // Sticky notes
+    const stickyTexts = nodes
+        .filter((n) => n.type === 'stickyNoteNode')
+        .map((n) => (n.data as unknown as StickyNoteNodeData).content)
+        .filter((c): c is string => typeof c === 'string' && c.trim().length > 0)
+    if (stickyTexts.length > 0) {
+        parts.push('[Sticky Notes]\n' + stickyTexts.map((s) => `• ${s.trim()}`).join('\n'))
+    }
+
+    // AI-generated summaries
+    const summaryTexts = nodes
+        .filter((n) => n.type === 'summaryNode')
+        .map((n) => (n.data as unknown as SummaryNodeData).summary)
+        .filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
+    if (summaryTexts.length > 0) {
+        parts.push('[AI-Generated Summaries]\n' + summaryTexts.map((s) => s.trim()).join('\n\n'))
+    }
+
+    // Voice transcriptions
+    const transcriptionTexts = nodes
+        .filter((n) => n.type === 'transcriptionNode')
+        .map((n) => (n.data as unknown as TranscriptionNodeData).text)
+        .filter((t): t is string => typeof t === 'string' && t.trim().length > 0)
+    if (transcriptionTexts.length > 0) {
+        parts.push('[Voice Transcriptions]\n' + transcriptionTexts.map((t) => t.trim()).join('\n\n'))
+    }
+
+    // Custom prompt conversations
+    const conversations = nodes
+        .filter((n) => n.type === 'customPromptNode')
+        .map((n) => (n.data as unknown as CustomPromptNodeData).chatHistory as ChatMessage[])
+        .filter((h) => Array.isArray(h) && h.length > 0)
+    if (conversations.length > 0) {
+        const formatted = conversations
+            .map((hist, i) => {
+                const turns = hist
+                    .map((msg) => `${msg.role === 'user' ? 'Student' : 'Gemini'}: ${msg.content.trim()}`)
+                    .join('\n')
+                return `[Conversation ${i + 1}]\n${turns}`
+            })
+            .join('\n\n')
+        parts.push('[Custom Prompt Conversations]\n' + formatted)
+    }
+
+    return parts.join('\n\n')
+}
+
 export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; onSave?: (onProgress?: (pct: number, label: string) => void) => Promise<void> }) {
     const { setCenter, getZoom, fitView, setViewport, getViewport, screenToFlowPosition } = useReactFlow()
     const [selection, setSelection] = useState<SelectionState | null>(null)
@@ -108,6 +162,13 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
     const [showRevisionMenu, setShowRevisionMenu] = useState(false)
     const [revisionSource, setRevisionSource] = useState<{ sourceType: 'struggling' | 'page'; pageIndex: number; pageContent?: string } | null>(null)
     const [isGeneratingFlashcards, setIsGeneratingFlashcards] = useState(false)
+    const [generationProgress, setGenerationProgress] = useState<{
+        type: 'quiz' | 'flashcards'
+        label: string
+        progress: number
+    } | null>(null)
+    const genProgressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+    const genProgressValueRef = useRef(0)
     const [showTools, setShowTools] = useState(false)
     const [showUploadPopup, setShowUploadPopup] = useState(false)
     const [showUploadHint, setShowUploadHint] = useState(true)
@@ -123,6 +184,49 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
     const streamingNodesRef = useRef<Set<string>>(new Set())
     const containerRef = useRef<HTMLDivElement>(null)
     const snipOverlayRef = useRef<HTMLDivElement>(null)
+
+    // ── Toast + Generation progress helpers ─────────────────────────────────
+    // Declared early (before any callbacks) so all callers see them.
+
+    // Simple toast
+    const showToast = useCallback((msg: string) => {
+        setToast(msg)
+        if (toastTimeout) clearTimeout(toastTimeout)
+        toastTimeout = setTimeout(() => setToast(null), 3000)
+    }, [])
+
+    // Uses exponential decay toward ~90%; snaps to 100% only when API resolves.
+    const startGenProgress = useCallback((type: 'quiz' | 'flashcards', label: string) => {
+        genProgressValueRef.current = 0
+        setGenerationProgress({ type, label, progress: 0 })
+        if (genProgressIntervalRef.current) clearInterval(genProgressIntervalRef.current)
+        genProgressIntervalRef.current = setInterval(() => {
+            genProgressValueRef.current = genProgressValueRef.current + (90 - genProgressValueRef.current) * 0.08
+            setGenerationProgress((prev) =>
+                prev ? { ...prev, progress: Math.min(genProgressValueRef.current, 90) } : null
+            )
+        }, 150)
+    }, [])
+
+    // Call when API resolves: snap to 100% and hide after 500 ms.
+    // Content is added to the canvas in the same React batch — zero delay.
+    const finishGenProgress = useCallback(() => {
+        if (genProgressIntervalRef.current) {
+            clearInterval(genProgressIntervalRef.current)
+            genProgressIntervalRef.current = null
+        }
+        setGenerationProgress((prev) => prev ? { ...prev, progress: 100 } : null)
+        setTimeout(() => setGenerationProgress(null), 500)
+    }, [])
+
+    // Call on error / cancellation: hide the bar immediately.
+    const cancelGenProgress = useCallback(() => {
+        if (genProgressIntervalRef.current) {
+            clearInterval(genProgressIntervalRef.current)
+            genProgressIntervalRef.current = null
+        }
+        setGenerationProgress(null)
+    }, [])
 
     // ── Global Snipping Tool state ──────────────────────────────────────────
     const isSnippingMode = useCanvasStore((s) => s.isSnippingMode)
@@ -363,10 +467,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
             setNodes((prev) => prev.filter((n) => !existingIds.has(n.id)))
             setEdges((prev) => prev.filter((e) => !existingIds.has(e.source) && !existingIds.has(e.target)))
         }
-        // Show inline toast
-        setToast('Generating quiz questions for this page…')
-        if (toastTimeout) clearTimeout(toastTimeout)
-        toastTimeout = setTimeout(() => setToast(null), 3500)
+        startGenProgress('quiz', 'Generating quiz questions…')
 
         let questions: string[]
         try {
@@ -378,7 +479,8 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 if (b64) imageBase64 = b64
             }
 
-            const result = await generatePageQuiz(pageContent, fileData.pdf_id, currentPage - 1, imageBase64, userDetails)
+            const canvasContext = collectCanvasContext(nodes) || undefined
+            const result = await generatePageQuiz(pageContent, fileData.pdf_id, currentPage - 1, imageBase64, userDetails, canvasContext)
             questions = result.questions
         } catch (err: unknown) {
             console.error('Page quiz generation error:', err)
@@ -393,15 +495,13 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
             } else {
                 msg += ' ' + (axErr.response.data?.detail ?? axErr.message ?? '')
             }
-            setToast(msg)
-            if (toastTimeout) clearTimeout(toastTimeout)
-            toastTimeout = setTimeout(() => setToast(null), 5000)
+            cancelGenProgress()
+            showToast(msg)
             return
         }
         if (!questions.length) {
-            setToast('No questions were generated — try again.')
-            if (toastTimeout) clearTimeout(toastTimeout)
-            toastTimeout = setTimeout(() => setToast(null), 3000)
+            cancelGenProgress()
+            showToast('No questions were generated — try again.')
             return
         }
 
@@ -458,6 +558,8 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
             }
         })
 
+        // Complete the progress bar and render nodes in the same React batch
+        finishGenProgress()
         setNodes((prev) => [...prev, ...quizNodes])
         setEdges((prev) => [...prev, ...quizEdges])
 
@@ -466,13 +568,11 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
             setCenter(positions[midIdx].x + 180, positions[0].y + 120, { zoom: getZoom(), duration: 700 })
         }
         persistToLocalStorage()
-        setToast(`${questions.length} quiz questions generated!`)
-        if (toastTimeout) clearTimeout(toastTimeout)
-        toastTimeout = setTimeout(() => setToast(null), 3000)
     }, [
         fileData, currentPage, pageMarkdowns, nodes, contentNodeId,
         getQuizNodesForPage, setNodes, setEdges, setCenter, getZoom,
         updateQuizNodeData, persistToLocalStorage, buildEdgeStyle,
+        startGenProgress, finishGenProgress, cancelGenProgress, showToast,
     ])
 
     // Text selection hook
@@ -1065,12 +1165,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [setViewport, getViewport])
 
-    // Show toast helper
-    const showToast = useCallback((msg: string) => {
-        setToast(msg)
-        if (toastTimeout) clearTimeout(toastTimeout)
-        toastTimeout = setTimeout(() => setToast(null), 3000)
-    }, [])
+
 
     // ── Global Snipping Tool handlers ───────────────────────────────────────
     const handleSnipPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
@@ -1734,9 +1829,6 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 showToast("Mark some nodes as 'Struggling' first to create flashcards.")
                 return
             }
-            if (toastTimeout) clearTimeout(toastTimeout)
-            showToast('Generating flashcards from your struggling topics…')
-
             payload = strugglingNodes.map((n) => {
                 const d = n.data as unknown as AnswerNodeData
                 return {
@@ -1749,9 +1841,9 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
         } else {
             pageContent = pageMarkdowns[currentPage - 1]
             pIndex = currentPage - 1
-            if (toastTimeout) clearTimeout(toastTimeout)
-            showToast('Generating flashcards for the current page…')
         }
+
+        startGenProgress('flashcards', sourceType === 'struggling' ? 'Generating flashcards from struggling topics…' : 'Generating flashcards for this page…')
 
         setIsGeneratingFlashcards(true)
 
@@ -1774,6 +1866,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
 
             // Use page-scoped text instead of full PDF raw_text to avoid 500K limit
             const scopedRawText = pageContent || pageMarkdowns[currentPage - 1] || (fileData.raw_text ?? '').slice(0, 50000)
+            const canvasContext = collectCanvasContext(nodes) || undefined
             const fcResult = await generateFlashcards(
                 payload,
                 scopedRawText,
@@ -1782,7 +1875,8 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 pIndex,
                 pageContent,
                 currentFlashcards.length > 0 ? currentFlashcards : undefined,
-                imageBase64
+                imageBase64,
+                canvasContext
             )
             cards = fcResult.flashcards
             flashcardModelUsed = fcResult.model_used
@@ -1800,12 +1894,14 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
             } else {
                 msg += ' ' + (axErr.response.data?.detail ?? axErr.message ?? '')
             }
+            cancelGenProgress()
             showToast(msg)
             setIsGeneratingFlashcards(false)
             return
         }
 
         if (!cards.length) {
+            cancelGenProgress()
             showToast('No flashcards were generated — try again.')
             setIsGeneratingFlashcards(false)
             return
@@ -1875,6 +1971,8 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
 
         setNodes((prev) => [...prev, ...flashcardNodes])
         setEdges((prev) => [...prev, ...chainEdges])
+        // Complete the progress bar and render cards in the same React batch
+        finishGenProgress()
         persistToLocalStorage()
         setIsGeneratingFlashcards(false)
 
@@ -1882,8 +1980,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
             const mid = flashcardNodes[Math.floor(flashcardNodes.length / 2)]
             setCenter(mid.position.x + cardWidth / 2, mid.position.y + 100, { zoom: getZoom(), duration: 700 })
         }
-        showToast(`${cards.length} flashcards created!`)
-    }, [nodes, fileData, currentPage, setNodes, setEdges, persistToLocalStorage, setCenter, getZoom, showToast, buildEdgeStyle])
+    }, [nodes, fileData, currentPage, setNodes, setEdges, persistToLocalStorage, setCenter, getZoom, showToast, buildEdgeStyle, startGenProgress, finishGenProgress, cancelGenProgress])
 
     // Download Q&A as a PDF (text-based export — legacy)
     const handleDownloadPDF = useCallback(async () => {
@@ -2366,6 +2463,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                     sourceType={revisionSource.sourceType}
                     pageIndex={revisionSource.pageIndex - 1}
                     pageContent={revisionSource.pageContent}
+                    canvasContext={collectCanvasContext(nodes) || undefined}
                 />
             )}
 
@@ -2762,6 +2860,29 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                                 Dismiss
                             </button>
                         )}
+                    </div>
+                </div>
+            )}
+
+            {/* Generation progress bar — quiz questions & flashcards */}
+            {generationProgress && (
+                <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 w-80 bg-white rounded-2xl shadow-2xl border border-gray-100 px-5 py-4 pointer-events-none">
+                    <div className="flex items-center justify-between mb-2.5">
+                        <span className="text-sm font-semibold text-gray-700 truncate pr-2">{generationProgress.label}</span>
+                        <span className="text-xs font-mono font-bold text-indigo-600 shrink-0">
+                            {Math.round(generationProgress.progress)}%
+                        </span>
+                    </div>
+                    <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div
+                            className="h-full bg-indigo-500 rounded-full"
+                            style={{
+                                width: `${generationProgress.progress}%`,
+                                transition: generationProgress.progress === 100
+                                    ? 'width 0.12s ease-out'
+                                    : 'width 0.15s linear',
+                            }}
+                        />
                     </div>
                 </div>
             )}

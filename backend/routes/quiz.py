@@ -29,7 +29,8 @@ async def generate_quiz(request: Request, payload: QuizRequest):
             source_type=payload.source_type,
             page_index=payload.page_index,
             page_content=payload.page_content,
-            image_base64=payload.image_base64
+            image_base64=payload.image_base64,
+            canvas_context=payload.canvas_context
         )
         _validate_quiz(result)
         return {"questions": result, "model_used": MODEL_FLASH}
@@ -44,7 +45,8 @@ async def generate_quiz(request: Request, payload: QuizRequest):
             source_type=payload.source_type,
             page_index=payload.page_index,
             page_content=payload.page_content,
-            image_base64=payload.image_base64
+            image_base64=payload.image_base64,
+            canvas_context=payload.canvas_context
         )
         _validate_quiz(result)
         return {"questions": result, "model_used": MODEL_FLASH}
