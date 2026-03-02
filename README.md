@@ -52,6 +52,7 @@ The result is a **visual knowledge map** of exactly what you understood, what co
 | **Modern Canvas Controls** | Bottom-left control buttons (zoom in/out, fit view, lock, dark mode) are clearly sized and styled with rounded corners and a subtle shadow. The minimap is fully opaque with proper borders and supports pan + zoom interaction. |
 | **Resize Warning for Annotated Nodes** | If you try to resize a node with drawing annotations, a safety warning appears to prevent accidental annotation displacement. |
 | **PDF Viewer Lock & Quality** | Lock a PDF node to prevent accidental dragging/resizing. Adjust the rendering resolution (DPR) via a quality slider for crisp or fast rendering. |
+| **Interactive Walkthrough** | A game-style interactive tutorial guides new users through every core feature. High-quality SVG icons and smooth spotlight transitions focus the user's attention one tool at a time. |
 | **Dual Model Tiers** | Every AI response includes a model indicator badge. Complex/analytical queries automatically route to Gemini 2.5 Flash; simpler tasks use the faster Flash Lite. Users can override the model per custom prompt node. |
 | **Streaming Responses** | All AI answers stream token-by-token using `fetch` + `ReadableStream` with a cancel button. |
 | **Folder & Canvas Management** | Organise canvases in folders. Name prompts on creation prevent accidental duplicates. |
@@ -142,6 +143,10 @@ StudyCanvas/
         │   └── studyApi.ts     # Axios + fetch API wrappers for all endpoints
         ├── components/
         │   ├── HomePage.tsx            # Canvas/folder browser with drag-and-drop
+        │   ├── tutorial/               # Interactive Walkthrough components
+        │   │   ├── TutorialOverlay.tsx # Spotlight & tooltips system
+        │   │   ├── tutorialSteps.ts    # 11-step walkthrough definition
+        │   │   └── PhaseIcon.tsx       # Custom SVG icon mapping
         │   ├── CanvasCard.tsx          # Canvas thumbnail card
         │   ├── FolderCard.tsx          # Folder card with drop target
         │   ├── CanvasPage.tsx          # Route wrapper: load/save/autosave canvas
@@ -161,7 +166,7 @@ StudyCanvas/
         │   ├── RevisionModal.tsx       # Revision quiz modal (MCQ + short-answer)
         │   ├── PdfUploadPopup.tsx      # PDF upload popup with drag-and-drop
         │   ├── ModelIndicator.tsx      # Shows which Gemini model was used
-        │   ├── OnboardingModal.tsx     # First-run user details form
+        │   ├── OnboardingModal.tsx     # Tutorial entry point & persistent choice
         │   ├── ToolsModal.tsx          # User context / settings modal
         │   ├── StudyNotePDF.tsx        # PDF export component (@react-pdf/renderer)
         │   ├── PDFViewer/
@@ -174,12 +179,14 @@ StudyCanvas/
         │       ├── ColorPicker.tsx     # Color palette with custom hex & drag-to-delete
         │       └── TextNode.tsx        # Draggable text annotations on the canvas
         ├── hooks/
-        │   └── useTextSelection.ts     # Text selection detection hook
+        │   ├── useTextSelection.ts     # Text selection detection hook
+        │   └── useTutorial.ts          # Walkthrough step control
         ├── services/
         │   └── fileSystemService.ts    # File System Access API wrappers
         ├── store/
         │   ├── appStore.ts             # App-level state (canvas list, folders, auth)
-        │   └── canvasStore.ts          # Canvas-level state (nodes, edges, PDF data)
+        │   ├── canvasStore.ts          # Canvas-level state (nodes, edges, PDF data)
+        │   └── tutorialStore.ts        # Onboarding progress & persistence
         ├── types/
         │   └── index.ts                # Shared TypeScript types
         └── utils/
