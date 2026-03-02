@@ -122,6 +122,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
     const exportAbortRef = useRef<AbortController | null>(null)
     const streamingNodesRef = useRef<Set<string>>(new Set())
     const containerRef = useRef<HTMLDivElement>(null)
+    const snipOverlayRef = useRef<HTMLDivElement>(null)
 
     // ── Global Snipping Tool state ──────────────────────────────────────────
     const isSnippingMode = useCanvasStore((s) => s.isSnippingMode)
@@ -1111,101 +1112,133 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
 
         setIsSnipExtracting(true)
         try {
-            // Capture the ReactFlow container as a canvas using html-to-image.
-            // The container includes all nodes, edges, and the drawing layer.
             const el = containerRef.current
             if (!el) throw new Error('Canvas container not found')
 
-            // html-to-image captures the full element; we then crop to selection.
-            // Use a reasonable pixel ratio for quality without being excessive.
-            const capturePixelRatio = Math.min(window.devicePixelRatio || 1, 2)
+            // ── Compositing capture with overflow-aware clipping ─────────────
+            // The previous approach used html-to-image for <canvas> elements, which
+            // placed pixels at wrong coordinates inside CSS-transformed parents.
+            // getDisplayMedia was tried next but shows an unremovable browser bar.
+            //
+            // This approach:
+            //   1. html-to-image captures all HTML/DOM elements (canvases excluded).
+            //   2. Every <canvas> is composited separately using getBoundingClientRect
+            //      + getClippedScreenRect — the latter walks up the DOM intersecting
+            //      with every overflow-clipping ancestor so we only draw the pixels
+            //      that are actually visible (fixing the zoomed-PDF overflow bug).
+            //   3. Whiteboard strokes are drawn last.
 
-            // First, manually capture the drawing canvas content (handwritten strokes)
-            // This is needed because html-to-image doesn't capture canvas elements properly
-            const drawingCanvasMain = el.querySelector('.drawing-canvas-main') as HTMLCanvasElement | null
-            let drawingCanvasDataUrl: string | null = null
-
-            if (drawingCanvasMain) {
-                // Capture canvas with transparent background (original behavior)
-                // This allows DOM content to show through beneath the canvas
-                drawingCanvasDataUrl = drawingCanvasMain.toDataURL('image/png')
+            // Returns the intersection of an element's rect with all overflow-
+            // clipping ancestors — i.e. the region actually visible on screen.
+            const getClippedScreenRect = (elem: Element): DOMRect => {
+                let r = elem.getBoundingClientRect()
+                let parent = elem.parentElement
+                while (parent) {
+                    const st = getComputedStyle(parent)
+                    const ov = `${st.overflow} ${st.overflowX} ${st.overflowY}`
+                    if (/hidden|scroll|auto|clip/.test(ov)) {
+                        const pr = parent.getBoundingClientRect()
+                        const l = Math.max(r.left,   pr.left)
+                        const t = Math.max(r.top,    pr.top)
+                        const rr = Math.min(r.right,  pr.right)
+                        const b = Math.min(r.bottom, pr.bottom)
+                        if (rr <= l || b <= t) return new DOMRect(0, 0, 0, 0) // fully clipped
+                        r = new DOMRect(l, t, rr - l, b - t)
+                    }
+                    parent = parent.parentElement
+                }
+                return r
             }
 
-            const fullCanvas = await domToCanvas(el, {
-                pixelRatio: capturePixelRatio,
+            // Selection rectangle in absolute screen coordinates
+            const selLeft   = overlayRect.left + sx
+            const selTop    = overlayRect.top  + sy
+            const selRight  = selLeft + sw
+            const selBottom = selTop  + sh
+
+            // Output canvas at 1× CSS pixel scale
+            const cropCanvas = document.createElement('canvas')
+            cropCanvas.width  = Math.round(sw)
+            cropCanvas.height = Math.round(sh)
+            const ctx = cropCanvas.getContext('2d')!
+            ctx.fillStyle = '#FFFFFF'
+            ctx.fillRect(0, 0, cropCanvas.width, cropCanvas.height)
+
+            // ── Step 1: DOM capture (canvas elements excluded) ────────────────
+            const domCapture = await domToCanvas(el, {
+                pixelRatio: 1,
                 cacheBust: true,
                 filter: (node: HTMLElement) => {
-                    // Exclude the snipping overlay itself and fixed UI elements
                     if (node.dataset?.snipOverlay === 'true') return false
                     if (node.classList?.contains('react-flow__controls')) return false
                     if (node.classList?.contains('react-flow__minimap')) return false
-                    // Exclude both drawing canvases - we'll manually overlay them
-                    if (node.classList?.contains('drawing-canvas-main')) return false
-                    if (node.classList?.contains('drawing-canvas-temp')) return false
+                    if (node.tagName === 'CANVAS') return false
                     return true
                 },
             })
+            const containerRect = el.getBoundingClientRect()
+            ctx.drawImage(
+                domCapture,
+                selLeft - containerRect.left, selTop - containerRect.top, sw, sh,
+                0, 0, sw, sh,
+            )
 
-            // Create final canvas that combines DOM capture with canvas overlay
-            const combinedCanvas = document.createElement('canvas')
-            combinedCanvas.width = fullCanvas.width
-            combinedCanvas.height = fullCanvas.height
-            const combinedCtx = combinedCanvas.getContext('2d')
-            if (!combinedCtx) throw new Error('Could not get 2d context')
-            
-            // First draw the html-to-image capture (DOM elements)
-            combinedCtx.drawImage(fullCanvas, 0, 0)
+            // ── Step 2: composite each <canvas> using its visible screen rect ─
+            // getClippedScreenRect ensures zoomed/scrolled PDF canvases only
+            // contribute the pixels the user can actually see.
+            const allCanvases = el.querySelectorAll<HTMLCanvasElement>('canvas')
+            for (const canvas of allCanvases) {
+                if (
+                    canvas.classList.contains('drawing-canvas-main') ||
+                    canvas.classList.contains('drawing-canvas-temp')
+                ) continue
 
-            // Overlay the manually captured drawing canvas content (handwritten strokes)
-            if (drawingCanvasDataUrl) {
-                const drawingImg = new Image()
-                drawingImg.src = drawingCanvasDataUrl
-                await new Promise<void>((resolve) => {
-                    drawingImg.onload = () => resolve()
-                    drawingImg.onerror = () => resolve() // Continue even if drawing canvas fails
-                })
-                
-                // DEBUG: Log overlay info
-                console.log('[Snip] Drawing overlay:', {
-                    imgWidth: drawingImg.width,
-                    imgHeight: drawingImg.height,
-                    combinedWidth: combinedCanvas.width,
-                    combinedHeight: combinedCanvas.height,
-                    fullCanvasWidth: fullCanvas.width,
-                    fullCanvasHeight: fullCanvas.height
-                })
-                
-                // The drawing canvas covers the same area as the container
-                // Draw it directly at full size
-                combinedCtx.drawImage(drawingImg, 0, 0)
+                // Clipped visible rect of this canvas on screen
+                const visRect = getClippedScreenRect(canvas)
+                if (visRect.width === 0 || visRect.height === 0) continue
+
+                // Intersection of visible rect with user selection
+                const ol  = Math.max(selLeft,   visRect.left)
+                const ot  = Math.max(selTop,    visRect.top)
+                const or_ = Math.min(selRight,  visRect.right)
+                const ob  = Math.min(selBottom, visRect.bottom)
+                if (or_ <= ol || ob <= ot) continue
+
+                // Full (unclipped) rect — used to compute physical-pixel scale
+                const fullRect = canvas.getBoundingClientRect()
+                const scaleX = canvas.width  / fullRect.width
+                const scaleY = canvas.height / fullRect.height
+
+                // Source in canvas physical pixels (relative to the full unclipped canvas)
+                const srcX = (ol - fullRect.left) * scaleX
+                const srcY = (ot - fullRect.top)  * scaleY
+                const srcW = (or_ - ol) * scaleX
+                const srcH = (ob  - ot) * scaleY
+
+                // Destination in output canvas
+                ctx.drawImage(canvas, srcX, srcY, srcW, srcH, ol - selLeft, ot - selTop, or_ - ol, ob - ot)
             }
 
-            // Crop the combined canvas (DOM + drawing canvas) to the selection rectangle.
-            // The overlay is positioned over the same element, so coordinates map directly.
-            const cropCanvas = document.createElement('canvas')
-            const cropX = sx * capturePixelRatio
-            const cropY = sy * capturePixelRatio
-            const cropW = sw * capturePixelRatio
-            const cropH = sh * capturePixelRatio
-            cropCanvas.width = Math.floor(cropW)
-            cropCanvas.height = Math.floor(cropH)
-            const ctx = cropCanvas.getContext('2d')
-            if (!ctx) throw new Error('Could not get 2d context')
-
-            // Draw from the combined canvas which already has both DOM and drawing canvas
-            
-            // IMPORTANT: Fill with white background FIRST to ensure transparent areas 
-            // (where canvas has no strokes) don't become black in JPEG
-            // This makes black strokes on transparent canvas visible
-            ctx.fillStyle = '#FFFFFF'
-            ctx.fillRect(0, 0, cropCanvas.width, cropCanvas.height)
-            
-            // Then draw the content on top of white background
-            ctx.drawImage(
-                combinedCanvas,
-                cropX, cropY, cropW, cropH,
-                0, 0, cropCanvas.width, cropCanvas.height,
-            )
+            // ── Step 3: whiteboard strokes on top ─────────────────────────────
+            const drawingMain = el.querySelector<HTMLCanvasElement>('.drawing-canvas-main')
+            if (drawingMain) {
+                const visRect = getClippedScreenRect(drawingMain)
+                const ol  = Math.max(selLeft,   visRect.left)
+                const ot  = Math.max(selTop,    visRect.top)
+                const or_ = Math.min(selRight,  visRect.right)
+                const ob  = Math.min(selBottom, visRect.bottom)
+                if (or_ > ol && ob > ot) {
+                    const fullRect = drawingMain.getBoundingClientRect()
+                    const scaleX = drawingMain.width  / fullRect.width
+                    const scaleY = drawingMain.height / fullRect.height
+                    ctx.drawImage(
+                        drawingMain,
+                        (ol - fullRect.left) * scaleX, (ot - fullRect.top) * scaleY,
+                        (or_ - ol) * scaleX, (ob - ot) * scaleY,
+                        ol - selLeft, ot - selTop, or_ - ol, ob - ot,
+                    )
+                }
+            }
 
             // Convert to base64 JPEG with maximum quality for better OCR results
             const base64Image = cropCanvas.toDataURL('image/jpeg', 1.0)
@@ -2250,6 +2283,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
             {/* ── Global Snipping Tool Overlay ─────────────────────────────── */}
             {isSnippingMode && (
                 <div
+                    ref={snipOverlayRef}
                     data-snip-overlay="true"
                     className={`absolute inset-0 z-50 ${isSnipExtracting ? 'cursor-wait' : 'cursor-crosshair'}`}
                     style={{ backgroundColor: 'rgba(0,0,0,0.15)', touchAction: 'none' }}
