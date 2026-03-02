@@ -452,6 +452,7 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
     return (
         <div
             data-nodeid={id}
+            data-tutorial="content-node"
             className={`bg-white rounded-lg shadow-lg border relative flex flex-col ${isLocked ? 'nodrag nopan border-indigo-300 border-dashed' : 'border-gray-200'}`}
             style={{ width: nodeWidth, height: effectiveHeight, overflow: 'hidden' }}
         >
@@ -561,6 +562,7 @@ export default function ContentNode({ id, data }: ContentNodeProps) {
                     style={{ height: footerHeight }}
                 >
                     <button
+                        data-tutorial="test-me-btn"
                         onClick={(e) => { e.stopPropagation(); data.onTestMePage!() }}
                         className="inline-flex items-center gap-1 px-3 py-1 bg-violet-600 hover:bg-violet-700 active:bg-violet-800 text-white text-[11px] font-semibold rounded-full shadow-sm transition-colors select-none"
                     >

@@ -39,9 +39,9 @@ export default function LeftToolbar({
         'flex items-center justify-center w-9 h-9 rounded-lg transition-all duration-150 text-gray-600 hover:bg-gray-100 hover:text-gray-800'
 
     return (
-        <div className="fixed left-4 top-1/2 -translate-y-1/2 z-40 flex flex-col gap-1 p-1.5 bg-white/95 backdrop-blur-sm border border-gray-200 rounded-xl shadow-lg select-none">
+        <div data-tutorial="left-toolbar" className="fixed left-4 top-1/2 -translate-y-1/2 z-40 flex flex-col gap-1 p-1.5 bg-white/95 backdrop-blur-sm border border-gray-200 rounded-xl shadow-lg select-none">
             {/* Custom Prompt (chat with Gemini) */}
-            <button onClick={onCustomPrompt} className={btnClass} title="Custom Prompt">
+            <button data-tutorial="ai-btn" onClick={onCustomPrompt} className={btnClass} title="Custom Prompt">
                 <span className="text-[11px] font-extrabold leading-none text-indigo-500">AI</span>
             </button>
 
@@ -105,7 +105,7 @@ export default function LeftToolbar({
             <div className="h-px bg-gray-200 mx-1" />
 
             {/* Timer */}
-            <button onClick={onTimer} className={btnClass} title="Timer">
+            <button data-tutorial="timer-btn" onClick={onTimer} className={btnClass} title="Timer">
                 <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <circle cx="12" cy="12" r="10" />
                     <polyline points="12 6 12 12 16 14" />

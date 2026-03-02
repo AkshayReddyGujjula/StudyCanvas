@@ -4,6 +4,8 @@ import { ReactFlowProvider } from '@xyflow/react'
 import Canvas from './Canvas'
 import { useCanvasStore } from '../store/canvasStore'
 import { useAppStore } from '../store/appStore'
+import { useTutorialStore } from '../store/tutorialStore'
+import { TUTORIAL_FILE_DATA, createTutorialContentNode } from './tutorial/sampleContent'
 import {
     loadCanvasState,
     saveCanvasState,
@@ -272,6 +274,14 @@ export default function CanvasPage() {
                 const globalCtx = useAppStore.getState().userContext
                 if (globalCtx.name || globalCtx.age || globalCtx.status || globalCtx.educationLevel) {
                     store.setUserDetails(globalCtx)
+                }
+
+                // Tutorial canvas: inject pre-built sample content when loading fresh (no state.json)
+                const { tutorialCanvasId } = useTutorialStore.getState()
+                if (canvasId === tutorialCanvasId && !stateObj) {
+                    store.setFileData(TUTORIAL_FILE_DATA)
+                    const firstPageMarkdown = useCanvasStore.getState().pageMarkdowns[0] ?? TUTORIAL_FILE_DATA.markdown_content
+                    store.setNodes([createTutorialContentNode(firstPageMarkdown)])
                 }
 
                 // Load PDF: try local folder first, fall back to IndexedDB

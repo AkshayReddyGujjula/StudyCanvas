@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAppStore } from '../store/appStore'
+import { useTutorialStore } from '../store/tutorialStore'
+import { TutorialWelcomeModal } from './tutorial'
 import CanvasCard from './CanvasCard'
 import FolderCard from './FolderCard'
 import ToolsModal from './ToolsModal'
@@ -19,6 +21,9 @@ export default function HomePage() {
     const needsPermission = useAppStore((s) => s.needsPermission)
     const setDirectoryHandle = useAppStore((s) => s.setDirectoryHandle)
     const resetApp = useAppStore((s) => s.resetApp)
+
+    const tutorialCompleted = useTutorialStore((s) => s.tutorialCompleted)
+    const replayTutorial = useTutorialStore((s) => s.replayTutorial)
 
     const [showSettingsMenu, setShowSettingsMenu] = useState(false)
     const [showContext, setShowContext] = useState(false)
@@ -254,6 +259,7 @@ export default function HomePage() {
     }
 
     return (
+        <>
         <div className="min-h-screen bg-gray-100">
             {/* Header */}
             <header className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-30">
@@ -293,6 +299,16 @@ export default function HomePage() {
                                             <circle cx="12" cy="7" r="4" />
                                         </svg>
                                         Context
+                                    </button>
+                                    <div className="border-t border-gray-100 my-1" />
+                                    <button
+                                        onClick={() => { setShowSettingsMenu(false); replayTutorial() }}
+                                        className="w-full text-left px-3 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-2.5"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                            <polygon points="5 3 19 12 5 21 5 3" />
+                                        </svg>
+                                        Tutorial
                                     </button>
                                     <div className="border-t border-gray-100 my-1" />
                                     <button
@@ -616,5 +632,9 @@ export default function HomePage() {
                 </div>
             )}
         </div>
+
+        {/* Tutorial welcome modal - shown once for new users */}
+        {!tutorialCompleted && <TutorialWelcomeModal />}
+        </>
     )
 }

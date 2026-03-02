@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom'
+import { createBrowserRouter, RouterProvider, Navigate, Outlet } from 'react-router-dom'
 import { Analytics } from '@vercel/analytics/react'
 import { SpeedInsights } from '@vercel/speed-insights/react'
 import HomePage from './components/HomePage'
 import CanvasPage from './components/CanvasPage'
 import OnboardingModal from './components/OnboardingModal'
+import { TutorialOverlay } from './components/tutorial'
 import { useAppStore } from './store/appStore'
 import './index.css'
 
@@ -76,10 +77,26 @@ function AppGate() {
   return <HomePage />
 }
 
+// Root layout — wraps all routes so TutorialOverlay has access to Router context
+// (useNavigate inside TutorialCompletionModal requires being inside a Router)
+function RootLayout() {
+  return (
+    <>
+      <Outlet />
+      <TutorialOverlay />
+    </>
+  )
+}
+
 const router = createBrowserRouter([
-  { path: '/', element: <AppGate /> },
-  { path: '/canvas/:canvasId', element: <CanvasPage /> },
-  { path: '*', element: <Navigate to="/" replace /> },
+  {
+    element: <RootLayout />,
+    children: [
+      { path: '/', element: <AppGate /> },
+      { path: '/canvas/:canvasId', element: <CanvasPage /> },
+      { path: '*', element: <Navigate to="/" replace /> },
+    ],
+  },
 ])
 
 

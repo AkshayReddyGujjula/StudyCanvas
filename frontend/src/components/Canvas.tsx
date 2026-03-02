@@ -2212,7 +2212,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
     }, [])
 
     return (
-        <div ref={containerRef} style={{ width: '100vw', height: '100vh' }} className={isDarkMode ? 'dark-mode' : ''}>
+        <div ref={containerRef} data-tutorial="canvas-container" style={{ width: '100vw', height: '100vh' }} className={isDarkMode ? 'dark-mode' : ''}>
             {/* Whiteboard drawing overlay */}
             <DrawingCanvas />
 
@@ -2483,6 +2483,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
             {/* Top Left Menu */}
             <div className="fixed top-4 left-4 z-40">
                 <button
+                    data-tutorial="menu-btn"
                     onClick={() => { setShowMenu(!showMenu); setShowRevisionMenu(false) }}
                     className="flex items-center gap-2 px-4 py-2 bg-white text-gray-700 text-sm font-medium rounded-lg shadow-md border border-gray-200 hover:bg-gray-50 transition-colors"
                 >
@@ -2561,6 +2562,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
             {/* Top Right — Revision Menu */}
             <div className="fixed top-4 right-4 z-40">
                 <button
+                    data-tutorial="revision-btn"
                     onClick={() => { setShowRevisionMenu(!showRevisionMenu); setShowMenu(false) }}
                     className="flex items-center gap-2 px-4 py-2 bg-white text-gray-700 text-sm font-medium rounded-lg shadow-md border border-gray-200 hover:bg-gray-50 transition-colors"
                 >
@@ -2741,7 +2743,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
 
             {/* Page navigation bar — only shown when the PDF has multiple pages */}
             {pageMarkdowns.length > 1 && (
-                <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-4 py-2 bg-white border border-gray-200 shadow-md rounded-xl select-none">
+                <div data-tutorial="page-nav" className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-4 py-2 bg-white border border-gray-200 shadow-md rounded-xl select-none">
                     <button
                         disabled={currentPage === 1}
                         onClick={() => goToPage(currentPage - 1)}

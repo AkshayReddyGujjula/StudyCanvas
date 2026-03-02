@@ -101,7 +101,7 @@ export default function DrawingToolbar() {
         }`
 
     return (
-        <div ref={toolbarRef} className="fixed right-4 top-1/2 -translate-y-1/2 z-40 flex items-start gap-2">
+        <div ref={toolbarRef} data-tutorial="drawing-toolbar" className="fixed right-4 top-1/2 -translate-y-1/2 z-40 flex items-start gap-2">
             {/* Sub-panel (appears to the left of toolbar) */}
             {openPanel && (
                 <div

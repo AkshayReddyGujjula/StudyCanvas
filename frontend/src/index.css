@@ -382,3 +382,54 @@ body.rf-connecting .react-flow__node .nodrag * {
   stroke-dashoffset: 32;
   animation: draw-checkmark 0.55s cubic-bezier(0.22, 0.61, 0.36, 1) 0.12s forwards;
 }
+
+/* ── Tutorial system animations ───────────────────────────────────────────── */
+
+/* Fade-in + subtle lift used for tooltip cards and welcome/completion modals */
+@keyframes tutorial-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Slide-up for the step tooltip card on step transitions */
+@keyframes tutorial-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Pulsing glow ring around the spotlit element */
+@keyframes tutorial-ring-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 3px rgba(45, 156, 219, 0.25), 0 0 20px rgba(45, 156, 219, 0.15);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(45, 156, 219, 0.35), 0 0 30px rgba(45, 156, 219, 0.25);
+  }
+}
+
+/* Confetti particle falling animation for the completion screen */
+@keyframes tutorial-confetti {
+  0% {
+    opacity: 1;
+    transform: translateY(0) rotate(0deg);
+  }
+  80% {
+    opacity: 0.8;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(100vh) rotate(720deg);
+  }
+}
