@@ -3,15 +3,14 @@ import json
 import base64
 import logging
 import asyncio
-from google.generativeai.client import configure as genai_configure
-from google.generativeai.generative_models import GenerativeModel
-from google.generativeai.types import GenerationConfig
+from google import genai
+from google.genai import types
 from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)
 
 # Initialise the Gemini client once at module level
-genai_configure(api_key=os.environ.get("GEMINI_API_KEY", ""))
+_client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY", ""))
 
 # ── Model tier constants ──────────────────────────────────────────────────────
 # Lite: cheaper & faster — ideal for simple tasks (OCR, titles, simple Q&A)
@@ -69,7 +68,6 @@ async def generate_title(raw_text: str) -> str:
     Receives the cleaned Markdown content (not raw PDF extraction) for accuracy.
     Returns plain text with no markdown, punctuation, or explanation.
     """
-    model = GenerativeModel(MODEL_LITE)
     # Use up to 6000 chars of the (already-clean) markdown content
     excerpt = raw_text[:6000]
     prompt = (
@@ -87,22 +85,26 @@ async def generate_title(raw_text: str) -> str:
         "'Human Digestive System Overview'\n\n"
         f"Document excerpt:\n\n{excerpt}"
     )
-    response = await asyncio.to_thread(
-        lambda: model.generate_content(
-            prompt,
-            generation_config=GenerationConfig(max_output_tokens=50, temperature=0.3),
-        )
+    response = await _client.aio.models.generate_content(
+        model=MODEL_LITE,
+        contents=prompt,
+        config=types.GenerateContentConfig(max_output_tokens=50, temperature=0.3),
     )
-    # Safely extract text — finish_reason 2 (MAX_TOKENS) or blocked candidates
-    # can leave response.text inaccessible, so check candidates directly.
-    try:
-        raw = response.text
-    except ValueError:
-        # Fallback: try pulling text from the first candidate's parts
+    # Safely extract text — response.text is None when the model is blocked
+    # or hits MAX_TOKENS in the new SDK (no ValueError is raised).
+    raw = response.text
+    if not raw:
         try:
-            raw = response.candidates[0].content.parts[0].text
+            cands = response.candidates
+            raw = (
+                (cands[0].content.parts[0].text or "")
+                if cands and cands[0].content and cands[0].content.parts
+                else ""
+            )
         except Exception:
             return "Study Notes"
+    if not raw:
+        return "Study Notes"
     title = raw.strip().strip('"').strip("'")
     # Hard-cap at 6 words as a safety net
     words = title.split()
@@ -179,10 +181,6 @@ async def stream_query(
     # --- Context routing: skip raw_text if general knowledge suffices ---
     needs_context = _needs_pdf_context(question, highlighted_text)
 
-    model = GenerativeModel(
-        model_name=model_name or MODEL_LITE,
-    )
-
     if parent_response is None:
         system_prompt = (
             "You are a helpful study assistant. Start by trying to answer the student's question using the content "
@@ -245,17 +243,14 @@ Student's question:
         # layout that raw text extraction may miss entirely.
         contents: list = []
         if image_base64:
-            contents.append({"mime_type": "image/jpeg", "data": image_base64})
+            contents.append(types.Part.from_bytes(data=base64.b64decode(image_base64), mime_type="image/jpeg"))
         contents.append(full_prompt)
-        response = await model.generate_content_async(contents, stream=True)
-        async for chunk in response:
-            try:
-                text = chunk.text
-                if text:
-                    yield text
-            except ValueError:
-                # Final chunk carries finish_reason but no text parts — safe to skip
-                pass
+        async for chunk in await _client.aio.models.generate_content_stream(
+            model=model_name or MODEL_LITE, contents=contents
+        ):
+            text = chunk.text
+            if text:
+                yield text
     except Exception as e:
         logger.error(f"Gemini API streaming error: {str(e)}")
         yield f"\n\n[API Error: {str(e)}]"
@@ -263,19 +258,15 @@ Student's question:
 
 from services.pdf_service import get_page_image_base64
 
-def _make_image_part(img_b64: str) -> dict:
-    """Convert a base64 JPEG string into the dictionary format Gemini expects."""
-    return {
-        "mime_type": "image/jpeg",
-        "data": img_b64,
-    }
+def _make_image_part(img_b64: str) -> types.Part:
+    """Convert a base64 JPEG string into a Part object the new Gemini SDK expects."""
+    return types.Part.from_bytes(data=base64.b64decode(img_b64), mime_type="image/jpeg")
 
 async def extract_text_from_image_b64(img_b64: str) -> str:
     """
     Uses Gemini Vision to read substantive educational text from an image,
     ignoring page numbers and footers.
     """
-    model = GenerativeModel(MODEL_LITE)
     prompt = (
         "You are an OCR system. Extract ALL educational text, headings, bullet points, and "
         "substantive content visible in this image. "
@@ -284,7 +275,7 @@ async def extract_text_from_image_b64(img_b64: str) -> str:
     )
     contents = [_make_image_part(img_b64), prompt]
     try:
-        response = await asyncio.to_thread(lambda: model.generate_content(contents))
+        response = await _client.aio.models.generate_content(model=MODEL_LITE, contents=contents)
         extracted = (response.text or "").strip()
         logger.info(f"OCR extracted {len(extracted)} chars from image")
         return extracted
@@ -307,13 +298,6 @@ async def generate_quiz(
     Primary source is either the Gemini answers the student struggled with
     or the provided page content, depending on source_type.
     """
-    model = GenerativeModel(
-        MODEL_FLASH,
-        generation_config=GenerationConfig(
-            response_mime_type="application/json",
-        ),
-    )
-
     contents = []
     
     if source_type == "page":
@@ -327,7 +311,7 @@ async def generate_quiz(
         has_image = False
         img_b64 = image_base64 or (get_page_image_base64(pdf_id, page_index) if pdf_id and page_index is not None else None)
         if img_b64:
-            contents.append({"mime_type": "image/jpeg", "data": img_b64})
+            contents.append(types.Part.from_bytes(data=base64.b64decode(img_b64), mime_type="image/jpeg"))
             has_image = True
 
         if len(effective_content) < 20 and not has_image:
@@ -435,13 +419,13 @@ async def generate_quiz(
         if len(raw_text.strip()) < 50 and pdf_id:
             page_indexes = set(n.get("page_index") for n in struggling_nodes if n.get("page_index") is not None)
             if image_base64:
-                contents.append({"mime_type": "image/jpeg", "data": image_base64})
+                contents.append(types.Part.from_bytes(data=base64.b64decode(image_base64), mime_type="image/jpeg"))
                 prompt += "\n\n(An image of the relevant page is provided since text was unavailable.)"
             elif pdf_id:
                 for p_idx in page_indexes:
                     img_b64 = get_page_image_base64(pdf_id, p_idx)
                     if img_b64:
-                        contents.append({"mime_type": "image/jpeg", "data": img_b64})
+                        contents.append(types.Part.from_bytes(data=base64.b64decode(img_b64), mime_type="image/jpeg"))
                 if page_indexes:
                     prompt += "\n\n(Images of the relevant pages are provided since text was unavailable.)"
 
@@ -463,8 +447,12 @@ async def generate_quiz(
         )
 
     contents.append(prompt)
-    response = await asyncio.to_thread(lambda: model.generate_content(contents))
-    text = response.text.strip()
+    response = await _client.aio.models.generate_content(
+        model=MODEL_FLASH,
+        contents=contents,
+        config=types.GenerateContentConfig(response_mime_type="application/json"),
+    )
+    text = (response.text or "").strip()
     if text.startswith("```json"):
         text = text[7:]
     elif text.startswith("```"):
@@ -488,13 +476,6 @@ async def generate_flashcards(
     """
     Generates flashcards based on struggling topics or page context depending on source_type.
     """
-    model = GenerativeModel(
-        MODEL_FLASH,
-        generation_config=GenerationConfig(
-            response_mime_type="application/json",
-        ),
-    )
-
     contents = []
 
     if existing_flashcards and len(existing_flashcards) > 0:
@@ -514,7 +495,7 @@ async def generate_flashcards(
         has_image = False
         img_b64 = image_base64 or (get_page_image_base64(pdf_id, page_index) if pdf_id and page_index is not None else None)
         if img_b64:
-            contents.append({"mime_type": "image/jpeg", "data": img_b64})
+            contents.append(types.Part.from_bytes(data=base64.b64decode(img_b64), mime_type="image/jpeg"))
             has_image = True
 
         if len(effective_content) < 20 and not has_image:
@@ -589,13 +570,13 @@ async def generate_flashcards(
         if len(raw_text.strip()) < 50 and pdf_id:
             page_indexes = set(n.get("page_index") for n in struggling_nodes if n.get("page_index") is not None)
             if image_base64:
-                contents.append({"mime_type": "image/jpeg", "data": image_base64})
+                contents.append(types.Part.from_bytes(data=base64.b64decode(image_base64), mime_type="image/jpeg"))
                 prompt += "\n\n(An image of the relevant page is provided since text was unavailable.)"
             elif pdf_id:
                 for p_idx in page_indexes:
                     img_b64 = get_page_image_base64(pdf_id, p_idx)
                     if img_b64:
-                        contents.append({"mime_type": "image/jpeg", "data": img_b64})
+                        contents.append(types.Part.from_bytes(data=base64.b64decode(img_b64), mime_type="image/jpeg"))
                 if page_indexes:
                     prompt += "\n\n(Images of the relevant pages are provided since text was unavailable.)"
 
@@ -617,8 +598,12 @@ async def generate_flashcards(
         )
 
     contents.append(prompt)
-    response = await asyncio.to_thread(lambda: model.generate_content(contents))
-    text = response.text.strip()
+    response = await _client.aio.models.generate_content(
+        model=MODEL_FLASH,
+        contents=contents,
+        config=types.GenerateContentConfig(response_mime_type="application/json"),
+    )
+    text = (response.text or "").strip()
     if text.startswith("```json"):
         text = text[7:]
     elif text.startswith("```"):
@@ -651,7 +636,7 @@ async def generate_page_summary(
     # Include the page image for Vision AI analysis
     img_b64 = image_base64 or (get_page_image_base64(pdf_id, page_index) if pdf_id and page_index is not None else None)
     if img_b64:
-        contents.append({"mime_type": "image/jpeg", "data": img_b64})
+        contents.append(types.Part.from_bytes(data=base64.b64decode(img_b64), mime_type="image/jpeg"))
         has_image = True
     
     if len(effective_content) < 20 and not has_image:
@@ -691,17 +676,14 @@ async def generate_page_summary(
     contents.append(prompt)
     
     model_name = MODEL_LITE
-    model = GenerativeModel(model_name)
     
     try:
-        response = await model.generate_content_async(contents, stream=True)
-        async for chunk in response:
-            try:
-                text = chunk.text
-                if text:
-                    yield text
-            except ValueError:
-                pass
+        async for chunk in await _client.aio.models.generate_content_stream(
+            model=model_name, contents=contents
+        ):
+            text = chunk.text
+            if text:
+                yield text
     except Exception as e:
         logger.error(f"Summary generation error: {e}")
         yield f"\n\n[Error generating summary: {str(e)}]"
@@ -713,13 +695,6 @@ async def generate_page_quiz(page_content: str, pdf_id: str | None = None, page_
     No struggling nodes, no user context — pure page comprehension test.
     Returns a plain JSON array of question strings.
     """
-    model = GenerativeModel(
-        MODEL_FLASH,
-        generation_config=GenerationConfig(
-            response_mime_type="application/json",
-        ),
-    )
-
     import re as _re
     contents = []
     effective_content = (page_content or "").strip()
@@ -731,7 +706,7 @@ async def generate_page_quiz(page_content: str, pdf_id: str | None = None, page_
     has_image = False
     img_b64 = image_base64 or (get_page_image_base64(pdf_id, page_index) if pdf_id and page_index is not None else None)
     if img_b64:
-        contents.append({"mime_type": "image/jpeg", "data": img_b64})
+        contents.append(types.Part.from_bytes(data=base64.b64decode(img_b64), mime_type="image/jpeg"))
         has_image = True
 
     if len(effective_content) < 20 and not has_image:
@@ -831,8 +806,12 @@ async def generate_page_quiz(page_content: str, pdf_id: str | None = None, page_
         )
 
     contents.append(prompt)
-    response = await asyncio.to_thread(lambda: model.generate_content(contents))
-    text = response.text.strip()
+    response = await _client.aio.models.generate_content(
+        model=MODEL_FLASH,
+        contents=contents,
+        config=types.GenerateContentConfig(response_mime_type="application/json"),
+    )
+    text = (response.text or "").strip()
     if text.startswith("```json"):
         text = text[7:]
     elif text.startswith("```"):
@@ -859,8 +838,6 @@ async def grade_answer(
     Grades a student's answer to a page-quiz question and returns direct, personalised
     feedback as a plain text string (not JSON).
     """
-    model = GenerativeModel(MODEL_FLASH)
-
     personalisation = ""
     if user_details:
         name = user_details.get("name", "")
@@ -900,7 +877,7 @@ async def grade_answer(
     # diagrams, and annotations that text extraction misses
     img_b64 = image_base64 or (get_page_image_base64(pdf_id, page_index) if pdf_id and page_index is not None else None)
     if img_b64:
-        contents.append({"mime_type": "image/jpeg", "data": img_b64})
+        contents.append(types.Part.from_bytes(data=base64.b64decode(img_b64), mime_type="image/jpeg"))
         if len(cleaned_page_content) < 50:
             prompt += "\n\n(The extracted text was very limited. An image of the page is provided — use it as the primary source of truth for grading.)"
         else:
@@ -908,19 +885,23 @@ async def grade_answer(
 
     contents.append(prompt)
 
-    response = await asyncio.to_thread(
-        lambda: model.generate_content(
-            contents,
-            generation_config=GenerationConfig(max_output_tokens=8192, temperature=0.4),
-        )
+    response = await _client.aio.models.generate_content(
+        model=MODEL_FLASH,
+        contents=contents,
+        config=types.GenerateContentConfig(max_output_tokens=8192, temperature=0.4),
     )
-    try:
+    if response.text is not None:
         return response.text.strip()
-    except ValueError:
-        try:
-            return response.candidates[0].content.parts[0].text.strip()
-        except Exception:
-            return "Unable to grade your answer at this time. Please try again."
+    try:
+        cands = response.candidates
+        text = (
+            (cands[0].content.parts[0].text or "")
+            if cands and cands[0].content and cands[0].content.parts
+            else ""
+        )
+        return text.strip() if text else "Unable to grade your answer at this time. Please try again."
+    except Exception:
+        return "Unable to grade your answer at this time. Please try again."
 
 
 async def validate_answer(
@@ -953,13 +934,6 @@ async def validate_answer(
         }
 
     # ── Short answer: ask Gemini ────────────────────────────────────────────
-    model = GenerativeModel(
-        MODEL_LITE,
-        generation_config=GenerationConfig(
-            response_mime_type="application/json",
-        ),
-    )
-
     prompt = (
         "You are a supportive university teacher grading a study quiz. "
         "Evaluate whether the student's answer is correct.\n\n"
@@ -981,7 +955,13 @@ async def validate_answer(
         "No markdown fencing, no extra keys."
     )
 
-    response = await asyncio.to_thread(model.generate_content, prompt)
+    response = await _client.aio.models.generate_content(
+        model=MODEL_LITE,
+        contents=prompt,
+        config=types.GenerateContentConfig(response_mime_type="application/json"),
+    )
+    if not response.text:
+        raise HTTPException(status_code=500, detail="Empty response from model during answer validation")
     return json.loads(response.text)
 
 
@@ -994,8 +974,6 @@ async def image_to_text(base64_image: str) -> str:
     if "base64," in base64_image:
         base64_image = base64_image.split("base64,")[1]
         
-    model = GenerativeModel(MODEL_FLASH)
-    
     prompt = (
         "You are an expert Optical Character Recognition (OCR) and handwriting recognition assistant.\n"
         "The image may contain printed text, handwritten text (including freehand mouse or stylus strokes\n"
@@ -1009,22 +987,26 @@ async def image_to_text(base64_image: str) -> str:
         "4. Do not add any conversational filler, markdown fencing, or explanations."
     )
     
-    response = await asyncio.to_thread(
-        lambda: model.generate_content(
-            [
-                {"mime_type": "image/jpeg", "data": base64_image},
-                prompt
-            ],
-            generation_config=GenerationConfig(temperature=0.1),
-        )
+    response = await _client.aio.models.generate_content(
+        model=MODEL_FLASH,
+        contents=[
+            types.Part.from_bytes(data=base64.b64decode(base64_image), mime_type="image/jpeg"),
+            prompt,
+        ],
+        config=types.GenerateContentConfig(temperature=0.1),
     )
-    try:
+    if response.text is not None:
         return response.text.strip()
-    except ValueError:
-        try:
-            return response.candidates[0].content.parts[0].text.strip()
-        except Exception:
-            return ""
+    try:
+        cands = response.candidates
+        text = (
+            (cands[0].content.parts[0].text or "")
+            if cands and cands[0].content and cands[0].content.parts
+            else ""
+        )
+        return text.strip()
+    except Exception:
+        return ""
 
 
 # ── Audio Transcription ───────────────────────────────────────────────────────
@@ -1044,8 +1026,6 @@ async def transcribe_audio(audio_base64: str, mime_type: str) -> str:
     Returns:
         The transcribed text, stripped of leading/trailing whitespace.
     """
-    model = GenerativeModel(MODEL_LITE)
-
     prompt = (
         "You are a precise transcription assistant. "
         "Transcribe the following audio clip exactly as spoken. "
@@ -1053,20 +1033,24 @@ async def transcribe_audio(audio_base64: str, mime_type: str) -> str:
         "Do not add commentary, labels, or explanations — output only the transcription text."
     )
 
-    response = await asyncio.to_thread(
-        lambda: model.generate_content(
-            [
-                {"mime_type": mime_type, "data": audio_base64},
-                prompt,
-            ],
-            generation_config=GenerationConfig(temperature=0.0),
-        )
+    response = await _client.aio.models.generate_content(
+        model=MODEL_LITE,
+        contents=[
+            types.Part.from_bytes(data=base64.b64decode(audio_base64), mime_type=mime_type),
+            prompt,
+        ],
+        config=types.GenerateContentConfig(temperature=0.0),
     )
 
-    try:
+    if response.text is not None:
         return response.text.strip()
-    except ValueError:
-        try:
-            return response.candidates[0].content.parts[0].text.strip()
-        except Exception:
-            return ""
+    try:
+        cands = response.candidates
+        text = (
+            (cands[0].content.parts[0].text or "")
+            if cands and cands[0].content and cands[0].content.parts
+            else ""
+        )
+        return text.strip()
+    except Exception:
+        return ""

@@ -2,8 +2,6 @@ import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import {
     ReactFlow,
     Background,
-    Controls,
-    ControlButton,
     MiniMap,
     BackgroundVariant,
     useReactFlow,
@@ -154,7 +152,7 @@ function collectCanvasContext(nodes: Node[]): string {
 }
 
 export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; onSave?: (onProgress?: (pct: number, label: string) => void) => Promise<void> }) {
-    const { setCenter, getZoom, fitView, setViewport, getViewport, screenToFlowPosition } = useReactFlow()
+    const { setCenter, getZoom, fitView, zoomIn, zoomOut, setViewport, getViewport, screenToFlowPosition } = useReactFlow()
     const [selection, setSelection] = useState<SelectionState | null>(null)
     const [modal, setModal] = useState<ModalState | null>(null)
     const [showRevision, setShowRevision] = useState(false)
@@ -2347,22 +2345,6 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 }}
             >
                 <Background variant={BackgroundVariant.Dots} />
-                <Controls position="bottom-left">
-                    <ControlButton
-                        onClick={() => setIsDarkMode((d) => !d)}
-                        title={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
-                    >
-                        {isDarkMode ? (
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" style={{ width: '12px', height: '12px' }}>
-                                <path d="M12 2.25a.75.75 0 01.75.75v2.25a.75.75 0 01-1.5 0V3a.75.75 0 01.75-.75zM7.5 12a4.5 4.5 0 119 0 4.5 4.5 0 01-9 0zM18.894 6.166a.75.75 0 00-1.06-1.06l-1.591 1.59a.75.75 0 101.06 1.061l1.591-1.59zM21.75 12a.75.75 0 01-.75.75h-2.25a.75.75 0 010-1.5H21a.75.75 0 01.75.75zM17.834 18.894a.75.75 0 001.06-1.06l-1.59-1.591a.75.75 0 10-1.061 1.06l1.59 1.591zM12 18a.75.75 0 01.75.75V21a.75.75 0 01-1.5 0v-2.25A.75.75 0 0112 18zM7.166 17.834a.75.75 0 00-1.06 1.06l1.59 1.591a.75.75 0 001.061-1.06l-1.59-1.591zM6 12a.75.75 0 01-.75.75H3a.75.75 0 010-1.5h2.25A.75.75 0 016 12zM6.166 6.166a.75.75 0 00-1.06 1.06l1.59 1.591a.75.75 0 001.061-1.06l-1.59-1.591z" />
-                            </svg>
-                        ) : (
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" style={{ width: '12px', height: '12px' }}>
-                                <path fillRule="evenodd" d="M9.528 1.718a.75.75 0 01.162.819A8.97 8.97 0 009 6a9 9 0 009 9 8.97 8.97 0 003.463-.69.75.75 0 01.981.98 10.503 10.503 0 01-9.694 6.46c-5.799 0-10.5-4.701-10.5-10.5 0-4.368 2.667-8.112 6.46-9.694a.75.75 0 01.818.162z" clipRule="evenodd" />
-                            </svg>
-                        )}
-                    </ControlButton>
-                </Controls>
                 <MiniMap
                     nodeColor={nodeColor}
                     position="bottom-right"
@@ -2421,6 +2403,53 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                     )}
                 </div>
             )}
+
+            {/* Canvas navigation controls — rendered outside ReactFlow so they live in
+                the root stacking context and always appear above the drawing canvas overlay */}
+            <div className="canvas-nav-controls fixed bottom-4 left-4 z-[50] flex flex-col bg-white border border-gray-200 rounded-lg shadow-md overflow-hidden select-none">
+                <button
+                    onClick={() => zoomIn()}
+                    className="flex items-center justify-center w-[36px] h-[36px] text-gray-600 hover:bg-gray-100 border-b border-gray-200 transition-colors"
+                    title="Zoom in"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                        <path d="M12 5v14M5 12h14" />
+                    </svg>
+                </button>
+                <button
+                    onClick={() => zoomOut()}
+                    className="flex items-center justify-center w-[36px] h-[36px] text-gray-600 hover:bg-gray-100 border-b border-gray-200 transition-colors"
+                    title="Zoom out"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                        <path d="M5 12h14" />
+                    </svg>
+                </button>
+                <button
+                    onClick={() => fitView()}
+                    className="flex items-center justify-center w-[36px] h-[36px] text-gray-600 hover:bg-gray-100 border-b border-gray-200 transition-colors"
+                    title="Fit view"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M4 8V4m0 0h4M4 4l5 5M20 8V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5M20 16v4m0 0h-4m4 0l-5-5" />
+                    </svg>
+                </button>
+                <button
+                    onClick={() => setIsDarkMode((d) => !d)}
+                    className="flex items-center justify-center w-[36px] h-[36px] text-gray-600 hover:bg-gray-100 transition-colors"
+                    title={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+                >
+                    {isDarkMode ? (
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
+                            <path d="M12 2.25a.75.75 0 01.75.75v2.25a.75.75 0 01-1.5 0V3a.75.75 0 01.75-.75zM7.5 12a4.5 4.5 0 119 0 4.5 4.5 0 01-9 0zM18.894 6.166a.75.75 0 00-1.06-1.06l-1.591 1.59a.75.75 0 101.06 1.061l1.591-1.59zM21.75 12a.75.75 0 01-.75.75h-2.25a.75.75 0 010-1.5H21a.75.75 0 01.75.75zM17.834 18.894a.75.75 0 001.06-1.06l-1.59-1.591a.75.75 0 10-1.061 1.06l1.59 1.591zM12 18a.75.75 0 01.75.75V21a.75.75 0 01-1.5 0v-2.25A.75.75 0 0112 18zM7.166 17.834a.75.75 0 00-1.06 1.06l1.59 1.591a.75.75 0 001.061-1.06l-1.59-1.591zM6 12a.75.75 0 01-.75.75H3a.75.75 0 010-1.5h2.25A.75.75 0 016 12zM6.166 6.166a.75.75 0 00-1.06 1.06l1.59 1.591a.75.75 0 001.061-1.06l-1.59-1.591z" />
+                        </svg>
+                    ) : (
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
+                            <path fillRule="evenodd" d="M9.528 1.718a.75.75 0 01.162.819A8.97 8.97 0 009 6a9 9 0 009 9 8.97 8.97 0 003.463-.69.75.75 0 01.981.98 10.503 10.503 0 01-9.694 6.46c-5.799 0-10.5-4.701-10.5-10.5 0-4.368 2.667-8.112 6.46-9.694a.75.75 0 01.818.162z" clipRule="evenodd" />
+                        </svg>
+                    )}
+                </button>
+            </div>
 
             {/* Whiteboard toolbar */}
             <DrawingToolbar />

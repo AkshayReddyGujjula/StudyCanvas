@@ -98,7 +98,7 @@ export default function QuizQuestionNode({ id, data }: QuizQuestionNodeProps) {
                 {
                     question: q,
                     highlighted_text: data.question,
-                    raw_text: data.pageMarkdown || fileData.raw_text,
+                    raw_text: data.pageMarkdown || (fileData.raw_text ?? '').slice(0, 50000),
                     parent_response: data.feedback || null,
                     chat_history: fullHistory,
                     user_details: userDetails,

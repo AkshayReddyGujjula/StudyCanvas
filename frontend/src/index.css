@@ -107,12 +107,28 @@ body.rf-connecting .react-flow__node .nodrag * {
   background: #ffffff !important;
 }
 
-/* ReactFlow built-in controls panel — dark mode overrides */
+/* ReactFlow built-in controls panel — dark mode overrides (kept for legacy) */
 .dark-mode .react-flow__controls {
   background-color: #1e1e1e !important;
   background: #1e1e1e !important;
   border-color: #3a3a3a !important;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6) !important;
+}
+
+/* Custom canvas navigation controls panel (fixed, outside ReactFlow) — dark mode */
+.dark-mode .canvas-nav-controls {
+  background-color: #1e1e1e !important;
+  border-color: #3a3a3a !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6) !important;
+}
+
+.dark-mode .canvas-nav-controls button {
+  color: #d4d4d4 !important;
+  border-color: #3a3a3a !important;
+}
+
+.dark-mode .canvas-nav-controls button:hover {
+  background-color: #2d2d2d !important;
 }
 
 .dark-mode .react-flow__controls-button {

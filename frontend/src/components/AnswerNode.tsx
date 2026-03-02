@@ -98,7 +98,7 @@ export default function AnswerNode({ id, data }: AnswerNodeProps) {
             const response = await streamQuery({
                 question,
                 highlighted_text: data.highlighted_text,
-                raw_text: fileData.raw_text,
+                raw_text: (fileData.raw_text ?? '').slice(0, 50000),
                 parent_response: data.parentResponseText || null,
                 chat_history: fullHistoryForApi,
                 user_details: userDetails

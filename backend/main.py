@@ -1,6 +1,9 @@
 import os
-from fastapi import FastAPI
+import logging
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 
 from slowapi import _rate_limit_exceeded_handler
@@ -11,10 +14,17 @@ load_dotenv()
 
 from routes import upload, query, quiz, page_quiz, flashcards, ocr, transcription
 
+logger = logging.getLogger(__name__)
 app = FastAPI(title="StudyCanvas API")
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    logger.error("422 Validation error on %s %s: %s", request.method, request.url.path, exc.errors())
+    return JSONResponse(status_code=422, content={"detail": exc.errors()})
 
 # Allow localhost in dev and any Vercel deployment in production.
 # Set ALLOWED_ORIGINS env var to a comma-separated list to restrict origins.
