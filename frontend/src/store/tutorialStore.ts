@@ -2,8 +2,14 @@ import { create } from 'zustand'
 
 // ─── Tutorial store — manages the first-time user walkthrough ─────────────────
 
-const TUTORIAL_DONE_KEY = 'studycanvas_tutorial_done'
-const TUTORIAL_CANVAS_KEY = 'studycanvas_tutorial_canvas_id'
+export const TUTORIAL_DONE_KEY = 'studycanvas_tutorial_done'
+export const TUTORIAL_CANVAS_KEY = 'studycanvas_tutorial_canvas_id'
+
+/** Clear all tutorial-related localStorage keys (called on logout / new workspace). */
+export function clearTutorialStorage() {
+    try { localStorage.removeItem(TUTORIAL_DONE_KEY) } catch { /* ignore */ }
+    try { localStorage.removeItem(TUTORIAL_CANVAS_KEY) } catch { /* ignore */ }
+}
 
 /** Total number of spotlight steps in the tutorial (not counting the completion screen). */
 export const TUTORIAL_TOTAL_STEPS = 11
@@ -100,6 +106,7 @@ export const useTutorialStore = create<TutorialState & TutorialActions>((set, ge
 
     replayTutorial: () => {
         try { localStorage.removeItem(TUTORIAL_DONE_KEY) } catch { /* ignore */ }
-        set({ tutorialCompleted: false, isTutorialActive: false, currentStep: 0, showCompletion: false })
+        try { localStorage.removeItem(TUTORIAL_CANVAS_KEY) } catch { /* ignore */ }
+        set({ tutorialCompleted: false, isTutorialActive: false, currentStep: 0, showCompletion: false, tutorialCanvasId: null })
     },
 }))

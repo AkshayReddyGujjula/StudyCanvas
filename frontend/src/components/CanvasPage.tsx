@@ -5,7 +5,7 @@ import Canvas from './Canvas'
 import { useCanvasStore } from '../store/canvasStore'
 import { useAppStore } from '../store/appStore'
 import { useTutorialStore } from '../store/tutorialStore'
-import { TUTORIAL_FILE_DATA, createTutorialContentNode } from './tutorial/sampleContent'
+import { TUTORIAL_FILE_DATA, createTutorialContentNode, generateTutorialPdf } from './tutorial/sampleContent'
 import {
     loadCanvasState,
     saveCanvasState,
@@ -282,6 +282,13 @@ export default function CanvasPage() {
                     store.setFileData(TUTORIAL_FILE_DATA)
                     const firstPageMarkdown = useCanvasStore.getState().pageMarkdowns[0] ?? TUTORIAL_FILE_DATA.markdown_content
                     store.setNodes([createTutorialContentNode(firstPageMarkdown)])
+                    // Generate a real PDF so the content node renders in PDF mode
+                    try {
+                        const tutorialPdfBuffer = generateTutorialPdf()
+                        store.setPdfArrayBuffer(tutorialPdfBuffer)
+                    } catch (err) {
+                        console.warn('[CanvasPage] Tutorial PDF generation failed, falling back to markdown:', err)
+                    }
                 }
 
                 // Load PDF: try local folder first, fall back to IndexedDB

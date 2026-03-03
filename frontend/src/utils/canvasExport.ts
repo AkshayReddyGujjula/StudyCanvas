@@ -19,6 +19,7 @@
 
 import { toCanvas } from 'html-to-image'
 import { jsPDF } from 'jspdf'
+import type { Node } from '@xyflow/react'
 import { useCanvasStore } from '../store/canvasStore'
 import type { AnswerNodeData, QuizQuestionNodeData, FlashcardNodeData, TextNodeData } from '../types'
 
@@ -41,6 +42,15 @@ const SETTLE_DELAY_MS = 800
 
 /** Default capture scale factor (2× for high resolution) */
 const DEFAULT_SCALE = 2
+
+/** Auto-tile when the full-fit zoom falls below this level — content would be unreadably small */
+const MIN_TILE_ZOOM = 0.2
+
+/** Zoom level used for each individual tile — gives comfortable reading zoom */
+const TARGET_TILE_ZOOM = 0.55
+
+/** Fraction of tile width/height shared between adjacent tiles (prevents edge clipping) */
+const TILE_OVERLAP = 0.05
 
 // ─── Mutual-exclusion flag ───────────────────────────────────────────────────
 
@@ -77,6 +87,8 @@ export interface ExportOptions {
     getViewport: () => ViewportState
     /** React Flow setViewport — restores a previously saved viewport */
     setViewport: (vp: ViewportState, opts?: { duration?: number }) => void
+    /** React Flow getNodes — returns all currently rendered nodes with measured dimensions */
+    getNodes: () => Node[]
 }
 
 export interface ExportAllOptions extends ExportOptions {
@@ -215,6 +227,212 @@ function forceFlashcardAnswers(container: HTMLElement): () => void {
     })
 
     return () => restorers.forEach((fn) => fn())
+}
+
+// ─── Content bounds (nodes + strokes) ───────────────────────────────────────
+
+interface ContentBounds {
+    minX: number
+    minY: number
+    maxX: number
+    maxY: number
+}
+
+/**
+ * Compute the axis-aligned bounding box (in React Flow *flow* coordinates) of
+ * all content on a given page: React Flow nodes + DrawingCanvas strokes.
+ *
+ * Returns null if no content is found.
+ */
+function computeContentBounds(pageIndex: number, rfNodes: Node[]): ContentBounds | null {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+
+    const expand = (x: number, y: number) => {
+        if (x < minX) minX = x
+        if (y < minY) minY = y
+        if (x > maxX) maxX = x
+        if (y > maxY) maxY = y
+    }
+
+    // ── React Flow nodes ──────────────────────────────────────────────────
+    for (const node of rfNodes) {
+        const nx = node.position.x
+        const ny = node.position.y
+        // Use measured dimensions when available; fall back to style or defaults
+        const nw: number =
+            (node.measured?.width as number | undefined) ??
+            (node.width as number | undefined) ??
+            (node.style?.width as number | undefined) ??
+            200
+        const nh: number =
+            (node.measured?.height as number | undefined) ??
+            (node.height as number | undefined) ??
+            (node.style?.height as number | undefined) ??
+            100
+        expand(nx, ny)
+        expand(nx + nw, ny + nh)
+    }
+
+    // ── Drawing strokes ───────────────────────────────────────────────────
+    const { drawingStrokes, nodes: storeNodes } = useCanvasStore.getState()
+    const pageStrokes = drawingStrokes.filter((s) => s.pageIndex === pageIndex)
+
+    for (const stroke of pageStrokes) {
+        // Determine offset: node-attached strokes have points relative to the node
+        let ox = 0, oy = 0
+        if (stroke.nodeId) {
+            const attachedNode = storeNodes.find((n) => n.id === stroke.nodeId)
+            if (attachedNode) {
+                ox = attachedNode.position.x
+                oy = attachedNode.position.y
+            } else {
+                // Node deleted — use recorded fallback offset
+                ox = stroke.nodeOffset?.x ?? 0
+                oy = stroke.nodeOffset?.y ?? 0
+            }
+        }
+        for (const pt of stroke.points) {
+            expand(pt.x + ox, pt.y + oy)
+        }
+    }
+
+    if (!isFinite(minX)) return null
+    return { minX, minY, maxX, maxY }
+}
+
+/**
+ * Compute the React Flow viewport {x, y, zoom} that fits the given flow-coord
+ * bounds into a container of (cw × ch) pixels with `padding` fractional margin
+ * (e.g. 0.08 = 8% padding on each side).
+ */
+function viewportForBounds(
+    bounds: ContentBounds,
+    cw: number,
+    ch: number,
+    padding: number,
+): ViewportState {
+    const bW = bounds.maxX - bounds.minX
+    const bH = bounds.maxY - bounds.minY
+    if (bW <= 0 || bH <= 0) return { x: 0, y: 0, zoom: 1 }
+
+    const usableW = cw * (1 - 2 * padding)
+    const usableH = ch * (1 - 2 * padding)
+    const zoom = Math.min(usableW / bW, usableH / bH)
+
+    const midFlowX = bounds.minX + bW / 2
+    const midFlowY = bounds.minY + bH / 2
+
+    return {
+        zoom,
+        x: cw / 2 - midFlowX * zoom,
+        y: ch / 2 - midFlowY * zoom,
+    }
+}
+
+// ─── Tiling planner ───────────────────────────────────────────────────────────
+
+interface TileViewport extends ViewportState {
+    /** Human-readable label e.g. "row 1 col 2" for progress messages */
+    label: string
+}
+
+/**
+ * After calling fitView(), compute all viewport positions needed to capture
+ * the entire canvas content (nodes + strokes).
+ *
+ * Returns an array of TileViewport objects:
+ *   • Exactly 1 entry  → normal single-page export (zoom is comfortable)
+ *   • Multiple entries → content is very large; each entry is a tile that
+ *                        covers a portion of the canvas at TARGET_TILE_ZOOM
+ *
+ * Tiling is triggered automatically when the full-fit zoom would fall below
+ * MIN_TILE_ZOOM (content would be unreadably tiny in a single-page PDF).
+ */
+async function prepareViewportAndPlan(
+    pageIndex: number,
+    getNodes: () => Node[],
+    containerEl: HTMLElement,
+    fitView: (opts?: { padding?: number; duration?: number }) => void,
+    getViewport: () => ViewportState,
+    setViewport: (vp: ViewportState, opts?: { duration?: number }) => void,
+): Promise<TileViewport[]> {
+    const cw = containerEl.offsetWidth
+    const ch = containerEl.offsetHeight
+
+    // ── 1. Standard fitView (node-only) ─────────────────────────────────────
+    fitView({ padding: 0.10, duration: 0 })
+    await new Promise((r) => setTimeout(r, SETTLE_DELAY_MS))
+
+    // ── 2. Expand bounds to include drawing strokes ──────────────────────────
+    const rfNodes = getNodes()
+    const bounds = computeContentBounds(pageIndex, rfNodes)
+
+    if (!bounds) {
+        // No content — return current viewport as single tile
+        const vp = getViewport()
+        return [{ ...vp, label: 'full canvas' }]
+    }
+
+    // Build full-fit viewport from the union bounds (nodes + strokes)
+    const fullFitVp = viewportForBounds(bounds, cw, ch, 0.08)
+
+    // ── 3. Decide: single page or tiled? ─────────────────────────────────────
+    if (fullFitVp.zoom >= MIN_TILE_ZOOM) {
+        // Content fits comfortably; use full-fit viewport (strokes now included)
+        setViewport(fullFitVp, { duration: 0 })
+        await new Promise((r) => setTimeout(r, 500))
+        return [{ ...fullFitVp, label: 'full canvas' }]
+    }
+
+    // ── 4. Large canvas: build tile grid at TARGET_TILE_ZOOM ─────────────────
+    const contentW = bounds.maxX - bounds.minX
+    const contentH = bounds.maxY - bounds.minY
+
+    // Visible flow area per tile at the target zoom
+    const visW = cw / TARGET_TILE_ZOOM
+    const visH = ch / TARGET_TILE_ZOOM
+
+    // Step between tile origins (with overlap so edges aren't cut)
+    const stepW = visW * (1 - TILE_OVERLAP)
+    const stepH = visH * (1 - TILE_OVERLAP)
+
+    const cols = Math.max(1, Math.ceil(contentW / stepW))
+    const rows = Math.max(1, Math.ceil(contentH / stepH))
+
+    // Safety cap — never exceed MAX_EXPORT_PAGES tiles
+    const totalTiles = rows * cols
+    if (totalTiles > MAX_EXPORT_PAGES) {
+        // Fall back to a single low-zoom page rather than exploding page count
+        console.warn(
+            `[canvasExport] Tile count ${totalTiles} exceeds MAX_EXPORT_PAGES; falling back to single-page.`,
+        )
+        setViewport(fullFitVp, { duration: 0 })
+        await new Promise((r) => setTimeout(r, 500))
+        return [{ ...fullFitVp, label: 'full canvas (scaled)' }]
+    }
+
+    const tiles: TileViewport[] = []
+    // Centre the tile grid on the content bounds (any leftover space is shared)
+    const gridW = cols * stepW + visW * TILE_OVERLAP
+    const gridH = rows * stepH + visH * TILE_OVERLAP
+    const originX = bounds.minX - (gridW - contentW) / 2
+    const originY = bounds.minY - (gridH - contentH) / 2
+
+    for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+            const tileFlowLeft = originX + c * stepW
+            const tileFlowTop = originY + r * stepH
+            // Place top-left of tile at screen origin
+            tiles.push({
+                zoom: TARGET_TILE_ZOOM,
+                x: -tileFlowLeft * TARGET_TILE_ZOOM,
+                y: -tileFlowTop * TARGET_TILE_ZOOM,
+                label: `row ${r + 1} col ${c + 1}`,
+            })
+        }
+    }
+
+    return tiles
 }
 
 // ─── Core capture ────────────────────────────────────────────────────────────
@@ -361,7 +579,7 @@ function triggerDownload(blob: Blob, filename: string): void {
 export async function exportCurrentPage(options: ExportOptions): Promise<Blob | null> {
     if (_isExporting) throw new Error('An export is already in progress')
 
-    const { containerEl, filenameBase, onProgress, signal, fitView, getViewport, setViewport } = options
+    const { containerEl, filenameBase, onProgress, signal, fitView, getViewport, setViewport, getNodes } = options
     const currentPage = useCanvasStore.getState().currentPage
 
     if (!pageHasContent(currentPage)) return null
@@ -376,60 +594,65 @@ export async function exportCurrentPage(options: ExportOptions): Promise<Blob | 
         const h = containerEl.offsetHeight
         const scale = computeSafeScale(w, h, DEFAULT_SCALE)
 
-        // ── 1. Fit all visible nodes so nothing is off-screen ──────────────
-        fitView({ padding: 0.10, duration: 0 })
-
-        // Wait for React Flow viewport CSS transform + DrawingCanvas redraw
-        await new Promise((r) => setTimeout(r, SETTLE_DELAY_MS))
-        if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError')
-
-        // ── 1b. Zoom out an additional 12% beyond the minimum fit, keeping the
-        //        same centre — this creates a uniform padding-like ring around
-        //        all nodes in the captured image.
-        const EXTRA_ZOOM_OUT = 0.88 // 12% extra pull-back
-        const fv = getViewport()
-        const cx = containerEl.offsetWidth / 2
-        const cy = containerEl.offsetHeight / 2
-        setViewport(
-            {
-                zoom: fv.zoom * EXTRA_ZOOM_OUT,
-                x: cx - (cx - fv.x) * EXTRA_ZOOM_OUT,
-                y: cy - (cy - fv.y) * EXTRA_ZOOM_OUT,
-            },
-            { duration: 0 },
+        // ── 1. Plan viewport tiles (includes drawing strokes in bounds) ────
+        //    prepareViewportAndPlan calls fitView, expands the bounding box to
+        //    include all pen/highlighter strokes, then splits into multiple tiles
+        //    if the canvas is too wide/tall to render at a readable zoom level.
+        const tiles = await prepareViewportAndPlan(
+            currentPage, getNodes, containerEl, fitView, getViewport, setViewport,
         )
-        // Let the React Flow transform + DrawingCanvas fully settle before capture
-        await new Promise((r) => setTimeout(r, 500))
         if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError')
 
-        onProgress?.('Capturing canvas…')
+        // ── 2. Capture each tile and assemble into a PDF ──────────────────
+        let doc: jsPDF | null = null
 
-        // ── 2. Capture (overlay hiding + flashcard fix handled internally) ─
-        const capturePromise = captureContainer(containerEl, scale, signal)
-        const timeoutPromise = new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('Capture timed out')), PAGE_CAPTURE_TIMEOUT_MS),
-        )
-        const canvas = await Promise.race([capturePromise, timeoutPromise])
+        for (let t = 0; t < tiles.length; t++) {
+            const tile = tiles[t]
 
-        if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError')
+            if (tiles.length > 1) {
+                onProgress?.(`Capturing tile ${t + 1} of ${tiles.length} (${tile.label})…`)
+            } else {
+                onProgress?.('Capturing canvas…')
+            }
+
+            // Position viewport for this tile; wait for DrawingCanvas to redraw
+            setViewport(tile, { duration: 0 })
+            await new Promise((r) => setTimeout(r, 500))
+            if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError')
+
+            const capturePromise = captureContainer(containerEl, scale, signal)
+            const timeoutPromise = new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error('Capture timed out')), PAGE_CAPTURE_TIMEOUT_MS),
+            )
+            const canvas = await Promise.race([capturePromise, timeoutPromise])
+            if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError')
+
+            const preferJpeg = tiles.length > 1
+            const imgData = await canvasToCompressedBytes(canvas, preferJpeg)
+            releaseCanvas(canvas)
+
+            if (!doc) {
+                doc = new jsPDF({
+                    orientation: imgData.width >= imgData.height ? 'landscape' : 'portrait',
+                    unit: 'px',
+                    format: [imgData.width, imgData.height],
+                    compress: true,
+                })
+            } else {
+                doc.addPage(
+                    [imgData.width, imgData.height],
+                    imgData.width >= imgData.height ? 'landscape' : 'portrait',
+                )
+            }
+            doc.addImage(imgData.data, imgData.format, 0, 0, imgData.width, imgData.height)
+        }
+
+        if (!doc) throw new Error('Capture produced no output')
 
         onProgress?.('Building PDF…')
-
-        // Use async blob conversion — avoids huge base64 string on main thread
-        const imgData = await canvasToCompressedBytes(canvas)
-        releaseCanvas(canvas) // free pixel buffer immediately
-
-        const doc = new jsPDF({
-            orientation: imgData.width >= imgData.height ? 'landscape' : 'portrait',
-            unit: 'px',
-            format: [imgData.width, imgData.height],
-            compress: true,
-        })
-        doc.addImage(imgData.data, imgData.format, 0, 0, imgData.width, imgData.height)
-
+        const suffix = tiles.length > 1 ? `-tiled(${tiles.length}pages)` : ''
         const blob = doc.output('blob')
-
-        triggerDownload(blob, `${filenameBase}-Page${currentPage}.pdf`)
+        triggerDownload(blob, `${filenameBase}-Page${currentPage}${suffix}.pdf`)
         onProgress?.('Done!')
         return blob
     } finally {
@@ -459,7 +682,7 @@ export async function exportAllPages(options: ExportAllOptions): Promise<Blob | 
     const {
         containerEl, filenameBase, onProgress, signal,
         goToPage, totalPages, currentPage: originalPage,
-        fitView, getViewport, setViewport,
+        fitView, getViewport, setViewport, getNodes,
     } = options
 
     // Build list of annotated pages
@@ -494,59 +717,74 @@ export async function exportAllPages(options: ExportAllOptions): Promise<Blob | 
             if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError')
 
             const pageNum = annotatedPages[i]
-            onProgress?.(`Capturing page ${pageNum} (${i + 1} of ${annotatedPages.length})…`)
+            onProgress?.(`Preparing page ${pageNum} (${i + 1} of ${annotatedPages.length})…`)
 
             // Navigate to the page → new visible nodes + strokes
             goToPage(pageNum)
             await new Promise((r) => setTimeout(r, 300))
 
-            // Fit all this page's nodes
-            fitView({ padding: 0.05, duration: 0 })
-            await new Promise((r) => setTimeout(r, SETTLE_DELAY_MS))
+            // Build tile plan for this page (handles stroke bounds + auto-tiling)
+            const tiles = await prepareViewportAndPlan(
+                pageNum, getNodes, containerEl, fitView, getViewport, setViewport,
+            )
 
             if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError')
 
             try {
-                // Capture (overlay hiding + flashcard fix handled internally)
-                const capturePromise = captureContainer(containerEl, scale, signal)
-                const timeoutPromise = new Promise<never>((_, reject) =>
-                    setTimeout(
-                        () => reject(new Error(`Capture timed out for page ${pageNum}`)),
-                        PAGE_CAPTURE_TIMEOUT_MS,
-                    ),
-                )
-                const canvas = await Promise.race([capturePromise, timeoutPromise])
+                for (let t = 0; t < tiles.length; t++) {
+                    const tile = tiles[t]
 
-                // ★ Async JPEG compression — no base64 string in the JS heap
-                const imgData = await canvasToCompressedBytes(canvas, /* preferJpeg */ true)
+                    if (tiles.length > 1) {
+                        onProgress?.(
+                            `Page ${pageNum} (${i + 1}/${annotatedPages.length}) — tile ${t + 1}/${tiles.length}…`,
+                        )
+                    } else {
+                        onProgress?.(`Capturing page ${pageNum} (${i + 1} of ${annotatedPages.length})…`)
+                    }
 
-                // ★ Release canvas pixel buffer immediately (~33 MB per page at 2×)
-                releaseCanvas(canvas)
+                    setViewport(tile, { duration: 0 })
+                    await new Promise((r) => setTimeout(r, 500))
+                    if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError')
 
-                // ★ Add to PDF document incrementally
-                if (!doc) {
-                    doc = new jsPDF({
-                        orientation: imgData.width >= imgData.height ? 'landscape' : 'portrait',
-                        unit: 'px',
-                        format: [imgData.width, imgData.height],
-                        compress: true,
-                    })
-                } else {
-                    doc.addPage(
-                        [imgData.width, imgData.height],
-                        imgData.width >= imgData.height ? 'landscape' : 'portrait',
+                    const capturePromise = captureContainer(containerEl, scale, signal)
+                    const timeoutPromise = new Promise<never>((_, reject) =>
+                        setTimeout(
+                            () => reject(new Error(`Capture timed out for page ${pageNum} tile ${t + 1}`)),
+                            PAGE_CAPTURE_TIMEOUT_MS,
+                        ),
                     )
+                    const canvas = await Promise.race([capturePromise, timeoutPromise])
+
+                    // ★ Async JPEG compression — no base64 string in the JS heap
+                    const imgData = await canvasToCompressedBytes(canvas, /* preferJpeg */ true)
+                    // ★ Release canvas pixel buffer immediately (~33 MB per page at 2×)
+                    releaseCanvas(canvas)
+
+                    // ★ Add to PDF document incrementally
+                    if (!doc) {
+                        doc = new jsPDF({
+                            orientation: imgData.width >= imgData.height ? 'landscape' : 'portrait',
+                            unit: 'px',
+                            format: [imgData.width, imgData.height],
+                            compress: true,
+                        })
+                    } else {
+                        doc.addPage(
+                            [imgData.width, imgData.height],
+                            imgData.width >= imgData.height ? 'landscape' : 'portrait',
+                        )
+                    }
+                    doc.addImage(imgData.data, imgData.format, 0, 0, imgData.width, imgData.height)
+                    capturedCount++
+
+                    // ★ Yield to event loop — prevents "Page Unresponsive" dialog
+                    await new Promise((r) => setTimeout(r, 0))
                 }
-                doc.addImage(imgData.data, imgData.format, 0, 0, imgData.width, imgData.height)
-                capturedCount++
             } catch (err) {
                 console.warn(`[canvasExport] Failed to capture page ${pageNum}:`, err)
                 onProgress?.(`Warning: Failed to capture page ${pageNum}, skipping…`)
                 await new Promise((r) => setTimeout(r, 500))
             }
-
-            // ★ Yield to event loop — prevents "Page Unresponsive" dialog
-            await new Promise((r) => setTimeout(r, 0))
         }
 
         if (!doc || capturedCount === 0) throw new Error('All page captures failed')

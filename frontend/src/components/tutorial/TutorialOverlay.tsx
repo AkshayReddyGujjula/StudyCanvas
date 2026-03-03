@@ -12,7 +12,7 @@ import TutorialCompletionModal from './TutorialCompletionModal'
 
 const OVERLAY_BG = 'rgba(0, 0, 0, 0.65)'
 const SPOTLIGHT_PADDING = 10
-const TOOLTIP_WIDTH = 330
+const TOOLTIP_MAX_WIDTH = 360
 // Ring smoothly tracks the spotlit element; strips SNAP (no transition) to avoid the
 // wipe-across-screen glitch when the spotlight jumps between distant elements.
 const RING_TRANSITION = 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
@@ -43,11 +43,12 @@ function getSpotlightRect(selector: string | null, padding: number): SpotlightRe
 function computeTooltipStyle(
     spot: SpotlightRect,
     position: string,
+    tooltipWidth: number,
 ): React.CSSProperties {
     const vw = window.innerWidth
     const vh = window.innerHeight
-    const PAD = 16
-    const estimatedH = 360
+    const PAD = 20
+    const estimatedH = 380
 
     let top: number
     let left: number
@@ -56,27 +57,27 @@ function computeTooltipStyle(
         left = spot.left + spot.width + 16
         top = spot.top + spot.height / 2 - estimatedH / 2
         // Flip to left if overflow
-        if (left + TOOLTIP_WIDTH > vw - PAD) left = spot.left - TOOLTIP_WIDTH - 16
+        if (left + tooltipWidth > vw - PAD) left = spot.left - tooltipWidth - 16
     } else if (position === 'left') {
-        left = spot.left - TOOLTIP_WIDTH - 16
+        left = spot.left - tooltipWidth - 16
         top = spot.top + spot.height / 2 - estimatedH / 2
         if (left < PAD) left = spot.left + spot.width + 16
     } else if (position === 'top') {
         top = spot.top - estimatedH - 16
-        left = spot.left + spot.width / 2 - TOOLTIP_WIDTH / 2
+        left = spot.left + spot.width / 2 - tooltipWidth / 2
         if (top < PAD) top = spot.top + spot.height + 16
     } else {
         // bottom
         top = spot.top + spot.height + 16
-        left = spot.left + spot.width / 2 - TOOLTIP_WIDTH / 2
+        left = spot.left + spot.width / 2 - tooltipWidth / 2
         if (top + estimatedH > vh - PAD) top = spot.top - estimatedH - 16
     }
 
-    // Clamp to viewport
-    left = Math.max(PAD, Math.min(left, vw - TOOLTIP_WIDTH - PAD))
-    top = Math.max(PAD, Math.min(top, vh - PAD - 80))
+    // Clamp fully within viewport so the card is always visible on any display size
+    left = Math.max(PAD, Math.min(left, vw - tooltipWidth - PAD))
+    top = Math.max(PAD, Math.min(top, vh - estimatedH - PAD))
 
-    return { top, left, position: 'fixed', width: TOOLTIP_WIDTH }
+    return { top, left, position: 'fixed', width: tooltipWidth }
 }
 
 // ─── Phase icon lookup — maps phaseIconKey strings to crisp SVG icons ─────────
@@ -252,6 +253,8 @@ export default function TutorialOverlay() {
 
     const vw = typeof window !== 'undefined' ? window.innerWidth : 1920
     const vh = typeof window !== 'undefined' ? window.innerHeight : 1080
+    // Responsive tooltip width: slightly wider on larger screens, always fits viewport
+    const tooltipWidth = Math.min(TOOLTIP_MAX_WIDTH, Math.max(300, vw * 0.18))
     const isCentred = !step.targetSelector || !spotlightRect
 
     // Build overlay strips (4 divs around the spotlight)
@@ -265,8 +268,8 @@ export default function TutorialOverlay() {
     const RIGHT_W = sp ? Math.max(0, vw - RIGHT_X) : 0
 
     const tooltipStyle = isCentred
-        ? { position: 'fixed' as const, top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: TOOLTIP_WIDTH }
-        : computeTooltipStyle(spotlightRect!, step.tooltipPosition)
+        ? { position: 'fixed' as const, top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: tooltipWidth }
+        : computeTooltipStyle(spotlightRect!, step.tooltipPosition, tooltipWidth)
 
     // Progress percentage
     const progressPct = ((currentStep) / (TUTORIAL_TOTAL_STEPS - 1)) * 100

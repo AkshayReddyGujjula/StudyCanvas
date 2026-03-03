@@ -17,6 +17,7 @@ import {
     moveFolderOnDisk,
     type Manifest,
 } from '../services/fileSystemService'
+import { clearTutorialStorage, useTutorialStore } from './tutorialStore'
 
 // ─── App store — global state for multi-canvas homepage ──────────────────────
 
@@ -170,6 +171,9 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
         const prevCtx = loadUserContext()
         const updatedCtx = { ...prevCtx, name }
         persistUserContext(updatedCtx)
+        // Reset tutorial state so the welcome modal shows for this fresh workspace
+        clearTutorialStorage()
+        useTutorialStore.getState().replayTutorial()
         set({
             userName: name,
             isOnboarded: true,
@@ -266,6 +270,9 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
 
     resetApp: async () => {
         await clearDirectoryHandle()
+        // Clear tutorial state so the welcome modal shows again on the next workspace
+        clearTutorialStorage()
+        useTutorialStore.getState().replayTutorial()
         // Keep userContext in localStorage so it persists across logout/login
         set({
             userName: '',

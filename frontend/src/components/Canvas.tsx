@@ -191,7 +191,7 @@ function collectCanvasContext(nodes: Node[]): string {
 }
 
 export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; onSave?: (onProgress?: (pct: number, label: string) => void) => Promise<void> }) {
-    const { setCenter, getZoom, fitView, zoomIn, zoomOut, setViewport, getViewport, screenToFlowPosition } = useReactFlow()
+    const { setCenter, getZoom, fitView, zoomIn, zoomOut, setViewport, getViewport, getNodes, screenToFlowPosition } = useReactFlow()
     const [selection, setSelection] = useState<SelectionState | null>(null)
     const [modal, setModal] = useState<ModalState | null>(null)
     const [showRevision, setShowRevision] = useState(false)
@@ -2264,6 +2264,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 fitView,
                 getViewport,
                 setViewport,
+                getNodes,
             })
             showToast('Page exported successfully!')
         } catch (err) {
@@ -2325,6 +2326,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 fitView,
                 getViewport,
                 setViewport,
+                getNodes,
             })
             showToast('All pages exported successfully!')
         } catch (err) {

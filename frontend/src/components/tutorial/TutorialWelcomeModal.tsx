@@ -1,12 +1,15 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { useAppStore } from '../../store/appStore'
 import { useTutorialStore } from '../../store/tutorialStore'
 
 // ─── Tutorial Welcome Modal ───────────────────────────────────────────────────
-// Shown on the HomePage when the user is newly onboarded and has not yet
-// completed the tutorial. Clicking "Start Tour" creates a tutorial canvas,
+// Shown whenever the user creates a new workspace or on first launch.
+// Rendered via React Portal at the body level to ensure correct fixed positioning
+// on any display resolution, independent of parent transforms.
+// Clicking "Start Tour" creates a tutorial canvas,
 // injects sample content, and navigates to the canvas page.
 
 export default function TutorialWelcomeModal() {
@@ -42,7 +45,7 @@ export default function TutorialWelcomeModal() {
         skipTutorial()
     }
 
-    return (
+    return createPortal(
         <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50 backdrop-blur-sm">
             <div
                 className="bg-white rounded-2xl shadow-2xl max-w-md w-full mx-4 overflow-hidden"
@@ -149,6 +152,7 @@ export default function TutorialWelcomeModal() {
                     </p>
                 </div>
             </div>
-        </div>
+        </div>,
+        document.body,
     )
 }
