@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git merge claude/great-burnell -m \"Merge claude/great-burnell: Add Claude skills and project guide\")"
+    ]
+  }
+}
