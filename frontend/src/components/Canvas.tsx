@@ -2688,7 +2688,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                     Menu
                 </button>
                 {showMenu && (
-                    <div className="absolute top-full left-0 mt-2 flex flex-col gap-1 w-48 bg-white border border-gray-200 shadow-lg rounded-lg p-2">
+                    <div className="absolute top-full left-0 mt-2 flex flex-col gap-1 w-56 bg-white border border-gray-200 shadow-lg rounded-lg p-2">
                         {onGoHome && onSave && (
                             <button
                                 onClick={() => { setShowMenu(false); runSaveWithProgress(true) }}
@@ -2747,6 +2747,78 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                                 </svg>
                                 Tools (Context)
                             </span>
+                        </button>
+                        <div className="h-px bg-gray-200 mx-1.5" />
+                        <div className="px-3 py-1 mb-1 text-[11px] font-bold text-gray-400 uppercase tracking-wider">Export Canvas</div>
+                        <button
+                            onClick={() => { setShowMenu(false); handleExportCurrentPage() }}
+                            disabled={isExportingPage || isExportingAll}
+                            className="text-left px-3 py-2 hover:bg-indigo-50 rounded-md text-sm text-indigo-700 font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                            {isExportingPage ? (
+                                <span className="flex items-center gap-1.5">
+                                    <svg className="animate-spin h-3.5 w-3.5 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                                    </svg>
+                                    Exporting…
+                                </span>
+                            ) : (
+                                <span className="flex items-center gap-1.5 pl-2">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <rect x="3" y="3" width="18" height="18" rx="2" />
+                                        <path d="M3 9h18" />
+                                    </svg>
+                                    Save This Page
+                                </span>
+                            )}
+                        </button>
+                        <button
+                            onClick={() => { setShowMenu(false); handleExportAllPages() }}
+                            disabled={isExportingPage || isExportingAll}
+                            className="text-left px-3 py-2 hover:bg-indigo-50 rounded-md text-sm text-indigo-700 font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                            {isExportingAll ? (
+                                <span className="flex items-center gap-1.5">
+                                    <svg className="animate-spin h-3.5 w-3.5 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                                    </svg>
+                                    Exporting…
+                                </span>
+                            ) : (
+                                <span className="flex items-center gap-1.5 pl-2">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <rect x="3" y="3" width="18" height="18" rx="2" />
+                                        <path d="M3 9h18" />
+                                        <path d="M3 15h18" />
+                                    </svg>
+                                    Save All Pages
+                                </span>
+                            )}
+                        </button>
+                        <button
+                            onClick={() => { setShowMenu(false); handleDownloadPDF() }}
+                            disabled={!nodes.some((n) => n.type === 'answerNode' || n.type === 'quizQuestionNode') || isGeneratingPDF}
+                            className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                            {isGeneratingPDF ? (
+                                <span className="flex items-center gap-1.5">
+                                    <svg className="animate-spin h-3.5 w-3.5 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                                    </svg>
+                                    Generating…
+                                </span>
+                            ) : (
+                                <span className="flex items-center gap-1.5 pl-2">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                        <polyline points="14 2 14 8 20 8" />
+                                    </svg>
+                                    Save Notes (Text)
+                                </span>
+                            )}
                         </button>
                     </div>
                 )}
@@ -2827,78 +2899,6 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                                 </svg>
                                 Current Page
                             </span>
-                        </button>
-                        <div className="h-px bg-gray-200 mx-1.5" />
-                        <div className="px-3 py-1 mb-1 text-[11px] font-bold text-gray-400 uppercase tracking-wider">Export Canvas</div>
-                        <button
-                            onClick={handleExportCurrentPage}
-                            disabled={isExportingPage || isExportingAll}
-                            className="text-left px-3 py-2 hover:bg-indigo-50 rounded-md text-sm text-indigo-700 font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                        >
-                            {isExportingPage ? (
-                                <span className="flex items-center gap-1.5">
-                                    <svg className="animate-spin h-3.5 w-3.5 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                                    </svg>
-                                    Exporting…
-                                </span>
-                            ) : (
-                                <span className="flex items-center gap-1.5 pl-2">
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                        <rect x="3" y="3" width="18" height="18" rx="2" />
-                                        <path d="M3 9h18" />
-                                    </svg>
-                                    Save This Page
-                                </span>
-                            )}
-                        </button>
-                        <button
-                            onClick={handleExportAllPages}
-                            disabled={isExportingPage || isExportingAll}
-                            className="text-left px-3 py-2 hover:bg-indigo-50 rounded-md text-sm text-indigo-700 font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                        >
-                            {isExportingAll ? (
-                                <span className="flex items-center gap-1.5">
-                                    <svg className="animate-spin h-3.5 w-3.5 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                                    </svg>
-                                    Exporting…
-                                </span>
-                            ) : (
-                                <span className="flex items-center gap-1.5 pl-2">
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                        <rect x="3" y="3" width="18" height="18" rx="2" />
-                                        <path d="M3 9h18" />
-                                        <path d="M3 15h18" />
-                                    </svg>
-                                    Save All Pages
-                                </span>
-                            )}
-                        </button>
-                        <button
-                            onClick={handleDownloadPDF}
-                            disabled={!nodes.some((n) => n.type === 'answerNode' || n.type === 'quizQuestionNode') || isGeneratingPDF}
-                            className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                        >
-                            {isGeneratingPDF ? (
-                                <span className="flex items-center gap-1.5">
-                                    <svg className="animate-spin h-3.5 w-3.5 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                                    </svg>
-                                    Generating…
-                                </span>
-                            ) : (
-                                <span className="flex items-center gap-1.5 pl-2">
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                                        <polyline points="14 2 14 8 20 8" />
-                                    </svg>
-                                    Save Notes (Text)
-                                </span>
-                            )}
                         </button>
                     </div>
                 )}

@@ -8,6 +8,8 @@ type ToolPanel = 'pen1' | 'pen2' | 'highlighter' | 'eraser' | 'text' | null
 export default function DrawingToolbar() {
     const [openPanel, setOpenPanel] = useState<ToolPanel>(null)
     const toolbarRef = useRef<HTMLDivElement>(null)
+    const [isCollapsed, setIsCollapsed] = useState(false)
+    const [isHovering, setIsHovering] = useState(false)
 
     const activeTool = useCanvasStore((s) => s.activeTool)
     const setActiveTool = useCanvasStore((s) => s.setActiveTool)
@@ -48,6 +50,20 @@ export default function DrawingToolbar() {
             setOpenPanel(null)
         }
     }, [activeTool])
+
+    // Collapse hover detection — show when cursor is near the right edge
+    useEffect(() => {
+        if (!isCollapsed) return
+        const handleMouseMove = (e: MouseEvent) => {
+            if (window.innerWidth - e.clientX < 20) {
+                setIsHovering(true)
+            } else if (window.innerWidth - e.clientX > 120) {
+                setIsHovering(false)
+            }
+        }
+        document.addEventListener('mousemove', handleMouseMove)
+        return () => document.removeEventListener('mousemove', handleMouseMove)
+    }, [isCollapsed])
 
     const handlePenColorChange = useCallback((pen: 'pen1' | 'pen2', color: string) => {
         const current = toolSettings[pen]
@@ -100,8 +116,18 @@ export default function DrawingToolbar() {
                 : 'text-gray-600 hover:bg-gray-100 hover:text-gray-800'
         }`
 
+    const isVisible = !isCollapsed || isHovering
+
     return (
-        <div ref={toolbarRef} data-tutorial="drawing-toolbar" className="fixed right-4 top-1/2 -translate-y-1/2 z-40 flex items-start gap-2">
+        <div
+            ref={toolbarRef}
+            data-tutorial="drawing-toolbar"
+            className="fixed right-4 z-40 flex items-start gap-2 transition-transform duration-300"
+            style={{
+                top: '50%',
+                transform: `translateY(-50%) translateX(${isVisible ? '0' : 'calc(100% + 1.5rem)'})`
+            }}
+        >
             {/* Sub-panel (appears to the left of toolbar) */}
             {openPanel && (
                 <div
@@ -312,6 +338,27 @@ export default function DrawingToolbar() {
                         <polyline points="3 6 5 6 21 6" />
                         <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                     </svg>
+                </button>
+
+                <div className="h-px bg-gray-200 mx-1" />
+
+                {/* Collapse toggle */}
+                <button
+                    onClick={() => { setIsCollapsed(!isCollapsed); setIsHovering(false); setOpenPanel(null) }}
+                    className="flex items-center justify-center w-full h-4 rounded px-2 transition-all duration-150 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                    title={isCollapsed ? 'Pin toolbar' : 'Collapse toolbar'}
+                >
+                    {isCollapsed ? (
+                        <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="11 17 6 12 11 7" />
+                            <polyline points="18 17 13 12 18 7" />
+                        </svg>
+                    ) : (
+                        <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="13 17 18 12 13 7" />
+                            <polyline points="6 17 11 12 6 7" />
+                        </svg>
+                    )}
                 </button>
             </div>
         </div>

@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useRef, useState, useEffect } from 'react'
 
 interface LeftToolbarProps {
     onCustomPrompt: () => void
@@ -22,6 +22,22 @@ export default function LeftToolbar({
     onSummary,
 }: LeftToolbarProps) {
     const fileInputRef = useRef<HTMLInputElement>(null)
+    const toolbarRef = useRef<HTMLDivElement>(null)
+    const [isCollapsed, setIsCollapsed] = useState(false)
+    const [isHovering, setIsHovering] = useState(false)
+
+    useEffect(() => {
+        if (!isCollapsed) return
+        const handleMouseMove = (e: MouseEvent) => {
+            if (e.clientX < 20) {
+                setIsHovering(true)
+            } else if (e.clientX > 120) {
+                setIsHovering(false)
+            }
+        }
+        document.addEventListener('mousemove', handleMouseMove)
+        return () => document.removeEventListener('mousemove', handleMouseMove)
+    }, [isCollapsed])
 
     const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0]
@@ -35,11 +51,21 @@ export default function LeftToolbar({
         e.target.value = ''
     }
 
+    const isVisible = !isCollapsed || isHovering
+
     const btnClass =
         'flex items-center justify-center w-9 h-9 rounded-lg transition-all duration-150 text-gray-600 hover:bg-gray-100 hover:text-gray-800'
 
     return (
-        <div data-tutorial="left-toolbar" className="fixed left-4 top-1/2 -translate-y-1/2 z-40 flex flex-col gap-1 p-1.5 bg-white/95 backdrop-blur-sm border border-gray-200 rounded-xl shadow-lg select-none">
+        <div
+            ref={toolbarRef}
+            data-tutorial="left-toolbar"
+            className="fixed left-4 z-40 flex flex-col gap-1 p-1.5 bg-white/95 backdrop-blur-sm border border-gray-200 rounded-xl shadow-lg select-none transition-transform duration-300"
+            style={{
+                top: '50%',
+                transform: `translateY(-50%) translateX(${isVisible ? '0' : 'calc(-100% - 1.5rem)'})`
+            }}
+        >
             {/* Custom Prompt (chat with Gemini) */}
             <button data-tutorial="ai-btn" onClick={onCustomPrompt} className={btnClass} title="Custom Prompt">
                 <span className="text-[11px] font-extrabold leading-none text-indigo-500">AI</span>
@@ -123,6 +149,27 @@ export default function LeftToolbar({
                     <line x1="16" y1="17" x2="8" y2="17" />
                     <polyline points="10 9 9 9 8 9" />
                 </svg>
+            </button>
+
+            <div className="h-px bg-gray-200 mx-1" />
+
+            {/* Collapse toggle */}
+            <button
+                onClick={() => { setIsCollapsed(!isCollapsed); setIsHovering(false) }}
+                className="flex items-center justify-center w-full h-4 rounded px-2 transition-all duration-150 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                title={isCollapsed ? 'Pin toolbar' : 'Collapse toolbar'}
+            >
+                {isCollapsed ? (
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="13 17 18 12 13 7" />
+                        <polyline points="6 17 11 12 6 7" />
+                    </svg>
+                ) : (
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="11 17 6 12 11 7" />
+                        <polyline points="18 17 13 12 18 7" />
+                    </svg>
+                )}
             </button>
         </div>
     )
