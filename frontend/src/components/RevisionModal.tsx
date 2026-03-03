@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import type { Node } from '@xyflow/react'
 import { useCanvasStore } from '../store/canvasStore'
 import { extractPageImageBase64 } from '../utils/pdfImageExtractor'
-import { generateQuiz, validateAnswer } from '../api/studyApi'
+import { generateQuiz, validateAnswer, streamQuizFollowUp } from '../api/studyApi'
 import type { AnswerNodeData, QuizQuestion, ValidateAnswerResponse } from '../types'
 import ModelIndicator from './ModelIndicator'
 
@@ -22,6 +22,12 @@ interface QuestionState {
     answerText: string
     selectedOption: number | null
     validationResult: ValidateAnswerResponse | null
+}
+
+/** A single message in the per-question follow-up chat */
+interface FollowUpMessage {
+    role: 'user' | 'model'
+    content: string
 }
 
 const emptyQuestionState = (): QuestionState => ({
@@ -56,6 +62,15 @@ export default function RevisionModal({
     // Track which model was used for quiz generation and validation
     const [quizModelUsed, setQuizModelUsed] = useState<string | undefined>(undefined)
     const [validationModelUsed, setValidationModelUsed] = useState<string | undefined>(undefined)
+
+    // ── Per-question follow-up chat ──────────────────────────────────────────
+    // Stored as an array parallel to questionStates (indexed by question index).
+    // Each entry is the list of messages for that question's follow-up chat.
+    const [followUpHistories, setFollowUpHistories] = useState<FollowUpMessage[][]>([])
+    const [followUpInput, setFollowUpInput] = useState('')
+    const [isFollowUpStreaming, setIsFollowUpStreaming] = useState(false)
+    const followUpAbortRef = useRef<AbortController | null>(null)
+    const followUpBottomRef = useRef<HTMLDivElement | null>(null)
 
     // Guard: only generate the quiz once on mount, never re-fetch if canvas updates.
     const hasFetchedRef = useRef(false)
@@ -131,6 +146,7 @@ export default function RevisionModal({
                 setQuestions(quizResult.questions)
                 setQuizModelUsed(quizResult.model_used)
                 setQuestionStates(quizResult.questions.map(() => emptyQuestionState()))
+                setFollowUpHistories(quizResult.questions.map(() => []))
                 setLoading(false)
             } catch (err: unknown) {
                 console.error('Revision quiz generation error:', err)
@@ -158,6 +174,9 @@ export default function RevisionModal({
     // Derived current-question state
     const currentState: QuestionState = questionStates[currentIndex] ?? emptyQuestionState()
     const { answerText, selectedOption, validationResult } = currentState
+
+    // Current question's follow-up history
+    const currentFollowUp: FollowUpMessage[] = followUpHistories[currentIndex] ?? []
 
     const updateCurrentState = useCallback((update: Partial<QuestionState>) => {
         setQuestionStates((prev) => {
@@ -214,6 +233,13 @@ export default function RevisionModal({
 
     const handleNext = () => {
         if (!questions) return
+        // Cancel any ongoing follow-up stream when moving to next question
+        if (followUpAbortRef.current) {
+            followUpAbortRef.current.abort()
+            followUpAbortRef.current = null
+        }
+        setIsFollowUpStreaming(false)
+        setFollowUpInput('')
         if (currentIndex >= questions.length - 1) {
             setShowScore(true)
         } else {
@@ -223,9 +249,104 @@ export default function RevisionModal({
 
     const handleBack = () => {
         if (currentIndex > 0) {
+            // Cancel any ongoing follow-up stream
+            if (followUpAbortRef.current) {
+                followUpAbortRef.current.abort()
+                followUpAbortRef.current = null
+            }
+            setIsFollowUpStreaming(false)
+            setFollowUpInput('')
             setCurrentIndex((i) => i - 1)
         }
     }
+
+    // ── Follow-up chat submission ─────────────────────────────────────────
+    const handleFollowUpSubmit = useCallback(async (e?: React.FormEvent) => {
+        if (e) e.preventDefault()
+        if (!followUpInput.trim() || isFollowUpStreaming || !current || !validationResult) return
+
+        const userMsg: FollowUpMessage = { role: 'user', content: followUpInput.trim() }
+        const modelPlaceholder: FollowUpMessage = { role: 'model', content: '' }
+
+        // Optimistically append user message + empty model placeholder
+        setFollowUpHistories((prev) => {
+            const next = [...prev]
+            next[currentIndex] = [...(next[currentIndex] ?? []), userMsg, modelPlaceholder]
+            return next
+        })
+        setFollowUpInput('')
+        setIsFollowUpStreaming(true)
+
+        const controller = new AbortController()
+        followUpAbortRef.current = controller
+
+        // Build history excluding the empty placeholder we just added
+        const priorHistory: FollowUpMessage[] = [...(followUpHistories[currentIndex] ?? [])]
+
+        // The student's answer text — for MCQ questions use the selected option text
+        const studentAnswerText = current.question_type === 'mcq' && selectedOption !== null
+            ? (current.options?.[selectedOption] ?? answerText)
+            : answerText
+
+        try {
+            const response = await streamQuizFollowUp(
+                {
+                    quiz_question: current.question,
+                    student_answer: studentAnswerText,
+                    ai_feedback: validationResult.explanation,
+                    follow_up_message: userMsg.content,
+                    chat_history: priorHistory.map((m) => ({ role: m.role, content: m.content })),
+                    raw_text: rawText.slice(0, 8000) || undefined,
+                },
+                controller.signal,
+            )
+
+            if (!response.body) throw new Error('No response body')
+            const reader = response.body.getReader()
+            const decoder = new TextDecoder()
+            let accumulated = ''
+
+            while (true) {
+                const { done, value } = await reader.read()
+                if (done) break
+                accumulated += decoder.decode(value, { stream: true })
+                // Update the last message (model placeholder) with the accumulated text
+                setFollowUpHistories((prev) => {
+                    const next = [...prev]
+                    const msgs = [...(next[currentIndex] ?? [])]
+                    if (msgs.length > 0) {
+                        msgs[msgs.length - 1] = { role: 'model', content: accumulated }
+                    }
+                    next[currentIndex] = msgs
+                    return next
+                })
+            }
+        } catch (err) {
+            if ((err as Error).name !== 'AbortError') {
+                console.error('Follow-up chat error:', err)
+                // Replace empty placeholder with error message
+                setFollowUpHistories((prev) => {
+                    const next = [...prev]
+                    const msgs = [...(next[currentIndex] ?? [])]
+                    if (msgs.length > 0) {
+                        msgs[msgs.length - 1] = { role: 'model', content: 'Sorry, I could not generate a response. Please try again.' }
+                    }
+                    next[currentIndex] = msgs
+                    return next
+                })
+            }
+        } finally {
+            setIsFollowUpStreaming(false)
+            followUpAbortRef.current = null
+        }
+    }, [followUpInput, isFollowUpStreaming, current, validationResult, currentIndex, followUpHistories, selectedOption, answerText, rawText])
+
+    // Auto-scroll follow-up chat to bottom when new messages arrive
+    useEffect(() => {
+        if (followUpBottomRef.current) {
+            followUpBottomRef.current.scrollIntoView({ behavior: 'smooth' })
+        }
+    }, [currentFollowUp])
 
     // ── Option button styling ────────────────────────────────────────────
     const getOptionClass = (optionIndex: number): string => {
@@ -428,8 +549,80 @@ export default function RevisionModal({
                             </div>
                         )}
 
+                        {/* ── Follow-up AI chat (visible only after feedback is shown) ── */}
+                        {validationResult && (
+                            <div className="mt-4 border border-indigo-100 rounded-xl bg-indigo-50/40 overflow-hidden">
+                                {/* Chat header */}
+                                <div className="flex items-center gap-2 px-3 py-2 border-b border-indigo-100 bg-indigo-50">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5 text-indigo-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                                    </svg>
+                                    <span className="text-xs font-semibold text-indigo-700">Ask the AI tutor a follow-up question</span>
+                                    <span className="ml-auto text-[10px] text-indigo-400 font-medium">Flash Lite</span>
+                                </div>
+
+                                {/* Message history */}
+                                {currentFollowUp.length > 0 && (
+                                    <div className="px-3 py-2 space-y-2 max-h-48 overflow-y-auto">
+                                        {currentFollowUp.map((msg, i) => (
+                                            <div
+                                                key={i}
+                                                className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                                            >
+                                                <div
+                                                    className={`max-w-[85%] rounded-lg px-3 py-1.5 text-xs leading-relaxed ${msg.role === 'user'
+                                                            ? 'bg-indigo-600 text-white'
+                                                            : 'bg-white border border-indigo-100 text-gray-700'
+                                                        }`}
+                                                >
+                                                    {msg.content || (
+                                                        <span className="flex items-center gap-1 text-gray-400">
+                                                            <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '0ms' }} />
+                                                            <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '150ms' }} />
+                                                            <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '300ms' }} />
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ))}
+                                        <div ref={followUpBottomRef} />
+                                    </div>
+                                )}
+
+                                {/* Follow-up input */}
+                                <form
+                                    onSubmit={handleFollowUpSubmit}
+                                    className="flex items-center gap-2 px-3 py-2 border-t border-indigo-100"
+                                >
+                                    <input
+                                        type="text"
+                                        value={followUpInput}
+                                        onChange={(e) => setFollowUpInput(e.target.value)}
+                                        disabled={isFollowUpStreaming}
+                                        placeholder="Ask a follow-up question..."
+                                        className="flex-1 text-xs px-3 py-1.5 rounded-lg border border-indigo-200 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 outline-none bg-white disabled:bg-gray-50 disabled:text-gray-400 transition-all"
+                                    />
+                                    <button
+                                        type="submit"
+                                        disabled={!followUpInput.trim() || isFollowUpStreaming}
+                                        className="flex items-center justify-center w-7 h-7 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+                                        title="Send"
+                                    >
+                                        {isFollowUpStreaming ? (
+                                            <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                        ) : (
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                                <line x1="22" y1="2" x2="11" y2="13" />
+                                                <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                                            </svg>
+                                        )}
+                                    </button>
+                                </form>
+                            </div>
+                        )}
+
                         {/* ── Back / Next navigation ── */}
-                        <div className="flex items-center justify-between mt-2">
+                        <div className="flex items-center justify-between mt-4">
                             {/* Back button — always visible but disabled on first question */}
                             <button
                                 onClick={handleBack}
@@ -458,4 +651,3 @@ export default function RevisionModal({
         </div>
     )
 }
-

@@ -224,3 +224,29 @@ export const transcribeAudio = async (
     )
     return response.data
 }
+
+/**
+ * Stream a follow-up clarification response from the AI tutor after a revision
+ * quiz question has been answered and graded. Uses Flash Lite for fast, cheap
+ * conversational responses. Returns the raw Response for streaming.
+ */
+export const streamQuizFollowUp = async (
+    request: {
+        quiz_question: string
+        student_answer: string
+        ai_feedback: string
+        follow_up_message: string
+        chat_history?: { role: 'user' | 'model'; content: string }[]
+        raw_text?: string
+    },
+    signal: AbortSignal,
+): Promise<Response> => {
+    const response = await fetch(`${API_BASE}/api/quiz-followup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+        signal,
+    })
+    return response
+}
+

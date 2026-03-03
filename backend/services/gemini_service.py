@@ -1105,3 +1105,60 @@ async def transcribe_audio(audio_base64: str, mime_type: str) -> str:
         raise ValueError("No speech detected in the recording. Please speak clearly and try again.")
 
     return result
+
+
+async def quiz_followup_chat(
+    quiz_question: str,
+    student_answer: str,
+    ai_feedback: str,
+    follow_up_message: str,
+    chat_history: list | None = None,
+    raw_text: str | None = None,
+):
+    """
+    Streams a follow-up explanation after a revision quiz question has been answered
+    and graded. The student can ask clarification questions to deepen understanding.
+
+    Uses MODEL_LITE (Flash Lite) — these are short conversational clarifications that
+    don't warrant the heavier Flash model.
+    """
+    context_block = ""
+    if raw_text and raw_text.strip():
+        context_block = f"\n\nRelevant document excerpt (for additional context):\n{raw_text[:4000].strip()}\n"
+
+    history_block = ""
+    if chat_history:
+        history_block = "\n\nPrior follow-up conversation:\n"
+        for msg in chat_history:
+            role = msg.role if hasattr(msg, "role") else msg.get("role", "user")
+            content = msg.content if hasattr(msg, "content") else msg.get("content", "")
+            history_block += f"{'Student' if role == 'user' else 'Tutor'}: {content}\n"
+
+    prompt = (
+        "You are a patient and knowledgeable tutor helping a student understand a quiz answer better.\n\n"
+        "Context for this conversation:\n"
+        f"Quiz Question: {quiz_question}\n"
+        f"Student's Answer: {student_answer}\n"
+        f"Feedback already given: {ai_feedback}\n"
+        f"{context_block}"
+        f"{history_block}\n\n"
+        "The student now has a follow-up question. Answer it clearly and concisely.\n"
+        "- Build on the feedback already provided — do not repeat it verbatim.\n"
+        "- Use plain language and concrete examples where helpful.\n"
+        "- Keep your response focused: 2-4 sentences or a short bullet list.\n"
+        "- DO NOT just repeat the original feedback.\n\n"
+        f"Student's follow-up: {follow_up_message}"
+    )
+
+    try:
+        async for chunk in await _client.aio.models.generate_content_stream(
+            model=MODEL_LITE,
+            contents=[prompt],
+        ):
+            text = chunk.text
+            if text:
+                yield text
+    except Exception as e:
+        logger.error(f"Quiz follow-up chat error: {str(e)}")
+        yield f"\n\n[Error: {str(e)}]"
+

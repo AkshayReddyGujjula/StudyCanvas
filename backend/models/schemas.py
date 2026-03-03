@@ -101,3 +101,13 @@ class Flashcard(BaseModel):
     question: str
     answer: str
 
+
+class QuizFollowUpRequest(BaseModel):
+    """Request body for a follow-up question after a revision quiz answer."""
+    quiz_question: str = Field(..., max_length=2000, description="The original quiz question")
+    student_answer: str = Field(..., max_length=5000, description="The student's submitted answer")
+    ai_feedback: str = Field(..., max_length=5000, description="The AI's feedback/explanation provided after grading")
+    follow_up_message: str = Field(..., max_length=2000, description="The student's follow-up question")
+    chat_history: Optional[list[ChatMessage]] = Field(default=None, description="Prior follow-up chat turns")
+    raw_text: Optional[str] = Field(None, max_length=50000, description="Relevant page content for additional context")
+

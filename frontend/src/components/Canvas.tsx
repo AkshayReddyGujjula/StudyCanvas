@@ -1053,6 +1053,22 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
     }, [getViewportCenter, currentPage, nodes, setNodes, persistToLocalStorage])
 
     const handleSpawnSummary = useCallback(async () => {
+        // ── Guard: max 1 summary node per page ──────────────────────────────
+        // Check if a summary node already exists for the current page.
+        // Pinned nodes appear on all pages but belong to a different source page,
+        // so we only block if the node's sourcePage matches and it's NOT pinned to this page.
+        const existingSummary = nodes.find((n) => {
+            if (n.type !== 'summaryNode') return false
+            const d = n.data as unknown as SummaryNodeData
+            // A non-pinned summary that belongs to the current page
+            if (!d.isPinned && d.sourcePage === currentPage) return true
+            return false
+        })
+        if (existingSummary) {
+            showToast(`A summary for page ${currentPage} already exists. Delete it first to generate a new one.`)
+            return
+        }
+
         const center = getViewportCenter()
         const nodeWidth = 350
         const nodeHeight = 350
@@ -1140,7 +1156,7 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
             }
         }
         persistToLocalStorage()
-    }, [getViewportCenter, currentPage, pageMarkdowns, fileData, userDetails, nodes, setNodes, updateNodeData, persistToLocalStorage])
+    }, [getViewportCenter, currentPage, pageMarkdowns, fileData, userDetails, nodes, setNodes, updateNodeData, persistToLocalStorage, showToast])
 
     // Dismiss popup on mousedown outside
     useEffect(() => {
