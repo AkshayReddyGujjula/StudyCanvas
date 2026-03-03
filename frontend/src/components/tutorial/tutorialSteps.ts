@@ -129,7 +129,7 @@ export const tutorialSteps: TutorialStep[] = [
         phaseIconKey: 'wrench',
         title: 'Smart Study Toolkit',
         description:
-            'The left toolbar has everything: Snipping Tool (drag a region → Gemini reads it with Vision AI), Image upload, Custom Flashcards, Sticky Notes, Voice Recorder, and AI Summary Generator.',
+            'The left toolbar has everything: Snipping Tool, Image upload, Custom Flashcards, Sticky Notes, Voice Recorder, and AI Summary Generator. Click the small rectangular button at the bottom to collapse the toolbar to the edge — hover near the left side to peek it back.',
         proTip: 'Ctrl+Shift+S activates the Snipping Tool — ask Gemini about any diagram or chart on screen',
         targetSelector: '[data-tutorial="left-toolbar"]',
         tooltipPosition: 'right',
@@ -157,7 +157,7 @@ export const tutorialSteps: TutorialStep[] = [
         phaseIconKey: 'paintbrush',
         title: 'Whiteboard & Drawing',
         description:
-            'Use the bottom-right toolbar to switch to whiteboard tools: Pen, Highlighter, Eraser, and Text. Draw diagrams, create mind maps, annotate your notes — all on the canvas.',
+            'Use the right toolbar to switch to whiteboard tools: Pen, Highlighter, Eraser, and Text. Draw diagrams, annotate your notes — all on the canvas. Collapse the toolbar with the small rectangular button at the bottom; hover near the right edge to bring it back.',
         proTip: 'Drawings are page-scoped — switch to another page for a completely fresh whiteboard',
         targetSelector: '[data-tutorial="drawing-toolbar"]',
         tooltipPosition: 'left',

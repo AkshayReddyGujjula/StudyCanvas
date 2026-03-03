@@ -43,11 +43,14 @@ const SETTLE_DELAY_MS = 800
 /** Default capture scale factor (2× for high resolution) */
 const DEFAULT_SCALE = 2
 
-/** Auto-tile when the full-fit zoom falls below this level — content would be unreadably small */
-const MIN_TILE_ZOOM = 0.2
+/** Auto-tile when the full-fit zoom falls below this level — content would be unreadably small.
+ *  Raised from 0.2 → 0.5 so that medium-large canvases are also split into tiles,
+ *  producing higher-quality PDF output instead of one greatly zoomed-out page. */
+const MIN_TILE_ZOOM = 0.5
 
-/** Zoom level used for each individual tile — gives comfortable reading zoom */
-const TARGET_TILE_ZOOM = 0.55
+/** Zoom level used for each individual tile — gives comfortable reading zoom.
+ *  Raised from 0.55 → 0.75 for sharper tile captures. */
+const TARGET_TILE_ZOOM = 0.75
 
 /** Fraction of tile width/height shared between adjacent tiles (prevents edge clipping) */
 const TILE_OVERLAP = 0.05

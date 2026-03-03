@@ -119,6 +119,24 @@ export default function DrawingToolbar() {
     const isVisible = !isCollapsed || isHovering
 
     return (
+        <>
+        {/* Thin edge indicator strip — visible only when collapsed and not peeking */}
+        {isCollapsed && !isHovering && (
+            <div
+                className="fixed right-0 z-40 cursor-pointer"
+                style={{
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    width: '6px',
+                    height: '64px',
+                    borderRadius: '6px 0 0 6px',
+                    background: 'rgba(156,163,175,0.7)',
+                    boxShadow: '-2px 0 8px rgba(0,0,0,0.18)',
+                }}
+                onClick={() => setIsHovering(true)}
+                title="Show drawing toolbar"
+            />
+        )}
         <div
             ref={toolbarRef}
             data-tutorial="drawing-toolbar"
@@ -362,6 +380,7 @@ export default function DrawingToolbar() {
                 </button>
             </div>
         </div>
+        </>
     )
 }
 

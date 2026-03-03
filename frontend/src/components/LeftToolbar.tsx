@@ -57,6 +57,24 @@ export default function LeftToolbar({
         'flex items-center justify-center w-9 h-9 rounded-lg transition-all duration-150 text-gray-600 hover:bg-gray-100 hover:text-gray-800'
 
     return (
+        <>
+        {/* Thin edge indicator strip — visible only when collapsed and not peeking */}
+        {isCollapsed && !isHovering && (
+            <div
+                className="fixed left-0 z-40 cursor-pointer"
+                style={{
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    width: '6px',
+                    height: '64px',
+                    borderRadius: '0 6px 6px 0',
+                    background: 'rgba(156,163,175,0.7)',
+                    boxShadow: '2px 0 8px rgba(0,0,0,0.18)',
+                }}
+                onClick={() => setIsHovering(true)}
+                title="Show left toolbar"
+            />
+        )}
         <div
             ref={toolbarRef}
             data-tutorial="left-toolbar"
@@ -172,5 +190,6 @@ export default function LeftToolbar({
                 )}
             </button>
         </div>
+        </>
     )
 }
