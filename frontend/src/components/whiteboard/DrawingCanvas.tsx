@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback, useMemo } from 'react'
+import { useRef, useEffect, useCallback, useMemo, useState } from 'react'
 import { useReactFlow } from '@xyflow/react'
 import { useCanvasStore } from '../../store/canvasStore'
 import type { DrawingStroke, StrokePoint } from '../../types'
@@ -441,10 +441,10 @@ export default function DrawingCanvas() {
             const size = Math.max(toolSettings.eraser.width, 8)
             const svg = [
                 `<svg xmlns='http://www.w3.org/2000/svg' width='${size}' height='${size}' viewBox='0 0 ${size} ${size}'>`,
-                `<circle cx='${size/2}' cy='${size/2}' r='${size/2 - 1}' fill='rgba(255,255,255,0.3)' stroke='%23555' stroke-width='1.5' stroke-dasharray='3,2'/>`,
+                `<circle cx='${size / 2}' cy='${size / 2}' r='${size / 2 - 1}' fill='rgba(255,255,255,0.3)' stroke='%23555' stroke-width='1.5' stroke-dasharray='3,2'/>`,
                 `</svg>`,
             ].join('')
-            return `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${size/2} ${size/2}, auto`
+            return `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${size / 2} ${size / 2}, auto`
         }
         if (isDrawingTool) {
             // Colored dot cursor — matches pen/highlighter colour and
@@ -467,7 +467,52 @@ export default function DrawingCanvas() {
         return 'default'
     }, [isEraserTool, isDrawingTool, toolSettings, activeTool])
 
+    const [isHoveringControl, setIsHoveringControl] = useState(false)
     const shouldCapture = isDrawingTool || isEraserTool
+
+    // ── Dynamic Cursor / Hover Detection ────────────────────────────────────
+    // When in pen/eraser mode, we want to allow clicking on buttons/UI elements.
+    useEffect(() => {
+        const temp = tempCanvasRef.current
+        if (!temp || !shouldCapture) {
+            setIsHoveringControl(false)
+            return
+        }
+
+        const handleMouseMove = (e: MouseEvent) => {
+            if (isDrawingRef.current) return
+
+            // Briefly allow click-through to identify the real elements under the cursor
+            // This bypasses the canvas to see what interactive components lie beneath
+            const wasNone = temp.style.pointerEvents === 'none'
+            if (!wasNone) temp.style.pointerEvents = 'none'
+
+            const elements = document.elementsFromPoint(e.clientX, e.clientY)
+
+            const isControl = elements.some(el => {
+                if (el === temp || el === canvasRef.current) return false
+                return el.closest('button, input, textarea, select, [role="button"], .react-flow__controls, .react-flow__minimap, .slider, input[type="range"]') !== null
+            })
+
+            // Restore so React can manage it properly via inline style
+            if (!wasNone) temp.style.pointerEvents = 'all'
+
+            setIsHoveringControl(curr => {
+                if (curr !== isControl) return isControl
+                return curr
+            })
+        }
+
+        // Use capture phase to intercept before React Flow
+        window.addEventListener('mousemove', handleMouseMove, true)
+        return () => window.removeEventListener('mousemove', handleMouseMove, true)
+    }, [shouldCapture])
+
+    // Compute effective properties taking UI hover into account
+    // When hovering a UI element (like a button/slider), we temporarily step aside
+    // so the canvas is physically transparent to mouse events (`none`) and visually falls back
+    // to the underlying button's cursor.
+    const effectiveCapture = shouldCapture && !isHoveringControl
 
     return (
         <>
@@ -495,9 +540,9 @@ export default function DrawingCanvas() {
                     left: 0,
                     width: '100%',
                     height: '100%',
-                    zIndex: shouldCapture ? 5 : 1,
-                    pointerEvents: shouldCapture ? 'all' : 'none',
-                    cursor: shouldCapture ? cursorStyle : 'default',
+                    zIndex: effectiveCapture ? 5 : 1,
+                    pointerEvents: effectiveCapture ? 'all' : 'none',
+                    cursor: effectiveCapture ? cursorStyle : 'default',
                     touchAction: 'none',
                 }}
                 onPointerDown={handlePointerDown}

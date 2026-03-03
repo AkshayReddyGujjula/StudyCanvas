@@ -1219,6 +1219,63 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
         return () => document.removeEventListener('keydown', handleKeyDown)
     }, [fitView, onSave, wrappedSave])
 
+    // ── Paste handler ───────────────────────────────────────────────────────
+    useEffect(() => {
+        const handlePaste = (e: ClipboardEvent) => {
+            // Ignore if pasting into an input or textarea
+            const activeTag = (document.activeElement as HTMLElement)?.tagName
+            if (activeTag === 'INPUT' || activeTag === 'TEXTAREA') return
+
+            if (!e.clipboardData) return
+
+            // 1. Check for images
+            const items = Array.from(e.clipboardData.items)
+            const imageItem = items.find((item) => item.type.startsWith('image/'))
+
+            if (imageItem) {
+                e.preventDefault()
+                const file = imageItem.getAsFile()
+                if (file) {
+                    const reader = new FileReader()
+                    reader.onload = (event) => {
+                        const dataUrl = event.target?.result as string
+                        handleSpawnImage(dataUrl, file.name || 'Pasted Image')
+                    }
+                    reader.readAsDataURL(file)
+                }
+                return
+            }
+
+            // 2. Check for text
+            const textContent = e.clipboardData.getData('text/plain')
+            if (textContent && textContent.trim().length > 0) {
+                e.preventDefault()
+                const center = getViewportCenter()
+                const nodeId = `text-${Date.now()}`
+                const newNode: Node = {
+                    id: nodeId,
+                    type: 'textNode',
+                    position: center,
+                    data: { text: textContent, pageIndex: currentPage } as unknown as Record<string, unknown>,
+                    style: { width: 300 },
+                }
+                setNodes((prev) => [...prev, newNode])
+
+                // Add to undo stack
+                useCanvasStore.getState().whiteboardUndoStack.push({
+                    type: 'addText',
+                    nodeId: nodeId,
+                })
+                useCanvasStore.setState({ whiteboardRedoStack: [] })
+
+                persistToLocalStorage()
+            }
+        }
+
+        document.addEventListener('paste', handlePaste)
+        return () => document.removeEventListener('paste', handlePaste)
+    }, [getViewportCenter, handleSpawnImage, setNodes, persistToLocalStorage, currentPage])
+
     // Safety net: always remove rf-connecting on mouseup so stale text-selection
     // suppression can't get stuck if onConnectEnd doesn't fire (e.g. drag released
     // outside the window or over an invalid target).
