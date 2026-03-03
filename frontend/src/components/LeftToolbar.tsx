@@ -9,6 +9,30 @@ interface LeftToolbarProps {
     onVoiceNote: () => void
     onTimer: () => void
     onSummary: () => void
+    /** Last autosave timestamp (null = no autosave yet this session) */
+    lastAutoSave?: Date | null
+    /** Autosave interval in milliseconds (used to display the cadence) */
+    autoSaveInterval?: number
+}
+
+/** Format ms interval as a short human-readable label: 30000 → "30s", 60000 → "1m" */
+function formatInterval(ms: number): string {
+    const s = Math.round(ms / 1000)
+    if (s < 60) return `${s}s`
+    const m = Math.round(s / 60)
+    if (m < 60) return `${m}m`
+    return `${Math.round(m / 60)}h`
+}
+
+/** Format a Date relative to now, e.g. "just now", "2m ago", "14:32". */
+function formatRelativeTime(date: Date): string {
+    const diffMs = Date.now() - date.getTime()
+    const diffSec = Math.floor(diffMs / 1000)
+    if (diffSec < 10) return 'just now'
+    if (diffSec < 60) return `${diffSec}s ago`
+    const diffMin = Math.floor(diffSec / 60)
+    if (diffMin < 60) return `${diffMin}m ago`
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
 export default function LeftToolbar({
@@ -20,11 +44,19 @@ export default function LeftToolbar({
     onVoiceNote,
     onTimer,
     onSummary,
+    lastAutoSave,
+    autoSaveInterval,
 }: LeftToolbarProps) {
     const fileInputRef = useRef<HTMLInputElement>(null)
     const toolbarRef = useRef<HTMLDivElement>(null)
     const [isCollapsed, setIsCollapsed] = useState(false)
     const [isHovering, setIsHovering] = useState(false)
+    // Refresh the autosave label every 10 seconds so "2m ago" stays accurate
+    const [, setTick] = useState(0)
+    useEffect(() => {
+        const id = setInterval(() => setTick((t) => t + 1), 10_000)
+        return () => clearInterval(id)
+    }, [])
 
     useEffect(() => {
         if (!isCollapsed) return
@@ -56,140 +88,160 @@ export default function LeftToolbar({
     const btnClass =
         'flex items-center justify-center w-9 h-9 rounded-lg transition-all duration-150 text-gray-600 hover:bg-gray-100 hover:text-gray-800'
 
+    // Build autosave footer label
+    const autoSaveLabel = lastAutoSave ? formatRelativeTime(lastAutoSave) : 'Never'
+    const intervalLabel = autoSaveInterval ? `(${formatInterval(autoSaveInterval)})` : ''
+
     return (
         <>
-        {/* Thin edge indicator strip — visible only when collapsed and not peeking */}
-        {isCollapsed && !isHovering && (
+            {/* Thin edge indicator strip — visible only when collapsed and not peeking */}
+            {isCollapsed && !isHovering && (
+                <div
+                    className="fixed left-0 z-40 cursor-pointer"
+                    style={{
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        width: '6px',
+                        height: '64px',
+                        borderRadius: '0 6px 6px 0',
+                        background: 'rgba(156,163,175,0.7)',
+                        boxShadow: '2px 0 8px rgba(0,0,0,0.18)',
+                    }}
+                    onClick={() => setIsHovering(true)}
+                    title="Show left toolbar"
+                />
+            )}
             <div
-                className="fixed left-0 z-40 cursor-pointer"
+                ref={toolbarRef}
+                data-tutorial="left-toolbar"
+                className="fixed left-4 z-40 flex flex-col gap-1 p-1.5 bg-white/95 backdrop-blur-sm border border-gray-200 rounded-xl shadow-lg select-none transition-transform duration-300"
                 style={{
                     top: '50%',
-                    transform: 'translateY(-50%)',
-                    width: '6px',
-                    height: '64px',
-                    borderRadius: '0 6px 6px 0',
-                    background: 'rgba(156,163,175,0.7)',
-                    boxShadow: '2px 0 8px rgba(0,0,0,0.18)',
+                    transform: `translateY(-50%) translateX(${isVisible ? '0' : 'calc(-100% - 1.5rem)'})`
                 }}
-                onClick={() => setIsHovering(true)}
-                title="Show left toolbar"
-            />
-        )}
-        <div
-            ref={toolbarRef}
-            data-tutorial="left-toolbar"
-            className="fixed left-4 z-40 flex flex-col gap-1 p-1.5 bg-white/95 backdrop-blur-sm border border-gray-200 rounded-xl shadow-lg select-none transition-transform duration-300"
-            style={{
-                top: '50%',
-                transform: `translateY(-50%) translateX(${isVisible ? '0' : 'calc(-100% - 1.5rem)'})`
-            }}
-        >
-            {/* Custom Prompt (chat with Gemini) */}
-            <button data-tutorial="ai-btn" onClick={onCustomPrompt} className={btnClass} title="Custom Prompt">
-                <span className="text-[11px] font-extrabold leading-none text-indigo-500">AI</span>
-            </button>
-
-            {/* Snipping Tool */}
-            <button onClick={onSnip} className={btnClass} title="Snipping Tool (Ctrl+Shift+S)">
-                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="6" cy="6" r="3" />
-                    <circle cx="6" cy="18" r="3" />
-                    <line x1="20" y1="4" x2="8.12" y2="15.88" />
-                    <line x1="14.47" y1="14.48" x2="20" y2="20" />
-                    <line x1="8.12" y1="8.12" x2="12" y2="12" />
-                </svg>
-            </button>
-
-            <div className="h-px bg-gray-200 mx-1" />
-
-            {/* Add Image */}
-            <button onClick={() => fileInputRef.current?.click()} className={btnClass} title="Add Image">
-                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                    <circle cx="8.5" cy="8.5" r="1.5" />
-                    <polyline points="21 15 16 10 5 21" />
-                </svg>
-            </button>
-            <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={handleImageSelect}
-            />
-
-            {/* Custom Flashcard */}
-            <button onClick={onCustomFlashcard} className={btnClass} title="Custom Flashcard">
-                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="2" y="6" width="20" height="13" rx="2" />
-                    <path d="M2 10h20" />
-                    <path d="M7 14h4" />
-                    <path d="M15 14h2" />
-                </svg>
-            </button>
-
-            {/* Sticky Note */}
-            <button onClick={onStickyNote} className={btnClass} title="Sticky Note">
-                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M15.5 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8.5L15.5 3Z" />
-                    <path d="M14 3v6h6" />
-                </svg>
-            </button>
-
-            {/* Voice Note */}
-            <button onClick={onVoiceNote} className={btnClass} title="Voice Note">
-                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                    <line x1="12" y1="19" x2="12" y2="23" />
-                    <line x1="8" y1="23" x2="16" y2="23" />
-                </svg>
-            </button>
-
-            <div className="h-px bg-gray-200 mx-1" />
-
-            {/* Timer */}
-            <button data-tutorial="timer-btn" onClick={onTimer} className={btnClass} title="Timer">
-                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="10" />
-                    <polyline points="12 6 12 12 16 14" />
-                </svg>
-            </button>
-
-            <div className="h-px bg-gray-200 mx-1" />
-
-            {/* Summary Generator */}
-            <button onClick={onSummary} className={btnClass} title="Generate Summary">
-                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                    <polyline points="14 2 14 8 20 8" />
-                    <line x1="16" y1="13" x2="8" y2="13" />
-                    <line x1="16" y1="17" x2="8" y2="17" />
-                    <polyline points="10 9 9 9 8 9" />
-                </svg>
-            </button>
-
-            <div className="h-px bg-gray-200 mx-1" />
-
-            {/* Collapse toggle */}
-            <button
-                onClick={() => { setIsCollapsed(!isCollapsed); setIsHovering(false) }}
-                className="flex items-center justify-center w-full h-4 rounded px-2 transition-all duration-150 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-                title={isCollapsed ? 'Pin toolbar' : 'Collapse toolbar'}
             >
-                {isCollapsed ? (
-                    <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="13 17 18 12 13 7" />
-                        <polyline points="6 17 11 12 6 7" />
+                {/* Custom Prompt (chat with Gemini) */}
+                <button data-tutorial="ai-btn" onClick={onCustomPrompt} className={btnClass} title="Custom Prompt">
+                    <span className="text-[11px] font-extrabold leading-none text-indigo-500">AI</span>
+                </button>
+
+                {/* Snipping Tool */}
+                <button onClick={onSnip} className={btnClass} title="Snipping Tool (Ctrl+Shift+S)">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="6" cy="6" r="3" />
+                        <circle cx="6" cy="18" r="3" />
+                        <line x1="20" y1="4" x2="8.12" y2="15.88" />
+                        <line x1="14.47" y1="14.48" x2="20" y2="20" />
+                        <line x1="8.12" y1="8.12" x2="12" y2="12" />
                     </svg>
-                ) : (
-                    <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="11 17 6 12 11 7" />
-                        <polyline points="18 17 13 12 18 7" />
+                </button>
+
+                <div className="h-px bg-gray-200 mx-1" />
+
+                {/* Add Image */}
+                <button onClick={() => fileInputRef.current?.click()} className={btnClass} title="Add Image">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                        <circle cx="8.5" cy="8.5" r="1.5" />
+                        <polyline points="21 15 16 10 5 21" />
                     </svg>
-                )}
-            </button>
-        </div>
+                </button>
+                <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleImageSelect}
+                />
+
+                {/* Custom Flashcard */}
+                <button onClick={onCustomFlashcard} className={btnClass} title="Custom Flashcard">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="2" y="6" width="20" height="13" rx="2" />
+                        <path d="M2 10h20" />
+                        <path d="M7 14h4" />
+                        <path d="M15 14h2" />
+                    </svg>
+                </button>
+
+                {/* Sticky Note */}
+                <button onClick={onStickyNote} className={btnClass} title="Sticky Note">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M15.5 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8.5L15.5 3Z" />
+                        <path d="M14 3v6h6" />
+                    </svg>
+                </button>
+
+                {/* Voice Note */}
+                <button onClick={onVoiceNote} className={btnClass} title="Voice Note">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                        <line x1="12" y1="19" x2="12" y2="23" />
+                        <line x1="8" y1="23" x2="16" y2="23" />
+                    </svg>
+                </button>
+
+                <div className="h-px bg-gray-200 mx-1" />
+
+                {/* Timer */}
+                <button data-tutorial="timer-btn" onClick={onTimer} className={btnClass} title="Timer">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="10" />
+                        <polyline points="12 6 12 12 16 14" />
+                    </svg>
+                </button>
+
+                <div className="h-px bg-gray-200 mx-1" />
+
+                {/* Summary Generator */}
+                <button onClick={onSummary} className={btnClass} title="Generate Summary">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                        <polyline points="14 2 14 8 20 8" />
+                        <line x1="16" y1="13" x2="8" y2="13" />
+                        <line x1="16" y1="17" x2="8" y2="17" />
+                        <polyline points="10 9 9 9 8 9" />
+                    </svg>
+                </button>
+
+                <div className="h-px bg-gray-200 mx-1" />
+
+                {/* Collapse toggle */}
+                <button
+                    onClick={() => { setIsCollapsed(!isCollapsed); setIsHovering(false) }}
+                    className="flex items-center justify-center w-full h-4 rounded px-2 transition-all duration-150 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                    title={isCollapsed ? 'Pin toolbar' : 'Collapse toolbar'}
+                >
+                    {isCollapsed ? (
+                        <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="13 17 18 12 13 7" />
+                            <polyline points="6 17 11 12 6 7" />
+                        </svg>
+                    ) : (
+                        <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="11 17 6 12 11 7" />
+                            <polyline points="18 17 13 12 18 7" />
+                        </svg>
+                    )}
+                </button>
+            </div>
+
+            {/* Autosave info — tiny grey text at bottom-left, only when toolbar is visible */}
+            {isVisible && (
+                <div
+                    className="fixed bottom-1 left-4 z-40 flex flex-col items-start gap-0 pointer-events-none select-none"
+                    style={{ transition: 'opacity 0.3s' }}
+                >
+                    <span
+                        style={{ fontSize: '9px', lineHeight: '1.3', color: '#9ca3af', letterSpacing: '0.02em' }}
+                        title={`Autosave: ${autoSaveLabel}${intervalLabel ? ' ' + intervalLabel : ''}`}
+                    >
+                        {autoSaveLabel} {intervalLabel}
+                    </span>
+                </div>
+            )}
         </>
     )
 }
+

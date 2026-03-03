@@ -190,7 +190,7 @@ function collectCanvasContext(nodes: Node[]): string {
     return parts.join('\n\n')
 }
 
-export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; onSave?: (onProgress?: (pct: number, label: string) => void) => Promise<void> }) {
+export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterval }: { onGoHome?: () => void; onSave?: (onProgress?: (pct: number, label: string) => void) => Promise<void>; lastAutoSave?: Date | null; autoSaveInterval?: number }) {
     const { setCenter, getZoom, fitView, zoomIn, zoomOut, setViewport, getViewport, getNodes, screenToFlowPosition } = useReactFlow()
     const [selection, setSelection] = useState<SelectionState | null>(null)
     const [modal, setModal] = useState<ModalState | null>(null)
@@ -221,6 +221,10 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
     const streamingNodesRef = useRef<Set<string>>(new Set())
     const containerRef = useRef<HTMLDivElement>(null)
     const snipOverlayRef = useRef<HTMLDivElement>(null)
+    // ── Session-change tracking ──────────────────────────────────────────────
+    // Records which page indices received user changes since the canvas was opened.
+    // Initialised once on mount; used by "Save This Session's Work".
+    const sessionChangedPagesRef = useRef<Set<number>>(new Set())
 
     // ── Toast + Generation progress helpers ─────────────────────────────────
     // Declared early (before any callbacks) so all callers see them.
@@ -292,6 +296,70 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
     const whiteboardRedo = useCanvasStore((s) => s.whiteboardRedo)
     const isCursorMode = activeTool === 'cursor'
     const isTextMode = activeTool === 'text'
+    const drawingStrokes = useCanvasStore((s) => s.drawingStrokes)
+
+    // ── Session change tracking ──────────────────────────────────────────────
+    // We snapshot the set of node IDs bucketed by pageIndex when the canvas
+    // first loads (nodes goes from [] → populated). On every subsequent render
+    // we diff the current per-page sets against that snapshot; any page whose
+    // set has changed (nodes added, removed, or replaced) gets recorded as dirty.
+    //
+    // Why not just watch `currentPage`? Because `nodes` holds nodes for ALL
+    // pages simultaneously — reacting with `currentPage` would record the
+    // wrong page whenever a change happens on a page the user isn't viewing.
+    const nodeSnapshotRef = useRef<Map<number, Set<string>> | null>(null)
+    useEffect(() => {
+        // Build a map: pageIndex → Set<nodeId> for the current render
+        const byPage = new Map<number, Set<string>>()
+        for (const n of nodes) {
+            const pg = ((n.data as Record<string, unknown>).pageIndex as number) ?? 1
+            if (!byPage.has(pg)) byPage.set(pg, new Set())
+            byPage.get(pg)!.add(n.id)
+        }
+
+        if (nodeSnapshotRef.current === null) {
+            // First time nodes are populated — take the baseline snapshot
+            if (nodes.length > 0) nodeSnapshotRef.current = byPage
+            return
+        }
+
+        // Diff every page that appears in either the snapshot or current state
+        const allPages = new Set([...byPage.keys(), ...nodeSnapshotRef.current.keys()])
+        for (const pg of allPages) {
+            const snap = nodeSnapshotRef.current.get(pg) ?? new Set<string>()
+            const curr = byPage.get(pg) ?? new Set<string>()
+            if (snap.size !== curr.size) {
+                sessionChangedPagesRef.current.add(pg)
+                continue
+            }
+            for (const id of curr) {
+                if (!snap.has(id)) { sessionChangedPagesRef.current.add(pg); break }
+            }
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [nodes])
+
+    // Drawing strokes already carry their own pageIndex — record it directly.
+    // Guard against initial hydration by only starting to track once the node
+    // snapshot has been established (nodeSnapshotRef !== null).
+    const prevStrokeCountRef = useRef(-1)
+    useEffect(() => {
+        if (nodeSnapshotRef.current === null) {
+            // Node snapshot not taken yet — record stroke baseline and skip
+            prevStrokeCountRef.current = drawingStrokes.length
+            return
+        }
+        if (prevStrokeCountRef.current === -1) {
+            prevStrokeCountRef.current = drawingStrokes.length
+            return
+        }
+        if (drawingStrokes.length !== prevStrokeCountRef.current) {
+            const recentStroke = drawingStrokes[drawingStrokes.length - 1]
+            if (recentStroke) sessionChangedPagesRef.current.add(recentStroke.pageIndex)
+            prevStrokeCountRef.current = drawingStrokes.length
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [drawingStrokes])
 
     // Auto-dismiss the upload hint once a PDF is loaded
     useEffect(() => {
@@ -467,21 +535,21 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 nodePageIndex - 1,
                 imageBase64
             )
-            
+
             // Determine verdict from feedback and set status accordingly
             const verdict = getVerdict(result.feedback)
             let newStatus: 'understood' | 'struggling' | undefined = undefined
-            
+
             if (verdict === 'correct') {
                 newStatus = 'understood'
             } else if (verdict === 'incorrect') {
                 newStatus = 'struggling'
             }
             // If verdict is 'partial' or null, don't change status
-            
-            updateQuizNodeData(nodeId, { 
-                isGrading: false, 
-                feedback: result.feedback, 
+
+            updateQuizNodeData(nodeId, {
+                isGrading: false,
+                feedback: result.feedback,
                 modelUsed: result.model_used,
                 ...(newStatus && { status: newStatus })
             })
@@ -790,7 +858,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
     const nodeColor = useCallback((node: Node) => {
         const nodeType = node.type;
         const status = (node.data as unknown as AnswerNodeData)?.status;
-        
+
         // Priority 1: Status colours (green for understood, red for struggling)
         if (status === 'understood') {
             return '#27AE60'; // Sage Green - correct/understood
@@ -798,7 +866,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
         if (status === 'struggling') {
             return '#EB5757'; // Warm Coral - incorrect/struggling
         }
-        
+
         // Priority 2: Node type colours (neutral default)
         switch (nodeType) {
             case 'contentNode':
@@ -905,8 +973,8 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
     const handleSpawnCustomFlashcard = useCallback(() => {
         const pageFlashcardCount = nodes.filter(
             (n) => n.type === 'flashcardNode' &&
-            ((n.data as unknown as FlashcardNodeData).pageIndex === currentPage ||
-             (n.data as unknown as FlashcardNodeData).isPinned === true)
+                ((n.data as unknown as FlashcardNodeData).pageIndex === currentPage ||
+                    (n.data as unknown as FlashcardNodeData).isPinned === true)
         ).length
         if (pageFlashcardCount >= FLASHCARD_PAGE_LIMIT) {
             showToast(`Maximum of ${FLASHCARD_PAGE_LIMIT} flashcards per page reached. Delete some to add more.`)
@@ -1275,7 +1343,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
         const y = e.clientY - rect.top
         setSnipStart({ x, y })
         setSnipCurrent({ x, y })
-        ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+            ; (e.target as HTMLElement).setPointerCapture(e.pointerId)
     }, [isSnipExtracting])
 
     const handleSnipPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
@@ -1335,9 +1403,9 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                     const ov = `${st.overflow} ${st.overflowX} ${st.overflowY}`
                     if (/hidden|scroll|auto|clip/.test(ov)) {
                         const pr = parent.getBoundingClientRect()
-                        const l = Math.max(r.left,   pr.left)
-                        const t = Math.max(r.top,    pr.top)
-                        const rr = Math.min(r.right,  pr.right)
+                        const l = Math.max(r.left, pr.left)
+                        const t = Math.max(r.top, pr.top)
+                        const rr = Math.min(r.right, pr.right)
                         const b = Math.min(r.bottom, pr.bottom)
                         if (rr <= l || b <= t) return new DOMRect(0, 0, 0, 0) // fully clipped
                         r = new DOMRect(l, t, rr - l, b - t)
@@ -1348,14 +1416,14 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
             }
 
             // Selection rectangle in absolute screen coordinates
-            const selLeft   = overlayRect.left + sx
-            const selTop    = overlayRect.top  + sy
-            const selRight  = selLeft + sw
-            const selBottom = selTop  + sh
+            const selLeft = overlayRect.left + sx
+            const selTop = overlayRect.top + sy
+            const selRight = selLeft + sw
+            const selBottom = selTop + sh
 
             // Output canvas at 1× CSS pixel scale
             const cropCanvas = document.createElement('canvas')
-            cropCanvas.width  = Math.round(sw)
+            cropCanvas.width = Math.round(sw)
             cropCanvas.height = Math.round(sh)
             const ctx = cropCanvas.getContext('2d')!
             ctx.fillStyle = '#FFFFFF'
@@ -1395,22 +1463,22 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                 if (visRect.width === 0 || visRect.height === 0) continue
 
                 // Intersection of visible rect with user selection
-                const ol  = Math.max(selLeft,   visRect.left)
-                const ot  = Math.max(selTop,    visRect.top)
-                const or_ = Math.min(selRight,  visRect.right)
-                const ob  = Math.min(selBottom, visRect.bottom)
+                const ol = Math.max(selLeft, visRect.left)
+                const ot = Math.max(selTop, visRect.top)
+                const or_ = Math.min(selRight, visRect.right)
+                const ob = Math.min(selBottom, visRect.bottom)
                 if (or_ <= ol || ob <= ot) continue
 
                 // Full (unclipped) rect — used to compute physical-pixel scale
                 const fullRect = canvas.getBoundingClientRect()
-                const scaleX = canvas.width  / fullRect.width
+                const scaleX = canvas.width / fullRect.width
                 const scaleY = canvas.height / fullRect.height
 
                 // Source in canvas physical pixels (relative to the full unclipped canvas)
                 const srcX = (ol - fullRect.left) * scaleX
-                const srcY = (ot - fullRect.top)  * scaleY
+                const srcY = (ot - fullRect.top) * scaleY
                 const srcW = (or_ - ol) * scaleX
-                const srcH = (ob  - ot) * scaleY
+                const srcH = (ob - ot) * scaleY
 
                 // Destination in output canvas
                 ctx.drawImage(canvas, srcX, srcY, srcW, srcH, ol - selLeft, ot - selTop, or_ - ol, ob - ot)
@@ -1420,13 +1488,13 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
             const drawingMain = el.querySelector<HTMLCanvasElement>('.drawing-canvas-main')
             if (drawingMain) {
                 const visRect = getClippedScreenRect(drawingMain)
-                const ol  = Math.max(selLeft,   visRect.left)
-                const ot  = Math.max(selTop,    visRect.top)
-                const or_ = Math.min(selRight,  visRect.right)
-                const ob  = Math.min(selBottom, visRect.bottom)
+                const ol = Math.max(selLeft, visRect.left)
+                const ot = Math.max(selTop, visRect.top)
+                const or_ = Math.min(selRight, visRect.right)
+                const ob = Math.min(selBottom, visRect.bottom)
                 if (or_ > ol && ob > ot) {
                     const fullRect = drawingMain.getBoundingClientRect()
-                    const scaleX = drawingMain.width  / fullRect.width
+                    const scaleX = drawingMain.width / fullRect.width
                     const scaleY = drawingMain.height / fullRect.height
                     ctx.drawImage(
                         drawingMain,
@@ -2075,8 +2143,8 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
 
         const existingPageFlashcardCount = nodes.filter(
             (n) => n.type === 'flashcardNode' &&
-            ((n.data as unknown as FlashcardNodeData).pageIndex === currentPage ||
-             (n.data as unknown as FlashcardNodeData).isPinned === true)
+                ((n.data as unknown as FlashcardNodeData).pageIndex === currentPage ||
+                    (n.data as unknown as FlashcardNodeData).isPinned === true)
         ).length
 
         if (existingPageFlashcardCount >= 20) {
@@ -2461,746 +2529,837 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
         exportAbortRef.current?.abort()
     }, [])
 
+    // ── Visual export: Save only the pages changed during this session ──────
+    const handleExportSessionPages = useCallback(async () => {
+        setShowMenu(false)
+        setShowRevisionMenu(false)
+
+        if (isExportInProgress()) {
+            showToast('An export is already in progress.')
+            return
+        }
+        if (!containerRef.current) {
+            showToast('Canvas not ready — please try again.')
+            return
+        }
+
+        // Collect session-changed pages that also have actual content
+        const changedPages = Array.from(sessionChangedPagesRef.current)
+            .filter((p) => pageHasContent(p))
+            .sort((a, b) => a - b)
+
+        if (changedPages.length === 0) {
+            showToast('No changes were made this session, or changed pages have no content to export.')
+            return
+        }
+
+        setIsExportingAll(true)
+        setExportProgress('Preparing…')
+        const abortController = new AbortController()
+        exportAbortRef.current = abortController
+
+        try {
+            const originalName = fileData?.filename?.replace(/\.[^/.]+$/, '') ?? 'Notes'
+            await exportAllPages({
+                containerEl: containerRef.current,
+                filenameBase: originalName,
+                onProgress: (msg) => setExportProgress(msg),
+                signal: abortController.signal,
+                goToPage,
+                totalPages: pageMarkdowns.length || 1,
+                currentPage,
+                fitView,
+                getViewport,
+                setViewport,
+                getNodes,
+                overridePagesToExport: changedPages,
+                filenameSuffix: 'SessionWork',
+            })
+            showToast('Session pages exported successfully!')
+        } catch (err) {
+            if (err instanceof DOMException && err.name === 'AbortError') {
+                showToast('Export cancelled.')
+            } else {
+                const msg = err instanceof Error ? err.message : String(err)
+                console.error('Session export error:', err)
+                showToast(`Export failed: ${msg}`)
+            }
+        } finally {
+            setIsExportingAll(false)
+            setExportProgress(null)
+            exportAbortRef.current = null
+        }
+    }, [currentPage, fileData, pageMarkdowns.length, showToast, goToPage, fitView, getViewport, setViewport, getNodes])
+
     return (
         <CanvasCallbackContext.Provider value={stableCanvasCallbacks}>
-        <div ref={containerRef} data-tutorial="canvas-container" style={{ width: '100vw', height: '100vh' }} className={isDarkMode ? 'dark-mode' : ''}>
-            {/* Whiteboard drawing overlay */}
-            <DrawingCanvas />
+            <div ref={containerRef} data-tutorial="canvas-container" style={{ width: '100vw', height: '100vh' }} className={isDarkMode ? 'dark-mode' : ''}>
+                {/* Whiteboard drawing overlay */}
+                <DrawingCanvas />
 
-            <ReactFlow
-                nodes={visibleNodes}
-                edges={visibleEdges}
-                nodeTypes={NODE_TYPES}
-                defaultViewport={canvasViewport ?? { x: 0, y: 0, zoom: 1 }}
-                onViewportChange={handleViewportChange}
-                onNodeDragStart={handleNodeDragStart}
-                onNodesChange={(changes) => {
-                    // Handle text node removal (via Backspace / Delete deleteKeyCode)
-                    const removeIds = changes
-                        .filter((c): c is Extract<typeof c, { type: 'remove' }> => c.type === 'remove')
-                        .filter((c) => c.id.startsWith('text-'))
-                        .map((c) => c.id)
-                    if (removeIds.length > 0) {
-                        removeIds.forEach((id) => {
-                            const node = nodes.find((n) => n.id === id)
-                            if (node) {
-                                useCanvasStore.getState().whiteboardUndoStack.push({
-                                    type: 'removeText',
-                                    nodeId: id,
-                                    nodeSnapshot: { ...node, data: { ...node.data } } as unknown as Record<string, unknown>,
-                                })
-                                useCanvasStore.setState({ whiteboardRedoStack: [] })
-                            }
-                        })
-                        setNodes((prev) => prev.filter((n) => !removeIds.includes(n.id)))
-                        persistToLocalStorage()
-                        return
-                    }
-
-                    // Handle selection changes so text nodes can be selected/deselected
-                    const selectChanges = changes.filter((c) => c.type === 'select')
-                    if (selectChanges.length > 0) {
-                        setNodes((prev) => {
-                            let next = [...prev]
-                            for (const change of selectChanges) {
-                                if (change.type === 'select') {
-                                    const idx = next.findIndex((n) => n.id === change.id)
-                                    if (idx !== -1) {
-                                        next[idx] = { ...next[idx], selected: change.selected }
-                                    }
+                <ReactFlow
+                    nodes={visibleNodes}
+                    edges={visibleEdges}
+                    nodeTypes={NODE_TYPES}
+                    defaultViewport={canvasViewport ?? { x: 0, y: 0, zoom: 1 }}
+                    onViewportChange={handleViewportChange}
+                    onNodeDragStart={handleNodeDragStart}
+                    onNodesChange={(changes) => {
+                        // Handle text node removal (via Backspace / Delete deleteKeyCode)
+                        const removeIds = changes
+                            .filter((c): c is Extract<typeof c, { type: 'remove' }> => c.type === 'remove')
+                            .filter((c) => c.id.startsWith('text-'))
+                            .map((c) => c.id)
+                        if (removeIds.length > 0) {
+                            removeIds.forEach((id) => {
+                                const node = nodes.find((n) => n.id === id)
+                                if (node) {
+                                    useCanvasStore.getState().whiteboardUndoStack.push({
+                                        type: 'removeText',
+                                        nodeId: id,
+                                        nodeSnapshot: { ...node, data: { ...node.data } } as unknown as Record<string, unknown>,
+                                    })
+                                    useCanvasStore.setState({ whiteboardRedoStack: [] })
                                 }
-                            }
-                            return next
-                        })
-                    }
-
-                    // ── Ghost-drag optimisation ──────────────────────────────────
-                    // During an active drag we still apply position changes (so the
-                    // node visually follows the cursor) but we SKIP the expensive
-                    // O(n) isOverlapping check on every tick. Overlap validation is
-                    // deferred to handleNodeDragStop where it runs exactly once.
-                    // This eliminates the biggest CPU bottleneck while keeping the
-                    // visual drag smooth.
-
-                    const dimensionChanges = changes.filter((c) => c.type === 'dimensions' && c.dimensions)
-                    const positionChanges = changes.filter((c) => c.type === 'position' && c.position)
-
-                    if (dimensionChanges.length === 0 && positionChanges.length === 0) return
-
-                    setNodes((prev) => {
-                        let next = prev
-                        let dimensionsChanged = false
-
-                        // Build O(1) index map for fast lookups
-                        const indexMap = new Map<string, number>()
-                        for (let i = 0; i < next.length; i++) {
-                            indexMap.set(next[i].id, i)
+                            })
+                            setNodes((prev) => prev.filter((n) => !removeIds.includes(n.id)))
+                            persistToLocalStorage()
+                            return
                         }
 
-                        // Apply position changes — during drag: direct apply (no
-                        // overlap check), otherwise also direct (overlap is always
-                        // deferred to drop via handleNodeDragStop).
-                        if (positionChanges.length > 0) {
-                            next = [...next]
-                            for (const change of positionChanges) {
-                                if (change.type === 'position' && change.position) {
-                                    const idx = indexMap.get(change.id)
-                                    if (idx !== undefined) {
-                                        next[idx] = { ...next[idx], position: change.position }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Apply dimension changes
-                        if (dimensionChanges.length > 0) {
-                            if (next === prev) next = [...next]
-                            for (const change of dimensionChanges) {
-                                if (change.type === 'dimensions' && change.dimensions) {
-                                    const idx = indexMap.get(change.id)
-                                    if (idx !== undefined) {
-                                        next[idx] = { ...next[idx], measured: change.dimensions }
-                                        dimensionsChanged = true
-                                    }
-                                }
-                            }
-                        }
-
-                        if (dimensionsChanged) {
-                            const expandingIds = next
-                                .filter((n) => (n.data as unknown as AnswerNodeData)?.isExpanding)
-                                .map((n) => n.id)
-
-                            if (expandingIds.length > 0) {
-                                next = resolveOverlaps(next)
-                                next = next.map((n) => {
-                                    if (expandingIds.includes(n.id)) {
-                                        return {
-                                            ...n,
-                                            data: { ...n.data, isExpanding: false } as unknown as Record<string, unknown>
+                        // Handle selection changes so text nodes can be selected/deselected
+                        const selectChanges = changes.filter((c) => c.type === 'select')
+                        if (selectChanges.length > 0) {
+                            setNodes((prev) => {
+                                let next = [...prev]
+                                for (const change of selectChanges) {
+                                    if (change.type === 'select') {
+                                        const idx = next.findIndex((n) => n.id === change.id)
+                                        if (idx !== -1) {
+                                            next[idx] = { ...next[idx], selected: change.selected }
                                         }
                                     }
-                                    return n
-                                })
-                            }
+                                }
+                                return next
+                            })
                         }
 
-                        return next
-                    })
-                }}
-                onEdgesChange={(changes: EdgeChange[]) => {
-                    // Only allow removal of user-created edges (prefixed with 'user-edge-')
-                    const filtered = changes.filter((c) =>
-                        c.type !== 'remove' || (c.id ?? '').startsWith('user-edge-')
-                    )
-                    if (filtered.length > 0) {
-                        setEdges((prev) => applyEdgeChanges(filtered, prev))
-                    }
-                }}
-                onConnect={onConnect}
-                onConnectStart={handleConnectStart}
-                onConnectEnd={handleConnectEnd}
-                connectionMode={ConnectionMode.Loose}
-                connectionLineType={ConnectionLineType.SmoothStep}
-                connectionLineStyle={buildEdgeStyle(connectingFromNodeId)}
-                fitView={false}
-                zoomOnScroll={false}
-                panOnScroll={false}
-                panOnDrag={isCursorMode}
-                nodesDraggable={isCursorMode}
-                nodesConnectable={isCursorMode}
-                elementsSelectable={isCursorMode || isTextMode}
-                edgesFocusable={isCursorMode}
-                deleteKeyCode={isCursorMode ? ['Backspace', 'Delete'] : null}
-                onNodeDragStop={handleNodeDragStop}
-                onPaneClick={handlePaneClick}
-                onEdgeDoubleClick={(evt, edge) => {
-                    evt.stopPropagation()
-                    setEdges((prev) => prev.filter((e) => e.id !== edge.id))
-                    persistToLocalStorage()
-                }}
-            >
-                <Background variant={BackgroundVariant.Dots} />
-                <MiniMap
-                    nodeColor={nodeColor}
-                    position="bottom-right"
-                    style={{
-                        backgroundColor: '#f8fafc',
-                        border: '1px solid #e2e8f0',
-                        borderRadius: '12px',
-                        boxShadow: '0 4px 16px rgba(0,0,0,0.10), 0 1px 4px rgba(0,0,0,0.06)',
-                        overflow: 'hidden',
+                        // ── Ghost-drag optimisation ──────────────────────────────────
+                        // During an active drag we still apply position changes (so the
+                        // node visually follows the cursor) but we SKIP the expensive
+                        // O(n) isOverlapping check on every tick. Overlap validation is
+                        // deferred to handleNodeDragStop where it runs exactly once.
+                        // This eliminates the biggest CPU bottleneck while keeping the
+                        // visual drag smooth.
+
+                        const dimensionChanges = changes.filter((c) => c.type === 'dimensions' && c.dimensions)
+                        const positionChanges = changes.filter((c) => c.type === 'position' && c.position)
+
+                        if (dimensionChanges.length === 0 && positionChanges.length === 0) return
+
+                        setNodes((prev) => {
+                            let next = prev
+                            let dimensionsChanged = false
+
+                            // Build O(1) index map for fast lookups
+                            const indexMap = new Map<string, number>()
+                            for (let i = 0; i < next.length; i++) {
+                                indexMap.set(next[i].id, i)
+                            }
+
+                            // Apply position changes — during drag: direct apply (no
+                            // overlap check), otherwise also direct (overlap is always
+                            // deferred to drop via handleNodeDragStop).
+                            if (positionChanges.length > 0) {
+                                next = [...next]
+                                for (const change of positionChanges) {
+                                    if (change.type === 'position' && change.position) {
+                                        const idx = indexMap.get(change.id)
+                                        if (idx !== undefined) {
+                                            next[idx] = { ...next[idx], position: change.position }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Apply dimension changes
+                            if (dimensionChanges.length > 0) {
+                                if (next === prev) next = [...next]
+                                for (const change of dimensionChanges) {
+                                    if (change.type === 'dimensions' && change.dimensions) {
+                                        const idx = indexMap.get(change.id)
+                                        if (idx !== undefined) {
+                                            next[idx] = { ...next[idx], measured: change.dimensions }
+                                            dimensionsChanged = true
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (dimensionsChanged) {
+                                const expandingIds = next
+                                    .filter((n) => (n.data as unknown as AnswerNodeData)?.isExpanding)
+                                    .map((n) => n.id)
+
+                                if (expandingIds.length > 0) {
+                                    next = resolveOverlaps(next)
+                                    next = next.map((n) => {
+                                        if (expandingIds.includes(n.id)) {
+                                            return {
+                                                ...n,
+                                                data: { ...n.data, isExpanding: false } as unknown as Record<string, unknown>
+                                            }
+                                        }
+                                        return n
+                                    })
+                                }
+                            }
+
+                            return next
+                        })
                     }}
-                    maskColor="rgba(148,163,184,0.18)"
-                    pannable
-                    zoomable
-                />
-            </ReactFlow>
-
-            {/* ── Global Snipping Tool Overlay ─────────────────────────────── */}
-            {isSnippingMode && (
-                <div
-                    ref={snipOverlayRef}
-                    data-snip-overlay="true"
-                    className={`absolute inset-0 z-50 ${isSnipExtracting ? 'cursor-wait' : 'cursor-crosshair'}`}
-                    style={{ backgroundColor: 'rgba(0,0,0,0.15)', touchAction: 'none' }}
-                    onPointerDown={handleSnipPointerDown}
-                    onPointerMove={handleSnipPointerMove}
-                    onPointerUp={handleSnipPointerUp}
+                    onEdgesChange={(changes: EdgeChange[]) => {
+                        // Only allow removal of user-created edges (prefixed with 'user-edge-')
+                        const filtered = changes.filter((c) =>
+                            c.type !== 'remove' || (c.id ?? '').startsWith('user-edge-')
+                        )
+                        if (filtered.length > 0) {
+                            setEdges((prev) => applyEdgeChanges(filtered, prev))
+                        }
+                    }}
+                    onConnect={onConnect}
+                    onConnectStart={handleConnectStart}
+                    onConnectEnd={handleConnectEnd}
+                    connectionMode={ConnectionMode.Loose}
+                    connectionLineType={ConnectionLineType.SmoothStep}
+                    connectionLineStyle={buildEdgeStyle(connectingFromNodeId)}
+                    fitView={false}
+                    zoomOnScroll={false}
+                    panOnScroll={false}
+                    panOnDrag={isCursorMode}
+                    nodesDraggable={isCursorMode}
+                    nodesConnectable={isCursorMode}
+                    elementsSelectable={isCursorMode || isTextMode}
+                    edgesFocusable={isCursorMode}
+                    deleteKeyCode={isCursorMode ? ['Backspace', 'Delete'] : null}
+                    onNodeDragStop={handleNodeDragStop}
+                    onPaneClick={handlePaneClick}
+                    onEdgeDoubleClick={(evt, edge) => {
+                        evt.stopPropagation()
+                        setEdges((prev) => prev.filter((e) => e.id !== edge.id))
+                        persistToLocalStorage()
+                    }}
                 >
-                    {/* Selection rectangle */}
-                    {snipStart && snipCurrent && (
-                        <div
-                            className="absolute border-2 border-indigo-500 bg-indigo-500/20 rounded-sm pointer-events-none"
-                            style={{
-                                left: Math.min(snipStart.x, snipCurrent.x),
-                                top: Math.min(snipStart.y, snipCurrent.y),
-                                width: Math.abs(snipStart.x - snipCurrent.x),
-                                height: Math.abs(snipStart.y - snipCurrent.y),
-                            }}
-                        />
-                    )}
-                    {/* Extracting spinner */}
-                    {isSnipExtracting && (
-                        <div className="absolute inset-0 flex items-center justify-center bg-white/40 backdrop-blur-sm">
-                            <div className="bg-white p-4 rounded-lg shadow-xl flex items-center gap-3">
-                                <div className="w-5 h-5 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
-                                <span className="text-sm font-medium text-gray-700">Extracting text with Vision AI...</span>
-                            </div>
-                        </div>
-                    )}
-                    {/* Hint label */}
-                    {!snipStart && !isSnipExtracting && (
-                        <div className="absolute top-6 left-1/2 -translate-x-1/2 pointer-events-none">
-                            <div className="bg-gray-900/80 text-white text-xs font-medium px-3 py-1.5 rounded-full shadow-lg">
-                                Drag to select an area · Press <kbd className="font-mono bg-white/20 px-1 rounded">Esc</kbd> to cancel
-                            </div>
-                        </div>
-                    )}
-                </div>
-            )}
+                    <Background variant={BackgroundVariant.Dots} />
+                    <MiniMap
+                        nodeColor={nodeColor}
+                        position="bottom-right"
+                        style={{
+                            backgroundColor: '#f8fafc',
+                            border: '1px solid #e2e8f0',
+                            borderRadius: '12px',
+                            boxShadow: '0 4px 16px rgba(0,0,0,0.10), 0 1px 4px rgba(0,0,0,0.06)',
+                            overflow: 'hidden',
+                        }}
+                        maskColor="rgba(148,163,184,0.18)"
+                        pannable
+                        zoomable
+                    />
+                </ReactFlow>
 
-            {/* Canvas navigation controls — rendered outside ReactFlow so they live in
-                the root stacking context and always appear above the drawing canvas overlay */}
-            <div className="canvas-nav-controls fixed bottom-4 left-4 z-[50] flex flex-col bg-white border border-gray-200 rounded-lg shadow-md overflow-hidden select-none">
-                <button
-                    onClick={() => zoomIn()}
-                    className="flex items-center justify-center w-[36px] h-[36px] text-gray-600 hover:bg-gray-100 border-b border-gray-200 transition-colors"
-                    title="Zoom in"
-                >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                        <path d="M12 5v14M5 12h14" />
-                    </svg>
-                </button>
-                <button
-                    onClick={() => zoomOut()}
-                    className="flex items-center justify-center w-[36px] h-[36px] text-gray-600 hover:bg-gray-100 border-b border-gray-200 transition-colors"
-                    title="Zoom out"
-                >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                        <path d="M5 12h14" />
-                    </svg>
-                </button>
-                <button
-                    onClick={() => fitView()}
-                    className="flex items-center justify-center w-[36px] h-[36px] text-gray-600 hover:bg-gray-100 border-b border-gray-200 transition-colors"
-                    title="Fit view"
-                >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M4 8V4m0 0h4M4 4l5 5M20 8V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5M20 16v4m0 0h-4m4 0l-5-5" />
-                    </svg>
-                </button>
-                <button
-                    onClick={() => setIsDarkMode((d) => !d)}
-                    className="flex items-center justify-center w-[36px] h-[36px] text-gray-600 hover:bg-gray-100 transition-colors"
-                    title={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
-                >
-                    {isDarkMode ? (
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
-                            <path d="M12 2.25a.75.75 0 01.75.75v2.25a.75.75 0 01-1.5 0V3a.75.75 0 01.75-.75zM7.5 12a4.5 4.5 0 119 0 4.5 4.5 0 01-9 0zM18.894 6.166a.75.75 0 00-1.06-1.06l-1.591 1.59a.75.75 0 101.06 1.061l1.591-1.59zM21.75 12a.75.75 0 01-.75.75h-2.25a.75.75 0 010-1.5H21a.75.75 0 01.75.75zM17.834 18.894a.75.75 0 001.06-1.06l-1.59-1.591a.75.75 0 10-1.061 1.06l1.59 1.591zM12 18a.75.75 0 01.75.75V21a.75.75 0 01-1.5 0v-2.25A.75.75 0 0112 18zM7.166 17.834a.75.75 0 00-1.06 1.06l1.59 1.591a.75.75 0 001.061-1.06l-1.59-1.591zM6 12a.75.75 0 01-.75.75H3a.75.75 0 010-1.5h2.25A.75.75 0 016 12zM6.166 6.166a.75.75 0 00-1.06 1.06l1.59 1.591a.75.75 0 001.061-1.06l-1.59-1.591z" />
-                        </svg>
-                    ) : (
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
-                            <path fillRule="evenodd" d="M9.528 1.718a.75.75 0 01.162.819A8.97 8.97 0 009 6a9 9 0 009 9 8.97 8.97 0 003.463-.69.75.75 0 01.981.98 10.503 10.503 0 01-9.694 6.46c-5.799 0-10.5-4.701-10.5-10.5 0-4.368 2.667-8.112 6.46-9.694a.75.75 0 01.818.162z" clipRule="evenodd" />
-                        </svg>
-                    )}
-                </button>
-            </div>
-
-            {/* Whiteboard toolbar */}
-            <DrawingToolbar />
-
-            {/* Left toolbar — custom nodes */}
-            <LeftToolbar
-                onCustomPrompt={handleSpawnCustomPrompt}
-                onSnip={() => setIsSnippingMode(true)}
-                onAddImage={handleSpawnImage}
-                onCustomFlashcard={handleSpawnCustomFlashcard}
-                onStickyNote={handleSpawnStickyNote}
-                onVoiceNote={handleSpawnVoiceNote}
-                onTimer={handleSpawnTimer}
-                onSummary={handleSpawnSummary}
-            />
-
-            {/* Ask Gemini popup */}
-            {selection && (
-                <AskGeminiPopup rect={selection.rect} nodeId={selection.sourceNodeId} mousePos={selection.mousePos} onAsk={handleAsk} />
-            )}
-
-            {/* Question modal */}
-            {modal && (
-                <QuestionModal
-                    selectedText={modal.selectedText}
-                    sourceNodeId={modal.sourceNodeId}
-                    preGeneratedNodeId={modal.preGeneratedNodeId}
-                    onSubmit={handleModalSubmit}
-                    onCancel={() => setModal(null)}
-                />
-            )}
-
-            {/* Revision mode modal */}
-            {showRevision && fileData && revisionSource && (
-                <RevisionModal
-                    nodes={nodes}
-                    rawText={revisionSource.pageContent || pageMarkdowns[currentPage - 1] || (fileData.raw_text ?? '').slice(0, 50000)}
-                    pdfId={fileData.pdf_id}
-                    onClose={() => setShowRevision(false)}
-                    sourceType={revisionSource.sourceType}
-                    pageIndex={revisionSource.pageIndex - 1}
-                    pageContent={revisionSource.pageContent}
-                    canvasContext={collectCanvasContext(nodes) || undefined}
-                />
-            )}
-
-            {/* Tools modal */}
-            {showTools && (
-                <ToolsModal onClose={() => setShowTools(false)} />
-            )}
-
-            {/* Upload PDF popup */}
-            {showUploadPopup && (
-                <PdfUploadPopup
-                    onClose={() => setShowUploadPopup(false)}
-                    onUploaded={() => { /* popup closes itself; node is already created */ }}
-                />
-            )}
-
-            {/* Top Left Menu */}
-            <div className="fixed top-4 left-4 z-40">
-                <button
-                    data-tutorial="menu-btn"
-                    onClick={() => { setShowMenu(!showMenu); setShowRevisionMenu(false) }}
-                    className="flex items-center gap-2 px-4 py-2 bg-white text-gray-700 text-sm font-medium rounded-lg shadow-md border border-gray-200 hover:bg-gray-50 transition-colors"
-                >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <line x1="3" y1="6" x2="21" y2="6" />
-                        <line x1="3" y1="12" x2="21" y2="12" />
-                        <line x1="3" y1="18" x2="21" y2="18" />
-                    </svg>
-                    Menu
-                </button>
-                {showMenu && (
-                    <div className="absolute top-full left-0 mt-2 flex flex-col gap-1 w-56 bg-white border border-gray-200 shadow-lg rounded-lg p-2">
-                        {onGoHome && onSave && (
-                            <button
-                                onClick={() => { setShowMenu(false); runSaveWithProgress(true) }}
-                                disabled={!!saveOverlay}
-                                className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors disabled:opacity-50"
-                            >
-                                <span className="flex items-center gap-1.5">
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                        <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-                                        <polyline points="9 22 9 12 15 12 15 22" />
-                                    </svg>
-                                    Save & Home
-                                </span>
-                            </button>
+                {/* ── Global Snipping Tool Overlay ─────────────────────────────── */}
+                {isSnippingMode && (
+                    <div
+                        ref={snipOverlayRef}
+                        data-snip-overlay="true"
+                        className={`absolute inset-0 z-50 ${isSnipExtracting ? 'cursor-wait' : 'cursor-crosshair'}`}
+                        style={{ backgroundColor: 'rgba(0,0,0,0.15)', touchAction: 'none' }}
+                        onPointerDown={handleSnipPointerDown}
+                        onPointerMove={handleSnipPointerMove}
+                        onPointerUp={handleSnipPointerUp}
+                    >
+                        {/* Selection rectangle */}
+                        {snipStart && snipCurrent && (
+                            <div
+                                className="absolute border-2 border-indigo-500 bg-indigo-500/20 rounded-sm pointer-events-none"
+                                style={{
+                                    left: Math.min(snipStart.x, snipCurrent.x),
+                                    top: Math.min(snipStart.y, snipCurrent.y),
+                                    width: Math.abs(snipStart.x - snipCurrent.x),
+                                    height: Math.abs(snipStart.y - snipCurrent.y),
+                                }}
+                            />
                         )}
-                        {!fileData && (
+                        {/* Extracting spinner */}
+                        {isSnipExtracting && (
+                            <div className="absolute inset-0 flex items-center justify-center bg-white/40 backdrop-blur-sm">
+                                <div className="bg-white p-4 rounded-lg shadow-xl flex items-center gap-3">
+                                    <div className="w-5 h-5 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+                                    <span className="text-sm font-medium text-gray-700">Extracting text with Vision AI...</span>
+                                </div>
+                            </div>
+                        )}
+                        {/* Hint label */}
+                        {!snipStart && !isSnipExtracting && (
+                            <div className="absolute top-6 left-1/2 -translate-x-1/2 pointer-events-none">
+                                <div className="bg-gray-900/80 text-white text-xs font-medium px-3 py-1.5 rounded-full shadow-lg">
+                                    Drag to select an area · Press <kbd className="font-mono bg-white/20 px-1 rounded">Esc</kbd> to cancel
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* Canvas navigation controls — rendered outside ReactFlow so they live in
+                the root stacking context and always appear above the drawing canvas overlay */}
+                <div className="canvas-nav-controls fixed bottom-4 left-4 z-[50] flex flex-col bg-white border border-gray-200 rounded-lg shadow-md overflow-hidden select-none">
+                    <button
+                        onClick={() => zoomIn()}
+                        className="flex items-center justify-center w-[36px] h-[36px] text-gray-600 hover:bg-gray-100 border-b border-gray-200 transition-colors"
+                        title="Zoom in"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                            <path d="M12 5v14M5 12h14" />
+                        </svg>
+                    </button>
+                    <button
+                        onClick={() => zoomOut()}
+                        className="flex items-center justify-center w-[36px] h-[36px] text-gray-600 hover:bg-gray-100 border-b border-gray-200 transition-colors"
+                        title="Zoom out"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                            <path d="M5 12h14" />
+                        </svg>
+                    </button>
+                    <button
+                        onClick={() => fitView()}
+                        className="flex items-center justify-center w-[36px] h-[36px] text-gray-600 hover:bg-gray-100 border-b border-gray-200 transition-colors"
+                        title="Fit view"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M4 8V4m0 0h4M4 4l5 5M20 8V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5M20 16v4m0 0h-4m4 0l-5-5" />
+                        </svg>
+                    </button>
+                    <button
+                        onClick={() => setIsDarkMode((d) => !d)}
+                        className="flex items-center justify-center w-[36px] h-[36px] text-gray-600 hover:bg-gray-100 transition-colors"
+                        title={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+                    >
+                        {isDarkMode ? (
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
+                                <path d="M12 2.25a.75.75 0 01.75.75v2.25a.75.75 0 01-1.5 0V3a.75.75 0 01.75-.75zM7.5 12a4.5 4.5 0 119 0 4.5 4.5 0 01-9 0zM18.894 6.166a.75.75 0 00-1.06-1.06l-1.591 1.59a.75.75 0 101.06 1.061l1.591-1.59zM21.75 12a.75.75 0 01-.75.75h-2.25a.75.75 0 010-1.5H21a.75.75 0 01.75.75zM17.834 18.894a.75.75 0 001.06-1.06l-1.59-1.591a.75.75 0 10-1.061 1.06l1.59 1.591zM12 18a.75.75 0 01.75.75V21a.75.75 0 01-1.5 0v-2.25A.75.75 0 0112 18zM7.166 17.834a.75.75 0 00-1.06 1.06l1.59 1.591a.75.75 0 001.061-1.06l-1.59-1.591zM6 12a.75.75 0 01-.75.75H3a.75.75 0 010-1.5h2.25A.75.75 0 016 12zM6.166 6.166a.75.75 0 00-1.06 1.06l1.59 1.591a.75.75 0 001.061-1.06l-1.59-1.591z" />
+                            </svg>
+                        ) : (
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
+                                <path fillRule="evenodd" d="M9.528 1.718a.75.75 0 01.162.819A8.97 8.97 0 009 6a9 9 0 009 9 8.97 8.97 0 003.463-.69.75.75 0 01.981.98 10.503 10.503 0 01-9.694 6.46c-5.799 0-10.5-4.701-10.5-10.5 0-4.368 2.667-8.112 6.46-9.694a.75.75 0 01.818.162z" clipRule="evenodd" />
+                            </svg>
+                        )}
+                    </button>
+                </div>
+
+                {/* Whiteboard toolbar */}
+                <DrawingToolbar />
+
+                {/* Left toolbar — custom nodes */}
+                <LeftToolbar
+                    onCustomPrompt={handleSpawnCustomPrompt}
+                    onSnip={() => setIsSnippingMode(true)}
+                    onAddImage={handleSpawnImage}
+                    onCustomFlashcard={handleSpawnCustomFlashcard}
+                    onStickyNote={handleSpawnStickyNote}
+                    onVoiceNote={handleSpawnVoiceNote}
+                    onTimer={handleSpawnTimer}
+                    onSummary={handleSpawnSummary}
+                    lastAutoSave={lastAutoSave}
+                    autoSaveInterval={autoSaveInterval}
+                />
+
+                {/* Ask Gemini popup */}
+                {selection && (
+                    <AskGeminiPopup rect={selection.rect} nodeId={selection.sourceNodeId} mousePos={selection.mousePos} onAsk={handleAsk} />
+                )}
+
+                {/* Question modal */}
+                {modal && (
+                    <QuestionModal
+                        selectedText={modal.selectedText}
+                        sourceNodeId={modal.sourceNodeId}
+                        preGeneratedNodeId={modal.preGeneratedNodeId}
+                        onSubmit={handleModalSubmit}
+                        onCancel={() => setModal(null)}
+                    />
+                )}
+
+                {/* Revision mode modal */}
+                {showRevision && fileData && revisionSource && (
+                    <RevisionModal
+                        nodes={nodes}
+                        rawText={revisionSource.pageContent || pageMarkdowns[currentPage - 1] || (fileData.raw_text ?? '').slice(0, 50000)}
+                        pdfId={fileData.pdf_id}
+                        onClose={() => setShowRevision(false)}
+                        sourceType={revisionSource.sourceType}
+                        pageIndex={revisionSource.pageIndex - 1}
+                        pageContent={revisionSource.pageContent}
+                        canvasContext={collectCanvasContext(nodes) || undefined}
+                    />
+                )}
+
+                {/* Tools modal */}
+                {showTools && (
+                    <ToolsModal onClose={() => setShowTools(false)} />
+                )}
+
+                {/* Upload PDF popup */}
+                {showUploadPopup && (
+                    <PdfUploadPopup
+                        onClose={() => setShowUploadPopup(false)}
+                        onUploaded={() => { /* popup closes itself; node is already created */ }}
+                    />
+                )}
+
+                {/* Top Left Menu */}
+                <div className="fixed top-4 left-4 z-40">
+                    <button
+                        data-tutorial="menu-btn"
+                        onClick={() => { setShowMenu(!showMenu); setShowRevisionMenu(false) }}
+                        className="flex items-center gap-2 px-4 py-2 bg-white text-gray-700 text-sm font-medium rounded-lg shadow-md border border-gray-200 hover:bg-gray-50 transition-colors"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <line x1="3" y1="6" x2="21" y2="6" />
+                            <line x1="3" y1="12" x2="21" y2="12" />
+                            <line x1="3" y1="18" x2="21" y2="18" />
+                        </svg>
+                        Menu
+                    </button>
+                    {showMenu && (
+                        <div className="absolute top-full left-0 mt-2 flex flex-col gap-1 w-56 bg-white border border-gray-200 shadow-lg rounded-lg p-2">
+                            {onGoHome && onSave && (
+                                <button
+                                    onClick={() => { setShowMenu(false); runSaveWithProgress(true) }}
+                                    disabled={!!saveOverlay}
+                                    className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors disabled:opacity-50"
+                                >
+                                    <span className="flex items-center gap-1.5">
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                                            <polyline points="9 22 9 12 15 12 15 22" />
+                                        </svg>
+                                        Save & Home
+                                    </span>
+                                </button>
+                            )}
+                            {!fileData && (
+                                <button
+                                    onClick={() => { setShowMenu(false); setShowUploadPopup(true); }}
+                                    className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors"
+                                >
+                                    <span className="flex items-center gap-1.5">
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                            <polyline points="14 2 14 8 20 8" />
+                                            <line x1="12" y1="18" x2="12" y2="12" />
+                                            <line x1="9" y1="15" x2="15" y2="15" />
+                                        </svg>
+                                        Upload PDF
+                                    </span>
+                                </button>
+                            )}
+                            {onSave && (
+                                <button
+                                    onClick={() => { setShowMenu(false); runSaveWithProgress(false) }}
+                                    disabled={!!saveOverlay}
+                                    className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors disabled:opacity-50"
+                                >
+                                    <span className="flex items-center gap-1.5">
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                                            <polyline points="17 21 17 13 7 13 7 21" />
+                                            <polyline points="7 3 7 8 15 8" />
+                                        </svg>
+                                        Save
+                                    </span>
+                                </button>
+                            )}
                             <button
-                                onClick={() => { setShowMenu(false); setShowUploadPopup(true); }}
+                                onClick={() => { setShowMenu(false); setShowTools(true); }}
                                 className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors"
                             >
                                 <span className="flex items-center gap-1.5">
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                                        <polyline points="14 2 14 8 20 8" />
-                                        <line x1="12" y1="18" x2="12" y2="12" />
-                                        <line x1="9" y1="15" x2="15" y2="15" />
-                                    </svg>
-                                    Upload PDF
-                                </span>
-                            </button>
-                        )}
-                        {onSave && (
-                            <button
-                                onClick={() => { setShowMenu(false); runSaveWithProgress(false) }}
-                                disabled={!!saveOverlay}
-                                className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors disabled:opacity-50"
-                            >
-                                <span className="flex items-center gap-1.5">
                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
-                                        <polyline points="17 21 17 13 7 13 7 21" />
-                                        <polyline points="7 3 7 8 15 8" />
+                                        <circle cx="12" cy="12" r="3" />
+                                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
                                     </svg>
-                                    Save
+                                    Tools (Context)
                                 </span>
                             </button>
-                        )}
-                        <button
-                            onClick={() => { setShowMenu(false); setShowTools(true); }}
-                            className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors"
-                        >
-                            <span className="flex items-center gap-1.5">
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <circle cx="12" cy="12" r="3" />
-                                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-                                </svg>
-                                Tools (Context)
-                            </span>
-                        </button>
-                        <div className="h-px bg-gray-200 mx-1.5" />
-                        <div className="px-3 py-1 mb-1 text-[11px] font-bold text-gray-400 uppercase tracking-wider">Export Canvas</div>
-                        <button
-                            onClick={() => { setShowMenu(false); handleExportCurrentPage() }}
-                            disabled={isExportingPage || isExportingAll}
-                            className="text-left px-3 py-2 hover:bg-indigo-50 rounded-md text-sm text-indigo-700 font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                        >
-                            {isExportingPage ? (
-                                <span className="flex items-center gap-1.5">
-                                    <svg className="animate-spin h-3.5 w-3.5 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                                    </svg>
-                                    Exporting…
-                                </span>
-                            ) : (
-                                <span className="flex items-center gap-1.5 pl-2">
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                        <rect x="3" y="3" width="18" height="18" rx="2" />
-                                        <path d="M3 9h18" />
-                                    </svg>
-                                    Save This Page
-                                </span>
-                            )}
-                        </button>
-                        <button
-                            onClick={() => { setShowMenu(false); handleExportAllPages() }}
-                            disabled={isExportingPage || isExportingAll}
-                            className="text-left px-3 py-2 hover:bg-indigo-50 rounded-md text-sm text-indigo-700 font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                        >
-                            {isExportingAll ? (
-                                <span className="flex items-center gap-1.5">
-                                    <svg className="animate-spin h-3.5 w-3.5 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                                    </svg>
-                                    Exporting…
-                                </span>
-                            ) : (
-                                <span className="flex items-center gap-1.5 pl-2">
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                        <rect x="3" y="3" width="18" height="18" rx="2" />
-                                        <path d="M3 9h18" />
-                                        <path d="M3 15h18" />
-                                    </svg>
-                                    Save All Pages
-                                </span>
-                            )}
-                        </button>
-                        <button
-                            onClick={() => { setShowMenu(false); handleDownloadPDF() }}
-                            disabled={!nodes.some((n) => n.type === 'answerNode' || n.type === 'quizQuestionNode') || isGeneratingPDF}
-                            className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                        >
-                            {isGeneratingPDF ? (
-                                <span className="flex items-center gap-1.5">
-                                    <svg className="animate-spin h-3.5 w-3.5 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                                    </svg>
-                                    Generating…
-                                </span>
-                            ) : (
-                                <span className="flex items-center gap-1.5 pl-2">
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                                        <polyline points="14 2 14 8 20 8" />
-                                    </svg>
-                                    Save Notes (Text)
-                                </span>
-                            )}
-                        </button>
-                    </div>
-                )}
-            </div>
+                            <div className="h-px bg-gray-200 mx-1.5" />
+                            <div className="px-3 py-1 mb-1 text-[11px] font-bold text-gray-400 uppercase tracking-wider">Export Canvas</div>
+                            {/* Session export button */}
+                            <button
+                                onClick={handleExportSessionPages}
+                                disabled={isExportingPage || isExportingAll}
+                                className="text-left px-3 py-2 hover:bg-indigo-50 rounded-md text-sm text-indigo-700 font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                                {isExportingAll ? (
+                                    <span className="flex items-center gap-1.5">
+                                        <svg className="animate-spin h-3.5 w-3.5 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                                        </svg>
+                                        Exporting…
+                                    </span>
+                                ) : (
+                                    <span className="flex items-center gap-1.5 pl-2">
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                            <polygon points="12 2 2 7 12 12 22 7 12 2" />
+                                            <polyline points="2 17 12 22 22 17" />
+                                            <polyline points="2 12 12 17 22 12" />
+                                        </svg>
+                                        Save This Session's Work
+                                    </span>
+                                )}
+                            </button>
+                            <div className="h-px bg-gray-100 mx-1.5 my-0.5" />
 
-            {/* Top Right — Revision Menu */}
-            <div className="fixed top-4 right-4 z-40">
-                <button
-                    data-tutorial="revision-btn"
-                    onClick={() => { setShowRevisionMenu(!showRevisionMenu); setShowMenu(false) }}
-                    className="flex items-center gap-2 px-4 py-2 bg-white text-gray-700 text-sm font-medium rounded-lg shadow-md border border-gray-200 hover:bg-gray-50 transition-colors"
-                >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="23 4 23 10 17 10" />
-                        <polyline points="1 20 1 14 7 14" />
-                        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-                    </svg>
-                    Revision
-                </button>
-                {showRevisionMenu && (
-                    <div className="absolute top-full right-0 mt-2 flex flex-col gap-1 w-56 bg-white border border-gray-200 shadow-lg rounded-lg p-2">
-                        <div className="px-3 py-1 mb-1 text-[11px] font-bold text-gray-400 uppercase tracking-wider">Revision Mode (Quiz)</div>
-                        <button
-                            onClick={() => handleRevisionMode('struggling')}
-                            className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors"
-                        >
-                            <span className="flex items-center gap-1.5 pl-2">
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                                </svg>
-                                Struggling Topics
-                            </span>
-                        </button>
-                        <button
-                            onClick={() => handleRevisionMode('page')}
-                            className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors"
-                        >
-                            <span className="flex items-center gap-1.5 pl-2">
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                                </svg>
-                                Current Page
-                            </span>
-                        </button>
+                            <button
+                                onClick={() => { setShowMenu(false); handleExportCurrentPage() }}
+                                disabled={isExportingPage || isExportingAll}
+                                className="text-left px-3 py-2 hover:bg-indigo-50 rounded-md text-sm text-indigo-700 font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                                {isExportingPage ? (
+                                    <span className="flex items-center gap-1.5">
+                                        <svg className="animate-spin h-3.5 w-3.5 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                                        </svg>
+                                        Exporting…
+                                    </span>
+                                ) : (
+                                    <span className="flex items-center gap-1.5 pl-2">
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                            <rect x="3" y="3" width="18" height="18" rx="2" />
+                                            <path d="M3 9h18" />
+                                        </svg>
+                                        Save This Page
+                                    </span>
+                                )}
+                            </button>
+                            <button
+                                onClick={() => { setShowMenu(false); handleExportAllPages() }}
+                                disabled={isExportingPage || isExportingAll}
+                                className="text-left px-3 py-2 hover:bg-indigo-50 rounded-md text-sm text-indigo-700 font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                                {isExportingAll ? (
+                                    <span className="flex items-center gap-1.5">
+                                        <svg className="animate-spin h-3.5 w-3.5 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                                        </svg>
+                                        Exporting…
+                                    </span>
+                                ) : (
+                                    <span className="flex items-center gap-1.5 pl-2">
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                            <rect x="3" y="3" width="18" height="18" rx="2" />
+                                            <path d="M3 9h18" />
+                                            <path d="M3 15h18" />
+                                        </svg>
+                                        Save All Pages
+                                    </span>
+                                )}
+                            </button>
+                            <button
+                                onClick={() => { setShowMenu(false); handleDownloadPDF() }}
+                                disabled={!nodes.some((n) => n.type === 'answerNode' || n.type === 'quizQuestionNode') || isGeneratingPDF}
+                                className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                                {isGeneratingPDF ? (
+                                    <span className="flex items-center gap-1.5">
+                                        <svg className="animate-spin h-3.5 w-3.5 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                                        </svg>
+                                        Generating…
+                                    </span>
+                                ) : (
+                                    <span className="flex items-center gap-1.5 pl-2">
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                            <polyline points="14 2 14 8 20 8" />
+                                        </svg>
+                                        Save Notes (Text)
+                                    </span>
+                                )}
+                            </button>
+                        </div>
+                    )}
+                </div>
 
-                        <div className="mt-2 px-3 py-1 mb-1 text-[11px] font-bold text-gray-400 uppercase tracking-wider">Flash Cards</div>
-                        <button
-                            onClick={() => handleCreateFlashCards('struggling')}
-                            disabled={isGeneratingFlashcards}
-                            className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                        >
-                            {isGeneratingFlashcards ? (
+                {/* Top Right — Revision Menu */}
+                <div className="fixed top-4 right-4 z-40">
+                    <button
+                        data-tutorial="revision-btn"
+                        onClick={() => { setShowRevisionMenu(!showRevisionMenu); setShowMenu(false) }}
+                        className="flex items-center gap-2 px-4 py-2 bg-white text-gray-700 text-sm font-medium rounded-lg shadow-md border border-gray-200 hover:bg-gray-50 transition-colors"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="23 4 23 10 17 10" />
+                            <polyline points="1 20 1 14 7 14" />
+                            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                        </svg>
+                        Revision
+                    </button>
+                    {showRevisionMenu && (
+                        <div className="absolute top-full right-0 mt-2 flex flex-col gap-1 w-56 bg-white border border-gray-200 shadow-lg rounded-lg p-2">
+                            <div className="px-3 py-1 mb-1 text-[11px] font-bold text-gray-400 uppercase tracking-wider">Revision Mode (Quiz)</div>
+                            <button
+                                onClick={() => handleRevisionMode('struggling')}
+                                className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors"
+                            >
                                 <span className="flex items-center gap-1.5 pl-2">
-                                    <svg className="animate-spin h-3.5 w-3.5 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                                    </svg>
-                                    Generating…
-                                </span>
-                            ) : (
-                                <span className="flex items-center gap-1.5 pl-2">
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                        <rect x="2" y="5" width="20" height="14" rx="2" />
-                                        <line x1="2" y1="10" x2="22" y2="10" />
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                                     </svg>
                                     Struggling Topics
                                 </span>
-                            )}
-                        </button>
-                        <button
-                            onClick={() => handleCreateFlashCards('page')}
-                            disabled={isGeneratingFlashcards}
-                            className="text-left px-3 py-2 mb-1 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                        >
-                            <span className="flex items-center gap-1.5 pl-2">
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <rect x="2" y="5" width="20" height="14" rx="2" />
-                                </svg>
-                                Current Page
-                            </span>
-                        </button>
-                    </div>
-                )}
-            </div>
+                            </button>
+                            <button
+                                onClick={() => handleRevisionMode('page')}
+                                className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors"
+                            >
+                                <span className="flex items-center gap-1.5 pl-2">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                    </svg>
+                                    Current Page
+                                </span>
+                            </button>
 
-            {/* PDF generation loading overlay */}
-            {isGeneratingPDF && (
-                <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 bg-indigo-700 text-white text-sm font-medium rounded-xl shadow-xl">
-                    <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                    </svg>
-                    Generating PDF title with Gemini…
-                </div>
-            )}
-
-            {/* Visual export progress overlay */}
-            {(isExportingPage || isExportingAll) && exportProgress && (
-                <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 bg-indigo-700 text-white text-sm font-medium rounded-xl shadow-xl">
-                    <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                    </svg>
-                    {exportProgress}
-                    {isExportingAll && (
-                        <button
-                            onClick={handleCancelExport}
-                            className="ml-2 px-2 py-0.5 bg-white/20 hover:bg-white/30 rounded text-xs transition-colors"
-                        >
-                            Cancel
-                        </button>
+                            <div className="mt-2 px-3 py-1 mb-1 text-[11px] font-bold text-gray-400 uppercase tracking-wider">Flash Cards</div>
+                            <button
+                                onClick={() => handleCreateFlashCards('struggling')}
+                                disabled={isGeneratingFlashcards}
+                                className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                                {isGeneratingFlashcards ? (
+                                    <span className="flex items-center gap-1.5 pl-2">
+                                        <svg className="animate-spin h-3.5 w-3.5 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                                        </svg>
+                                        Generating…
+                                    </span>
+                                ) : (
+                                    <span className="flex items-center gap-1.5 pl-2">
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                            <rect x="2" y="5" width="20" height="14" rx="2" />
+                                            <line x1="2" y1="10" x2="22" y2="10" />
+                                        </svg>
+                                        Struggling Topics
+                                    </span>
+                                )}
+                            </button>
+                            <button
+                                onClick={() => handleCreateFlashCards('page')}
+                                disabled={isGeneratingFlashcards}
+                                className="text-left px-3 py-2 mb-1 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                                <span className="flex items-center gap-1.5 pl-2">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <rect x="2" y="5" width="20" height="14" rx="2" />
+                                    </svg>
+                                    Current Page
+                                </span>
+                            </button>
+                        </div>
                     )}
                 </div>
-            )}
 
-            {/* Page navigation bar — only shown when the PDF has multiple pages */}
-            {pageMarkdowns.length > 1 && (
-                <div data-tutorial="page-nav" className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-4 py-2 bg-white border border-gray-200 shadow-md rounded-xl select-none">
-                    <button
-                        disabled={currentPage === 1}
-                        onClick={() => goToPage(currentPage - 1)}
-                        className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                    >
-                        ← Back
-                    </button>
-                    <span className="text-sm text-gray-600 font-medium min-w-[90px] text-center">
-                        Page {currentPage} / {pageMarkdowns.length}
-                    </span>
-                    <button
-                        disabled={currentPage === pageMarkdowns.length}
-                        onClick={() => goToPage(currentPage + 1)}
-                        className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                    >
-                        Forward →
-                    </button>
-                </div>
-            )}
-
-            {/* Upload hint pill — shown on fresh canvases with no PDF */}
-            {!fileData && showUploadHint && (
-                <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 pl-4 pr-2 py-2 bg-white border border-indigo-200 shadow-lg rounded-full text-sm text-gray-700 select-none">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-indigo-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                        <polyline points="14 2 14 8 20 8" />
-                        <line x1="12" y1="18" x2="12" y2="12" />
-                        <line x1="9" y1="15" x2="15" y2="15" />
-                    </svg>
-                    <span className="text-gray-600">Upload a PDF to get started</span>
-                    <button
-                        onClick={() => { setShowUploadHint(false); setShowUploadPopup(true) }}
-                        className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium rounded-full transition-colors"
-                    >
-                        Upload PDF
-                    </button>
-                    <button
-                        onClick={() => setShowUploadHint(false)}
-                        className="p-1 rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
-                        title="Dismiss"
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                            <line x1="18" y1="6" x2="6" y2="18" />
-                            <line x1="6" y1="6" x2="18" y2="18" />
+                {/* PDF generation loading overlay */}
+                {isGeneratingPDF && (
+                    <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 bg-indigo-700 text-white text-sm font-medium rounded-xl shadow-xl">
+                        <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
                         </svg>
-                    </button>
-                </div>
-            )}
+                        Generating PDF title with Gemini…
+                    </div>
+                )}
 
-            {/* Save Progress Overlay */}
-            {saveOverlay && (
-                <div
-                    className="fixed inset-0 flex items-center justify-center"
-                    style={{ zIndex: 9998, background: 'rgba(15,23,42,0.60)', backdropFilter: 'blur(3px)' }}
-                >
-                    <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-xs w-full mx-4 flex flex-col items-center gap-5">
-                        {/* Icon */}
-                        <div className={`w-10 h-10 rounded-full flex items-center justify-center ${saveOverlay.failed ? 'bg-red-100' : 'bg-indigo-100'}`}>
-                            {saveOverlay.failed ? (
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                    <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                                </svg>
-                            ) : (
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-indigo-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
-                                    <polyline points="17 21 17 13 7 13 7 21" /><polyline points="7 3 7 8 15 8" />
-                                </svg>
-                            )}
-                        </div>
-
-                        {/* Title */}
-                        <p className="text-sm font-semibold text-gray-800 tracking-wide">
-                            {saveOverlay.failed ? 'Save failed' : saveOverlay.done ? 'Saved!' : 'Saving canvas\u2026'}
-                        </p>
-
-                        {/* Progress bar — shown while saving */}
-                        {!saveOverlay.done && !saveOverlay.failed && (
-                            <div className="w-full">
-                                <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                                    <div
-                                        className="h-full bg-indigo-500 rounded-full"
-                                        style={{ width: `${saveOverlay.progress}%`, transition: 'width 0.38s ease' }}
-                                    />
-                                </div>
-                                <p className="mt-2 text-xs text-gray-400 text-center">{saveOverlay.label}</p>
-                            </div>
-                        )}
-
-                        {/* Done: animated checkmark */}
-                        {saveOverlay.done && (
-                            <div className="flex flex-col items-center gap-1.5">
-                                <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
-                                    <circle cx="24" cy="24" r="20" stroke="#e0e7ff" strokeWidth="3" />
-                                    <polyline
-                                        className="save-checkmark-path"
-                                        points="14,25 21,32 35,17"
-                                        stroke="#6366f1"
-                                        strokeWidth="2.8"
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        fill="none"
-                                    />
-                                </svg>
-                                {saveOverlay.goHome && (
-                                    <p className="text-xs text-gray-400">Returning home\u2026</p>
-                                )}
-                            </div>
-                        )}
-
-                        {/* Failed: dismiss button */}
-                        {saveOverlay.failed && (
+                {/* Visual export progress overlay */}
+                {(isExportingPage || isExportingAll) && exportProgress && (
+                    <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 bg-indigo-700 text-white text-sm font-medium rounded-xl shadow-xl">
+                        <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                        </svg>
+                        {exportProgress}
+                        {isExportingAll && (
                             <button
-                                onClick={() => setSaveOverlay(null)}
-                                className="px-4 py-1.5 text-xs font-medium text-white bg-gray-700 hover:bg-gray-800 rounded-lg transition-colors"
+                                onClick={handleCancelExport}
+                                className="ml-2 px-2 py-0.5 bg-white/20 hover:bg-white/30 rounded text-xs transition-colors"
                             >
-                                Dismiss
+                                Cancel
                             </button>
                         )}
                     </div>
-                </div>
-            )}
+                )}
 
-            {/* Generation progress bar — quiz questions & flashcards */}
-            {generationProgress && (
-                <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 w-80 bg-white rounded-2xl shadow-2xl border border-gray-100 px-5 py-4 pointer-events-none">
-                    <div className="flex items-center justify-between mb-2.5">
-                        <span className="text-sm font-semibold text-gray-700 truncate pr-2">{generationProgress.label}</span>
-                        <span className="text-xs font-mono font-bold text-indigo-600 shrink-0">
-                            {Math.round(generationProgress.progress)}%
+                {/* Page navigation bar — only shown when the PDF has multiple pages */}
+                {pageMarkdowns.length > 1 && (
+                    <div data-tutorial="page-nav" className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-4 py-2 bg-white border border-gray-200 shadow-md rounded-xl select-none">
+                        <button
+                            disabled={currentPage === 1}
+                            onClick={() => goToPage(currentPage - 1)}
+                            className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        >
+                            ← Back
+                        </button>
+                        <span className="text-sm text-gray-600 font-medium min-w-[90px] text-center">
+                            Page {currentPage} / {pageMarkdowns.length}
                         </span>
+                        <button
+                            disabled={currentPage === pageMarkdowns.length}
+                            onClick={() => goToPage(currentPage + 1)}
+                            className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        >
+                            Forward →
+                        </button>
                     </div>
-                    <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                        <div
-                            className="h-full bg-indigo-500 rounded-full"
-                            style={{
-                                width: `${generationProgress.progress}%`,
-                                transition: generationProgress.progress === 100
-                                    ? 'width 0.12s ease-out'
-                                    : 'width 0.15s linear',
-                            }}
-                        />
-                    </div>
-                </div>
-            )}
+                )}
 
-            {/* Toast notification */}
-            {toast && (
-                <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 px-4 py-2 bg-gray-800 text-white text-sm rounded-lg shadow-lg">
-                    {toast}
-                </div>
-            )}
-        </div>
+                {/* Upload hint pill — shown on fresh canvases with no PDF */}
+                {!fileData && showUploadHint && (
+                    <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 pl-4 pr-2 py-2 bg-white border border-indigo-200 shadow-lg rounded-full text-sm text-gray-700 select-none">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-indigo-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                            <polyline points="14 2 14 8 20 8" />
+                            <line x1="12" y1="18" x2="12" y2="12" />
+                            <line x1="9" y1="15" x2="15" y2="15" />
+                        </svg>
+                        <span className="text-gray-600">Upload a PDF to get started</span>
+                        <button
+                            onClick={() => { setShowUploadHint(false); setShowUploadPopup(true) }}
+                            className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium rounded-full transition-colors"
+                        >
+                            Upload PDF
+                        </button>
+                        <button
+                            onClick={() => setShowUploadHint(false)}
+                            className="p-1 rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+                            title="Dismiss"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                <line x1="18" y1="6" x2="6" y2="18" />
+                                <line x1="6" y1="6" x2="18" y2="18" />
+                            </svg>
+                        </button>
+                    </div>
+                )}
+
+                {/* Save Progress Overlay */}
+                {saveOverlay && (
+                    <div
+                        className="fixed inset-0 flex items-center justify-center"
+                        style={{ zIndex: 9998, background: 'rgba(15,23,42,0.60)', backdropFilter: 'blur(3px)' }}
+                    >
+                        <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-xs w-full mx-4 flex flex-col items-center gap-5">
+                            {/* Icon */}
+                            <div className={`w-10 h-10 rounded-full flex items-center justify-center ${saveOverlay.failed ? 'bg-red-100' : 'bg-indigo-100'}`}>
+                                {saveOverlay.failed ? (
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                        <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                                    </svg>
+                                ) : (
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-indigo-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                                        <polyline points="17 21 17 13 7 13 7 21" /><polyline points="7 3 7 8 15 8" />
+                                    </svg>
+                                )}
+                            </div>
+
+                            {/* Title */}
+                            <p className="text-sm font-semibold text-gray-800 tracking-wide">
+                                {saveOverlay.failed ? 'Save failed' : saveOverlay.done ? 'Saved!' : 'Saving canvas\u2026'}
+                            </p>
+
+                            {/* Progress bar — shown while saving */}
+                            {!saveOverlay.done && !saveOverlay.failed && (
+                                <div className="w-full">
+                                    <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                        <div
+                                            className="h-full bg-indigo-500 rounded-full"
+                                            style={{ width: `${saveOverlay.progress}%`, transition: 'width 0.38s ease' }}
+                                        />
+                                    </div>
+                                    <p className="mt-2 text-xs text-gray-400 text-center">{saveOverlay.label}</p>
+                                </div>
+                            )}
+
+                            {/* Done: animated checkmark */}
+                            {saveOverlay.done && (
+                                <div className="flex flex-col items-center gap-1.5">
+                                    <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+                                        <circle cx="24" cy="24" r="20" stroke="#e0e7ff" strokeWidth="3" />
+                                        <polyline
+                                            className="save-checkmark-path"
+                                            points="14,25 21,32 35,17"
+                                            stroke="#6366f1"
+                                            strokeWidth="2.8"
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            fill="none"
+                                        />
+                                    </svg>
+                                    {saveOverlay.goHome && (
+                                        <p className="text-xs text-gray-400">Returning home\u2026</p>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* Failed: dismiss button */}
+                            {saveOverlay.failed && (
+                                <button
+                                    onClick={() => setSaveOverlay(null)}
+                                    className="px-4 py-1.5 text-xs font-medium text-white bg-gray-700 hover:bg-gray-800 rounded-lg transition-colors"
+                                >
+                                    Dismiss
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                )}
+
+                {/* Generation progress bar — quiz questions & flashcards */}
+                {generationProgress && (
+                    <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 w-80 bg-white rounded-2xl shadow-2xl border border-gray-100 px-5 py-4 pointer-events-none">
+                        <div className="flex items-center justify-between mb-2.5">
+                            <span className="text-sm font-semibold text-gray-700 truncate pr-2">{generationProgress.label}</span>
+                            <span className="text-xs font-mono font-bold text-indigo-600 shrink-0">
+                                {Math.round(generationProgress.progress)}%
+                            </span>
+                        </div>
+                        <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                            <div
+                                className="h-full bg-indigo-500 rounded-full"
+                                style={{
+                                    width: `${generationProgress.progress}%`,
+                                    transition: generationProgress.progress === 100
+                                        ? 'width 0.12s ease-out'
+                                        : 'width 0.15s linear',
+                                }}
+                            />
+                        </div>
+                    </div>
+                )}
+
+                {/* Toast notification */}
+                {toast && (
+                    <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 px-4 py-2 bg-gray-800 text-white text-sm rounded-lg shadow-lg">
+                        {toast}
+                    </div>
+                )}
+            </div>
         </CanvasCallbackContext.Provider>
     )
 }

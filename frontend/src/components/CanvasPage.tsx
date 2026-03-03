@@ -41,6 +41,7 @@ export default function CanvasPage() {
     const navigate = useNavigate()
     const [loading, setLoading] = useState(true)
     const [loadError, setLoadError] = useState<string | null>(null)
+    const [lastAutoSave, setLastAutoSave] = useState<Date | null>(null)
     const savingRef = useRef(false)
     const mountedRef = useRef(true)
 
@@ -174,7 +175,7 @@ export default function CanvasPage() {
                         const audioId = (node.data as any).audioId as string
                         const blob = await loadAudio(audioId)
                         if (blob) {
-                            await fsSaveVoiceAudio(parentHandle, canvasId, audioId, blob).catch(() => {})
+                            await fsSaveVoiceAudio(parentHandle, canvasId, audioId, blob).catch(() => { })
                         }
                     }
                 } catch { /* best-effort */ }
@@ -213,7 +214,7 @@ export default function CanvasPage() {
             store.persistToLocalStorage()
 
             const backupState = { nodes, edges, fileData, highlights, userDetails, currentPage, pageMarkdowns, zoomLevel, scrollPositions, canvasViewport, drawingStrokes, savedColors, toolSettings }
-            await saveCanvasBackup(canvasId, backupState).catch(() => {})
+            await saveCanvasBackup(canvasId, backupState).catch(() => { })
 
             onProgress?.(100, 'Done!')
             setDirty(false)
@@ -345,7 +346,7 @@ export default function CanvasPage() {
                         store.setPdfArrayBuffer(pdfBuf)
                         if (stateObj?.fileData) {
                             const key = stateObj.fileData.pdf_id || stateObj.fileData.filename || 'current_pdf'
-                            savePdfToLocal(key, pdfBuf).catch(() => {})
+                            savePdfToLocal(key, pdfBuf).catch(() => { })
                         }
                     } else if (stateObj?.fileData) {
                         await store.loadPdfFromStorage()
@@ -363,7 +364,7 @@ export default function CanvasPage() {
                         if (!existingBlob) {
                             const blob = await fsLoadVoiceAudio(parentHandle, canvasId!, audioId).catch(() => null)
                             if (blob) {
-                                await saveAudio(audioId, blob).catch(() => {})
+                                await saveAudio(audioId, blob).catch(() => { })
                             }
                         }
                     }
@@ -416,7 +417,9 @@ export default function CanvasPage() {
     useEffect(() => {
         const timer = setInterval(() => {
             if (isDirty && mountedRef.current) {
-                saveCanvas()
+                saveCanvas().then(() => {
+                    if (mountedRef.current) setLastAutoSave(new Date())
+                }).catch(() => { })
             }
         }, autoSaveInterval)
         return () => clearInterval(timer)
@@ -460,7 +463,7 @@ export default function CanvasPage() {
                     canvasViewport: s.canvasViewport, drawingStrokes: s.drawingStrokes,
                     savedColors: s.savedColors, toolSettings: s.toolSettings,
                 }
-                saveCanvasBackup(canvasId, backup).catch(() => {})
+                saveCanvasBackup(canvasId, backup).catch(() => { })
             }
             // Save before leaving
             if (useAppStore.getState().isDirty) {
@@ -511,7 +514,7 @@ export default function CanvasPage() {
 
     return (
         <ReactFlowProvider>
-            <Canvas onGoHome={handleGoHome} onSave={saveCanvas} />
+            <Canvas onGoHome={handleGoHome} onSave={saveCanvas} lastAutoSave={lastAutoSave} autoSaveInterval={autoSaveInterval} />
         </ReactFlowProvider>
     )
 }

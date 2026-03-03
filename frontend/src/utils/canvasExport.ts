@@ -103,6 +103,14 @@ export interface ExportAllOptions extends ExportOptions {
     totalPages: number
     /** Current page index (1-based) to restore after export */
     currentPage: number
+    /**
+     * Optional explicit list of page numbers (1-based) to export.
+     * When provided, these pages are exported directly (no pageHasContent check).
+     * When omitted the function checks all pages via pageHasContent as usual.
+     */
+    overridePagesToExport?: number[]
+    /** Optional custom filename suffix (defaults to "AllPages") */
+    filenameSuffix?: string
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -197,7 +205,7 @@ function forceFlashcardAnswers(container: HTMLElement): () => void {
         if (back) {
             back.style.transform = 'none'
             back.style.backfaceVisibility = 'visible'
-            ;(back.style as unknown as Record<string, string>).webkitBackfaceVisibility = 'visible'
+                ; (back.style as unknown as Record<string, string>).webkitBackfaceVisibility = 'visible'
             back.style.position = 'relative'
         }
 
@@ -209,7 +217,7 @@ function forceFlashcardAnswers(container: HTMLElement): () => void {
             if (back) {
                 back.style.transform = savedBackTransform
                 back.style.backfaceVisibility = savedBackBfv
-                ;(back.style as unknown as Record<string, string>).webkitBackfaceVisibility = ''
+                    ; (back.style as unknown as Record<string, string>).webkitBackfaceVisibility = ''
                 back.style.position = savedBackPosition
             }
         })
@@ -686,12 +694,18 @@ export async function exportAllPages(options: ExportAllOptions): Promise<Blob | 
         containerEl, filenameBase, onProgress, signal,
         goToPage, totalPages, currentPage: originalPage,
         fitView, getViewport, setViewport, getNodes,
+        overridePagesToExport, filenameSuffix,
     } = options
 
-    // Build list of annotated pages
-    const annotatedPages: number[] = []
-    for (let p = 1; p <= totalPages; p++) {
-        if (pageHasContent(p)) annotatedPages.push(p)
+    // Build list of annotated pages — use override if provided, otherwise scan all pages
+    let annotatedPages: number[]
+    if (overridePagesToExport && overridePagesToExport.length > 0) {
+        annotatedPages = overridePagesToExport
+    } else {
+        annotatedPages = []
+        for (let p = 1; p <= totalPages; p++) {
+            if (pageHasContent(p)) annotatedPages.push(p)
+        }
     }
     if (annotatedPages.length === 0) return null
 
@@ -805,7 +819,7 @@ export async function exportAllPages(options: ExportAllOptions): Promise<Blob | 
 
         const blob = doc.output('blob')
 
-        triggerDownload(blob, `${filenameBase}-AllPages.pdf`)
+        triggerDownload(blob, `${filenameBase}-${filenameSuffix ?? 'AllPages'}.pdf`)
         onProgress?.('Done!')
         return blob
     } finally {
