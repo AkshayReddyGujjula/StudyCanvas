@@ -308,7 +308,7 @@ function FlashcardNode({ id, data }: FlashcardNodeProps) {
                                     )}
                                     <div className="mt-1.5 flex-shrink-0">
                                         <div className="border-t border-gray-100 pt-1.5 mb-1">
-                                            <p className="text-[10px] text-gray-400 italic leading-snug line-clamp-2 w-full" title={data.question}>
+                                            <p className="text-[11px] text-gray-700 font-medium leading-snug line-clamp-2 w-full" title={data.question}>
                                                 Q: {data.question}
                                             </p>
                                         </div>

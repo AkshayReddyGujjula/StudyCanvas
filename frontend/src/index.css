@@ -145,15 +145,40 @@ body.rf-connecting .react-flow__node .nodrag * {
   fill: #d4d4d4;
 }
 
-/* MiniMap */
+/* MiniMap — root cause fix:
+   The drawing canvases are position:absolute in the ROOT viewport stacking context
+   (z-index 1–5). The minimap's z-index was relative to ReactFlow's internal stacking
+   context so z-index:20 could never beat the canvas in the root context.
+   Fix: switch the minimap to position:fixed — this yanks it OUT of ReactFlow's
+   stacking context and places it directly in the viewport stacking context, where
+   z-index:30 definitively beats the drawing canvas. */
 .react-flow__minimap {
-  z-index: 10 !important;
+  position: fixed !important;
+  bottom: 8px !important;
+  right: 8px !important;
+  z-index: 30 !important;
+  /* Solid opaque white — nothing bleeds through */
+  background-color: #ffffff !important;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.10), 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+
+/* SVG canvas inside minimap also gets a solid white background */
+.react-flow__minimap svg {
+  background-color: #ffffff;
+  display: block;
 }
 
 .dark-mode .react-flow__minimap {
   background-color: #1e1e1e !important;
   border-color: #3a3a3a !important;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5) !important;
+}
+
+.dark-mode .react-flow__minimap svg {
+  background-color: #1e1e1e;
 }
 
 .dark-mode .react-flow__minimap-mask {

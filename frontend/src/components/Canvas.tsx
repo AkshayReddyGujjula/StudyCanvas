@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import {
     ReactFlow,
     Background,
@@ -2824,20 +2825,19 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
                     }}
                 >
                     <Background variant={BackgroundVariant.Dots} />
-                    <MiniMap
-                        nodeColor={nodeColor}
-                        position="bottom-right"
-                        style={{
-                            backgroundColor: '#f8fafc',
-                            border: '1px solid #e2e8f0',
-                            borderRadius: '12px',
-                            boxShadow: '0 4px 16px rgba(0,0,0,0.10), 0 1px 4px rgba(0,0,0,0.06)',
-                            overflow: 'hidden',
-                        }}
-                        maskColor="rgba(148,163,184,0.18)"
-                        pannable
-                        zoomable
-                    />
+                    {/* MiniMap portaled to document.body so it escapes
+                        .react-flow's z-index:0 stacking context and paints
+                        above the drawing canvas overlays (z-index 1-5). */}
+                    {createPortal(
+                        <MiniMap
+                            nodeColor={nodeColor}
+                            position="bottom-right"
+                            maskColor="rgba(148,163,184,0.18)"
+                            pannable
+                            zoomable
+                        />,
+                        document.body
+                    )}
                 </ReactFlow>
 
                 {/* ── Global Snipping Tool Overlay ─────────────────────────────── */}
@@ -3005,7 +3005,7 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
                         Menu
                     </button>
                     {showMenu && (
-                        <div className="absolute top-full left-0 mt-2 flex flex-col gap-1 w-56 bg-white border border-gray-200 shadow-lg rounded-lg p-2">
+                        <div className="absolute top-full left-0 mt-2 flex flex-col gap-1 w-fit bg-white border border-gray-200 shadow-lg rounded-lg p-2">
                             {onGoHome && onSave && (
                                 <button
                                     onClick={() => { setShowMenu(false); runSaveWithProgress(true) }}
@@ -3082,7 +3082,7 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
                                         Exporting…
                                     </span>
                                 ) : (
-                                    <span className="flex items-center gap-1.5 pl-2">
+                                    <span className="flex items-center gap-1.5 pl-2 whitespace-nowrap">
                                         <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                             <polygon points="12 2 2 7 12 12 22 7 12 2" />
                                             <polyline points="2 17 12 22 22 17" />
