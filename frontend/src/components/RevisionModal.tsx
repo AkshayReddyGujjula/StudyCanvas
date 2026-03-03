@@ -66,18 +66,53 @@ export default function RevisionModal({
 
         let input: any[] = []
         if (sourceType !== 'page') {
-            const strugglingNodes = nodes.filter(
-                (n) => n.type === 'answerNode' && (n.data as unknown as AnswerNodeData).status === 'struggling'
-            )
-            input = strugglingNodes.map((n) => {
-                const d = n.data as unknown as AnswerNodeData
-                return {
-                    highlighted_text: d.highlighted_text,
-                    question: d.question,
-                    answer: d.answer,
-                    page_index: d.pageIndex ? d.pageIndex - 1 : undefined,
-                }
-            })
+            input = nodes
+                .filter((n) => {
+                    const status = (n.data as any)?.status
+                    return status === 'struggling' && (
+                        n.type === 'answerNode' ||
+                        n.type === 'quizQuestionNode' ||
+                        n.type === 'flashcardNode' ||
+                        n.type === 'summaryNode'
+                    )
+                })
+                .map((n) => {
+                    if (n.type === 'answerNode') {
+                        const d = n.data as unknown as AnswerNodeData
+                        return {
+                            highlighted_text: d.highlighted_text,
+                            question: d.question,
+                            answer: d.answer,
+                            page_index: d.pageIndex ? d.pageIndex - 1 : undefined,
+                        }
+                    }
+                    if (n.type === 'quizQuestionNode') {
+                        const d = n.data as any
+                        return {
+                            highlighted_text: d.question,
+                            question: d.question,
+                            answer: d.userAnswer ?? d.feedback ?? '',
+                            page_index: d.pageIndex ? d.pageIndex - 1 : undefined,
+                        }
+                    }
+                    if (n.type === 'flashcardNode') {
+                        const d = n.data as any
+                        return {
+                            highlighted_text: d.question,
+                            question: d.question,
+                            answer: d.answer,
+                            page_index: d.pageIndex ? d.pageIndex - 1 : undefined,
+                        }
+                    }
+                    // summaryNode
+                    const d = n.data as any
+                    return {
+                        highlighted_text: (d.summary as string).slice(0, 500),
+                        question: `Summary — page ${d.sourcePage}`,
+                        answer: d.summary,
+                        page_index: d.sourcePage ? d.sourcePage - 1 : undefined,
+                    }
+                })
         }
 
         const fetchQuiz = async () => {

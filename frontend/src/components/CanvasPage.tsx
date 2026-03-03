@@ -148,27 +148,29 @@ export default function CanvasPage() {
             // 4. Capture thumbnail
             onProgress?.(72, 'Capturing thumbnail…')
             try {
-                const rfEl = document.querySelector('.react-flow') as HTMLElement | null
-                if (rfEl) {
-                    // Find the viewport container which holds the actual nodes
-                    const viewport = rfEl.querySelector('.react-flow__viewport') as HTMLElement | null
-                    const target = viewport ?? rfEl
+                // Capture the full container (DrawingCanvas + ReactFlow) so that
+                // handwritten strokes rendered on the drawing canvas are included.
+                // The container is identified by its data attribute.
+                const containerEl = document.querySelector('[data-tutorial="canvas-container"]') as HTMLElement | null
+                const target = containerEl ?? (document.querySelector('.react-flow') as HTMLElement | null)
 
-                    // Use a higher-fidelity capture: render at native size then scale down.
-                    // First get the bounding box of what's visible, then capture with
-                    // proper pixel ratio for sharpness.
+                if (target) {
                     const dataUrl = await toPng(target, {
                         quality: 0.85,
                         pixelRatio: 0.5,  // Half native pixel ratio for reasonable file size
-                        backgroundColor: '#ffffff',  // keep canvas thumbnail background white
+                        backgroundColor: '#ffffff',
                         filter: (node) => {
-                            // Exclude minimap, controls, and panels from thumbnail
                             const el = node as HTMLElement
-                            if (el.classList?.contains('react-flow__minimap')) return false
-                            if (el.classList?.contains('react-flow__controls')) return false
-                            if (el.classList?.contains('react-flow__panel')) return false
-                            // Exclude any fixed/absolute overlays (menus, popups)
-                            if (el.classList?.contains('react-flow__attribution')) return false
+                            if (!el.classList) return true
+                            // Exclude React Flow chrome
+                            if (el.classList.contains('react-flow__minimap')) return false
+                            if (el.classList.contains('react-flow__controls')) return false
+                            if (el.classList.contains('react-flow__panel')) return false
+                            if (el.classList.contains('react-flow__attribution')) return false
+                            // Exclude the live-stroke temp canvas (only committed strokes needed)
+                            if (el.classList.contains('drawing-canvas-temp')) return false
+                            // Exclude all fixed-position UI chrome (toolbars, menus, overlays, toasts)
+                            if (el.classList.contains('fixed')) return false
                             return true
                         },
                     })

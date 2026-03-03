@@ -1932,21 +1932,70 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
         return () => window.removeEventListener('keydown', handler)
     }, [whiteboardUndo, whiteboardRedo])
 
+    // ── Shared helper: collect quiz/flashcard payload from ALL struggling node types ──
+    const getStrugglingPayload = useCallback(() => {
+        return nodes
+            .filter((n) => {
+                const status = (n.data as any)?.status
+                return status === 'struggling' && (
+                    n.type === 'answerNode' ||
+                    n.type === 'quizQuestionNode' ||
+                    n.type === 'flashcardNode' ||
+                    n.type === 'summaryNode'
+                )
+            })
+            .map((n) => {
+                if (n.type === 'answerNode') {
+                    const d = n.data as unknown as AnswerNodeData
+                    return {
+                        highlighted_text: d.highlighted_text,
+                        question: d.question,
+                        answer: d.answer,
+                        page_index: d.pageIndex ? d.pageIndex - 1 : undefined,
+                    }
+                }
+                if (n.type === 'quizQuestionNode') {
+                    const d = n.data as unknown as QuizQuestionNodeData
+                    return {
+                        highlighted_text: d.question,
+                        question: d.question,
+                        answer: d.userAnswer ?? d.feedback ?? '',
+                        page_index: d.pageIndex ? d.pageIndex - 1 : undefined,
+                    }
+                }
+                if (n.type === 'flashcardNode') {
+                    const d = n.data as unknown as FlashcardNodeData
+                    return {
+                        highlighted_text: d.question,
+                        question: d.question,
+                        answer: d.answer,
+                        page_index: d.pageIndex ? d.pageIndex - 1 : undefined,
+                    }
+                }
+                // summaryNode
+                const d = n.data as unknown as SummaryNodeData
+                return {
+                    highlighted_text: d.summary.slice(0, 500),
+                    question: `Summary — page ${d.sourcePage}`,
+                    answer: d.summary,
+                    page_index: d.sourcePage ? d.sourcePage - 1 : undefined,
+                }
+            })
+    }, [nodes])
+
     // Revision mode
     const handleRevisionMode = useCallback((sourceType: 'struggling' | 'page' = 'struggling') => {
         setShowRevisionMenu(false)
         if (sourceType === 'struggling') {
-            const strugglingNodes = nodes.filter(
-                (n) => n.type === 'answerNode' && (n.data as unknown as AnswerNodeData).status === 'struggling'
-            )
-            if (strugglingNodes.length === 0) {
+            const payload = getStrugglingPayload()
+            if (payload.length === 0) {
                 showToast("Mark some nodes as 'Struggling' first to generate a targeted quiz.")
                 return
             }
         }
         setRevisionSource({ sourceType, pageIndex: currentPage, pageContent: pageMarkdowns[currentPage - 1] })
         setShowRevision(true)
-    }, [nodes, showToast, currentPage, pageMarkdowns])
+    }, [getStrugglingPayload, showToast, currentPage, pageMarkdowns])
 
     // Create flashcards from struggling nodes
     const handleCreateFlashCards = useCallback(async (sourceType: 'struggling' | 'page' = 'struggling') => {
@@ -1958,22 +2007,11 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
         let pIndex: number | undefined = undefined;
 
         if (sourceType === 'struggling') {
-            const strugglingNodes = nodes.filter(
-                (n) => n.type === 'answerNode' && (n.data as unknown as AnswerNodeData).status === 'struggling'
-            )
-            if (strugglingNodes.length === 0) {
+            payload = getStrugglingPayload()
+            if (payload.length === 0) {
                 showToast("Mark some nodes as 'Struggling' first to create flashcards.")
                 return
             }
-            payload = strugglingNodes.map((n) => {
-                const d = n.data as unknown as AnswerNodeData
-                return {
-                    highlighted_text: d.highlighted_text,
-                    question: d.question,
-                    answer: d.answer,
-                    page_index: d.pageIndex ? d.pageIndex - 1 : undefined
-                }
-            })
         } else {
             pageContent = pageMarkdowns[currentPage - 1]
             pIndex = currentPage - 1
@@ -2116,7 +2154,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
             const mid = flashcardNodes[Math.floor(flashcardNodes.length / 2)]
             setCenter(mid.position.x + cardWidth / 2, mid.position.y + 100, { zoom: getZoom(), duration: 700 })
         }
-    }, [nodes, fileData, currentPage, setNodes, setEdges, persistToLocalStorage, setCenter, getZoom, showToast, buildEdgeStyle, startGenProgress, finishGenProgress, cancelGenProgress])
+    }, [nodes, fileData, currentPage, setNodes, setEdges, persistToLocalStorage, setCenter, getZoom, showToast, buildEdgeStyle, startGenProgress, finishGenProgress, cancelGenProgress, getStrugglingPayload])
 
     // Download Q&A as a PDF (text-based export — legacy)
     const handleDownloadPDF = useCallback(async () => {
