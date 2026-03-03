@@ -1,16 +1,24 @@
 import { useState } from 'react'
 import { selectAndCreateRootFolder, FolderValidationError } from '../services/fileSystemService'
 import { useAppStore } from '../store/appStore'
+import { getBrowserInfo } from '../utils/browserDetection'
+
+const STORAGE_MODE = getBrowserInfo().storageMode
 
 /**
- * Two-step onboarding modal shown to first-time users.
+ * Onboarding modal shown to first-time users.
+ *
+ * FS mode   (Chromium desktop):
  *   Step 1 — Choose workspace: create new or restore existing.
  *   Step 2 — Ask for their name (only when creating a new workspace).
+ *
+ * IDB mode  (Firefox, Safari, iOS, Android):
+ *   Single step — Enter name.  No folder picker needed; data lives in IndexedDB.
  */
 export default function OnboardingModal() {
     const completeOnboarding = useAppStore((s) => s.completeOnboarding)
     const restoreFromExisting = useAppStore((s) => s.restoreFromExisting)
-    const [step, setStep] = useState<1 | 2>(1)
+    const [step, setStep] = useState<1 | 2>(STORAGE_MODE === 'indexeddb' ? 2 : 1)
     const [name, setName] = useState('')
     const [error, setError] = useState<string | null>(null)
     const [isSelecting, setIsSelecting] = useState(false)
@@ -18,7 +26,7 @@ export default function OnboardingModal() {
     /** Handle selected during "Create New Workspace" — held until name is entered. */
     const [pendingHandle, setPendingHandle] = useState<FileSystemDirectoryHandle | null>(null)
 
-    /** Step 1: User clicks "Create New Workspace" — pick folder, then advance to name step. */
+    /** FS mode — Step 1: User clicks "Create New Workspace" — pick folder, then advance to name step. */
     const handleFolderSelect = async () => {
         setError(null)
         setIsSelecting(true)
@@ -46,20 +54,20 @@ export default function OnboardingModal() {
             setError('Please enter your name.')
             return
         }
-        if (!pendingHandle) {
+        if (STORAGE_MODE === 'filesystem' && !pendingHandle) {
             setError('Something went wrong. Please go back and select a folder.')
             return
         }
         setError(null)
         try {
-            await completeOnboarding(name.trim(), pendingHandle)
+            await completeOnboarding(name.trim(), pendingHandle ?? undefined)
         } catch (err) {
             console.error('[OnboardingModal] completeOnboarding failed', err)
             setError('Failed to set up workspace. Please try again.')
         }
     }
 
-    /** Step 1: User clicks "Restore Existing Workspace" — name comes from manifest. */
+    /** FS mode — Step 1: User clicks "Restore Existing Workspace" — name comes from manifest. */
     const handleRestore = async () => {
         setError(null)
         setIsRestoring(true)
@@ -95,8 +103,8 @@ export default function OnboardingModal() {
                     <p className="text-sm text-gray-500 mt-1">Let's set up your workspace</p>
                 </div>
 
-                {/* Step 1: Choose workspace — Create New or Restore Existing */}
-                {step === 1 && (
+                {/* FS mode — Step 1: Choose workspace */}
+                {step === 1 && STORAGE_MODE === 'filesystem' && (
                     <div className="flex flex-col gap-4">
                         <div className="text-center">
                             <p className="text-sm text-gray-600 mb-1">
@@ -169,9 +177,21 @@ export default function OnboardingModal() {
                     </div>
                 )}
 
-                {/* Step 2: Enter name (only for new workspace) */}
+                {/* Step 2: Enter name — for FS mode new workspace, or the only step in IDB mode */}
                 {step === 2 && (
                     <div className="flex flex-col gap-4">
+                        {/* IDB mode: explain where data is stored */}
+                        {STORAGE_MODE === 'indexeddb' && (
+                            <div className="bg-indigo-50 rounded-xl px-4 py-3 flex items-start gap-2.5 mb-1">
+                                <svg className="w-4 h-4 text-indigo-400 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M12 2a10 10 0 100 20A10 10 0 0012 2z" />
+                                </svg>
+                                <p className="text-xs text-indigo-700 leading-relaxed">
+                                    Your canvases will be saved securely in your browser's local storage on this device.
+                                    No folder selection needed.
+                                </p>
+                            </div>
+                        )}
                         <div className="flex flex-col gap-1">
                             <label className="text-sm font-medium text-gray-700">What's your name?</label>
                             <input
@@ -193,12 +213,15 @@ export default function OnboardingModal() {
                         >
                             Get Started
                         </button>
-                        <button
-                            onClick={() => { setStep(1); setError(null); setPendingHandle(null) }}
-                            className="text-sm text-gray-400 hover:text-gray-600 transition-colors"
-                        >
-                            ← Back
-                        </button>
+                        {/* Back button only in FS mode (IDB has no step 1 to go back to) */}
+                        {STORAGE_MODE === 'filesystem' && (
+                            <button
+                                onClick={() => { setStep(1); setError(null); setPendingHandle(null) }}
+                                className="text-sm text-gray-400 hover:text-gray-600 transition-colors"
+                            >
+                                ← Back
+                            </button>
+                        )}
                     </div>
                 )}
             </div>

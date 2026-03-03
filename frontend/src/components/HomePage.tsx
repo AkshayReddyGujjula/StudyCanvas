@@ -21,6 +21,7 @@ export default function HomePage() {
     const needsPermission = useAppStore((s) => s.needsPermission)
     const setDirectoryHandle = useAppStore((s) => s.setDirectoryHandle)
     const resetApp = useAppStore((s) => s.resetApp)
+    const storageMode = useAppStore((s) => s.storageMode)
 
     const tutorialCompleted = useTutorialStore((s) => s.tutorialCompleted)
     const replayTutorial = useTutorialStore((s) => s.replayTutorial)
@@ -236,7 +237,7 @@ export default function HomePage() {
         .filter(c => (c.parentFolderId ?? null) === currentFolderId)
         .sort((a, b) => new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime())
 
-    if (needsPermission) {
+    if (needsPermission && storageMode !== 'indexeddb') {
         return (
             <div className="min-h-screen bg-gray-100 flex items-center justify-center">
                 <div className="bg-white rounded-2xl shadow-xl p-10 max-w-md w-full mx-4 text-center">

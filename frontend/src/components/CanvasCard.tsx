@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { loadThumbnail, resolveParentHandle } from '../services/fileSystemService'
+import { loadThumbnailIDB } from '../services/idbStorageService'
 import { useAppStore } from '../store/appStore'
 import type { CanvasMeta } from '../types'
 
@@ -11,6 +12,7 @@ interface Props {
 
 export default function CanvasCard({ canvas, onClick, onDragStart }: Props) {
     const directoryHandle = useAppStore((s) => s.directoryHandle)
+    const storageMode = useAppStore((s) => s.storageMode)
     const renameCanvas = useAppStore((s) => s.renameCanvas)
     const removeCanvas = useAppStore((s) => s.removeCanvas)
     const [thumbUrl, setThumbUrl] = useState<string | null>(null)
@@ -21,16 +23,18 @@ export default function CanvasCard({ canvas, onClick, onDragStart }: Props) {
     const menuRef = useRef<HTMLDivElement>(null)
     const renameRef = useRef<HTMLInputElement>(null)
 
-    // Load thumbnail
+    // Load thumbnail — branches on storage mode
     useEffect(() => {
         let revoked = false
-        if (directoryHandle) {
+        if (storageMode === 'indexeddb') {
+            loadThumbnailIDB(canvas.id)
+                .then((url) => { if (!revoked && url) setThumbUrl(url) })
+                .catch(() => {})
+        } else if (directoryHandle) {
             const folderList = useAppStore.getState().folderList
             resolveParentHandle(directoryHandle, folderList, canvas.parentFolderId)
                 .then((parentHandle) => loadThumbnail(parentHandle, canvas.id))
-                .then((url) => {
-                    if (!revoked && url) setThumbUrl(url)
-                })
+                .then((url) => { if (!revoked && url) setThumbUrl(url) })
                 .catch(() => {})
         }
         return () => {
@@ -38,7 +42,7 @@ export default function CanvasCard({ canvas, onClick, onDragStart }: Props) {
             if (thumbUrl) URL.revokeObjectURL(thumbUrl)
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [directoryHandle, canvas.id])
+    }, [storageMode, directoryHandle, canvas.id])
 
     // Close menu on click outside
     useEffect(() => {

@@ -17,6 +17,15 @@ import {
     moveFolderOnDisk,
     type Manifest,
 } from '../services/fileSystemService'
+import {
+    readManifestIDB,
+    writeManifestIDB,
+    deleteCanvasStateIDB,
+    deleteThumbnailIDB,
+    clearAllIDB,
+} from '../services/idbStorageService'
+import { deletePdfFromLocal } from '../utils/pdfStorage'
+import { getStorageMode, type StorageMode } from '../utils/browserDetection'
 import { clearTutorialStorage, useTutorialStore } from './tutorialStore'
 
 // ─── App store — global state for multi-canvas homepage ──────────────────────
@@ -48,6 +57,8 @@ interface AppState {
     userName: string
     /** Whether the user has completed onboarding (handle stored in IndexedDB) */
     isOnboarded: boolean
+    /** Storage backend determined from browser capabilities at startup. */
+    storageMode: StorageMode
     /** Handle to the StudyCanvas root folder on disk. Not serialisable — lives in IndexedDB. */
     directoryHandle: FileSystemDirectoryHandle | null
     /** Whether we have read-write permission on the handle */
@@ -73,8 +84,8 @@ interface AppState {
 interface AppActions {
     /** Boot the app: load handle from IndexedDB → request permission → read manifest. */
     initialize: () => Promise<void>
-    /** Complete onboarding: store handle + manifest, set state. */
-    completeOnboarding: (name: string, handle: FileSystemDirectoryHandle) => Promise<void>
+    /** Complete onboarding: store handle + manifest, set state. Handle is optional in IDB mode. */
+    completeOnboarding: (name: string, handle?: FileSystemDirectoryHandle) => Promise<void>
     /** Set the directory handle (e.g. after re-selection). */
     setDirectoryHandle: (handle: FileSystemDirectoryHandle) => Promise<void>
     /** Add a new canvas to the manifest and local state. */
@@ -112,6 +123,7 @@ interface AppActions {
 export const useAppStore = create<AppState & AppActions>((set, get) => ({
     userName: '',
     isOnboarded: false,
+    storageMode: getStorageMode(),
     directoryHandle: null,
     hasPermission: false,
     isLoading: true,
@@ -125,10 +137,38 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
 
     initialize: async () => {
         set({ isLoading: true })
+        const mode = getStorageMode()
         try {
+            // ── IDB mode (Firefox, Safari, iOS, Android) ──────────────────────────
+            if (mode === 'indexeddb') {
+                const manifest = await readManifestIDB()
+                const hasData = manifest.user.name || manifest.canvases.length > 0
+                if (!hasData) {
+                    set({ isOnboarded: false, storageMode: mode, isLoading: false })
+                    return
+                }
+                const prevCtx = loadUserContext()
+                const updatedCtx = { ...prevCtx, name: manifest.user.name }
+                persistUserContext(updatedCtx)
+                set({
+                    isOnboarded: true,
+                    storageMode: mode,
+                    directoryHandle: null,
+                    hasPermission: true,
+                    needsPermission: false,
+                    userName: manifest.user.name,
+                    canvasList: manifest.canvases,
+                    folderList: manifest.folders ?? [],
+                    isLoading: false,
+                    userContext: updatedCtx,
+                })
+                return
+            }
+
+            // ── File System mode (Chromium desktop) ───────────────────────────────
             const handle = await loadDirectoryHandle()
             if (!handle) {
-                set({ isOnboarded: false, isLoading: false })
+                set({ isOnboarded: false, storageMode: mode, isLoading: false })
                 return
             }
             let granted = false
@@ -138,7 +178,7 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
                 granted = false
             }
             if (!granted) {
-                set({ isOnboarded: true, directoryHandle: handle, hasPermission: false, needsPermission: true, isLoading: false })
+                set({ isOnboarded: true, storageMode: mode, directoryHandle: handle, hasPermission: false, needsPermission: true, isLoading: false })
                 return
             }
             const manifest = await readManifest(handle)
@@ -148,6 +188,7 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
             persistUserContext(updatedCtx)
             set({
                 isOnboarded: true,
+                storageMode: mode,
                 directoryHandle: handle,
                 hasPermission: true,
                 needsPermission: false,
@@ -164,9 +205,14 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
     },
 
     completeOnboarding: async (name, handle) => {
-        await storeDirectoryHandle(handle)
+        const mode = get().storageMode
         const manifest: Manifest = { version: 1, user: { name }, canvases: [], folders: [] }
-        await writeManifest(handle, manifest)
+        if (mode === 'indexeddb') {
+            await writeManifestIDB(manifest)
+        } else if (handle) {
+            await storeDirectoryHandle(handle)
+            await writeManifest(handle, manifest)
+        }
         // Initialise global user context with the name
         const prevCtx = loadUserContext()
         const updatedCtx = { ...prevCtx, name }
@@ -177,7 +223,7 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
         set({
             userName: name,
             isOnboarded: true,
-            directoryHandle: handle,
+            directoryHandle: handle ?? null,
             hasPermission: true,
             needsPermission: false,
             canvasList: [],
@@ -203,55 +249,83 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
     },
 
     addCanvas: async (meta) => {
-        const { directoryHandle, canvasList, folderList } = get()
-        if (!directoryHandle) return
-        // Resolve the parent directory for this canvas
-        const parentHandle = await resolveParentHandle(directoryHandle, folderList, meta.parentFolderId)
-        await getCanvasFolder(parentHandle, meta.id, true)
+        const { storageMode, directoryHandle, canvasList, folderList } = get()
         const updated = [...canvasList, meta]
-        const manifest = await readManifest(directoryHandle)
-        manifest.canvases = updated
-        manifest.folders = folderList
-        await writeManifest(directoryHandle, manifest)
+        if (storageMode === 'indexeddb') {
+            const manifest = await readManifestIDB()
+            manifest.canvases = updated
+            manifest.folders = folderList
+            await writeManifestIDB(manifest)
+        } else {
+            if (!directoryHandle) return
+            const parentHandle = await resolveParentHandle(directoryHandle, folderList, meta.parentFolderId)
+            await getCanvasFolder(parentHandle, meta.id, true)
+            const manifest = await readManifest(directoryHandle)
+            manifest.canvases = updated
+            manifest.folders = folderList
+            await writeManifest(directoryHandle, manifest)
+        }
         set({ canvasList: updated })
     },
 
     removeCanvas: async (canvasId) => {
-        const { directoryHandle, canvasList, folderList } = get()
-        if (!directoryHandle) return
+        const { storageMode, directoryHandle, canvasList, folderList } = get()
         const canvas = canvasList.find((c) => c.id === canvasId)
-        try {
-            const parentHandle = await resolveParentHandle(directoryHandle, folderList, canvas?.parentFolderId)
-            await fsDeleteCanvasFolder(parentHandle, canvasId)
-        } catch { /* folder might not exist */ }
         const updated = canvasList.filter((c) => c.id !== canvasId)
-        const manifest = await readManifest(directoryHandle)
-        manifest.canvases = updated
-        manifest.folders = folderList
-        await writeManifest(directoryHandle, manifest)
+        if (storageMode === 'indexeddb') {
+            // Clean up all IDB data for this canvas.
+            // PDF is always keyed by canvasId in IDB mode (see CanvasPage.tsx IDB save path).
+            await deleteCanvasStateIDB(canvasId).catch(() => {})
+            await deleteThumbnailIDB(canvasId).catch(() => {})
+            await deletePdfFromLocal(canvasId).catch(() => {})
+            const manifest = await readManifestIDB()
+            manifest.canvases = updated
+            manifest.folders = folderList
+            await writeManifestIDB(manifest)
+        } else {
+            if (!directoryHandle) return
+            try {
+                const parentHandle = await resolveParentHandle(directoryHandle, folderList, canvas?.parentFolderId)
+                await fsDeleteCanvasFolder(parentHandle, canvasId)
+            } catch { /* folder might not exist */ }
+            const manifest = await readManifest(directoryHandle)
+            manifest.canvases = updated
+            manifest.folders = folderList
+            await writeManifest(directoryHandle, manifest)
+        }
         set({ canvasList: updated })
     },
 
     renameCanvas: async (canvasId, newTitle) => {
-        const { directoryHandle, canvasList, folderList } = get()
-        if (!directoryHandle) return
+        const { storageMode, directoryHandle, canvasList, folderList } = get()
         const updated = canvasList.map((c) => (c.id === canvasId ? { ...c, title: newTitle } : c))
-        const manifest = await readManifest(directoryHandle)
-        manifest.canvases = updated
-        manifest.folders = folderList
-        await writeManifest(directoryHandle, manifest)
+        if (storageMode === 'indexeddb') {
+            const manifest = await readManifestIDB()
+            manifest.canvases = updated; manifest.folders = folderList
+            await writeManifestIDB(manifest)
+        } else {
+            if (!directoryHandle) return
+            const manifest = await readManifest(directoryHandle)
+            manifest.canvases = updated; manifest.folders = folderList
+            await writeManifest(directoryHandle, manifest)
+        }
         set({ canvasList: updated })
     },
 
     touchCanvas: async (canvasId) => {
-        const { directoryHandle, canvasList, folderList } = get()
-        if (!directoryHandle) return
+        const { storageMode, directoryHandle, canvasList, folderList } = get()
         const now = new Date().toISOString()
         const updated = canvasList.map((c) => (c.id === canvasId ? { ...c, modifiedAt: now } : c))
-        const manifest = await readManifest(directoryHandle)
-        manifest.canvases = updated
-        manifest.folders = folderList
-        await writeManifest(directoryHandle, manifest)
+        if (storageMode === 'indexeddb') {
+            const manifest = await readManifestIDB()
+            manifest.canvases = updated; manifest.folders = folderList
+            await writeManifestIDB(manifest)
+        } else {
+            if (!directoryHandle) return
+            const manifest = await readManifest(directoryHandle)
+            manifest.canvases = updated; manifest.folders = folderList
+            await writeManifest(directoryHandle, manifest)
+        }
         set({ canvasList: updated })
     },
 
@@ -259,9 +333,14 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
     setDirty: (dirty) => set({ isDirty: dirty }),
 
     refreshManifest: async () => {
-        const { directoryHandle } = get()
-        if (!directoryHandle) return
-        const manifest = await readManifest(directoryHandle)
+        const { storageMode, directoryHandle } = get()
+        let manifest: Manifest
+        if (storageMode === 'indexeddb') {
+            manifest = await readManifestIDB()
+        } else {
+            if (!directoryHandle) return
+            manifest = await readManifest(directoryHandle)
+        }
         const prevCtx = get().userContext
         const updatedCtx = { ...prevCtx, name: manifest.user.name }
         persistUserContext(updatedCtx)
@@ -269,7 +348,12 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
     },
 
     resetApp: async () => {
-        await clearDirectoryHandle()
+        const { storageMode } = get()
+        if (storageMode === 'indexeddb') {
+            await clearAllIDB()
+        } else {
+            await clearDirectoryHandle()
+        }
         // Clear tutorial state so the welcome modal shows again on the next workspace
         clearTutorialStorage()
         useTutorialStore.getState().replayTutorial()
@@ -288,6 +372,14 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
     },
 
     restoreFromExisting: async () => {
+        const { storageMode } = get()
+        // IDB mode: data is already in IndexedDB — just re-read the manifest
+        if (storageMode === 'indexeddb') {
+            await get().refreshManifest()
+            set({ isOnboarded: true, hasPermission: true, needsPermission: false })
+            return
+        }
+        // FS mode: original behaviour
         const { handle, manifest } = await openExistingFolder()
         await storeDirectoryHandle(handle)
         // Sync name from restored manifest into global user context
@@ -320,8 +412,7 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
     // ─── Folder actions ──────────────────────────────────────────────────
 
     addFolder: async (name, parentFolderId) => {
-        const { directoryHandle, canvasList, folderList } = get()
-        if (!directoryHandle) return
+        const { storageMode, directoryHandle, canvasList, folderList } = get()
 
         // Validate: no duplicate folder name in the same parent
         const siblings = folderList.filter(f => (f.parentFolderId ?? null) === (parentFolderId ?? null))
@@ -332,22 +423,24 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
         const id = crypto.randomUUID()
         const now = new Date().toISOString()
         const newFolder: FolderMeta = { id, name, parentFolderId: parentFolderId ?? null, createdAt: now }
-
-        // Create on disk
-        await createFolderOnDisk(directoryHandle, folderList, id, parentFolderId)
-
-        // Update manifest
         const updatedFolders = [...folderList, newFolder]
-        const manifest = await readManifest(directoryHandle)
-        manifest.canvases = canvasList
-        manifest.folders = updatedFolders
-        await writeManifest(directoryHandle, manifest)
+
+        if (storageMode === 'indexeddb') {
+            const manifest = await readManifestIDB()
+            manifest.canvases = canvasList; manifest.folders = updatedFolders
+            await writeManifestIDB(manifest)
+        } else {
+            if (!directoryHandle) return
+            await createFolderOnDisk(directoryHandle, folderList, id, parentFolderId)
+            const manifest = await readManifest(directoryHandle)
+            manifest.canvases = canvasList; manifest.folders = updatedFolders
+            await writeManifest(directoryHandle, manifest)
+        }
         set({ folderList: updatedFolders })
     },
 
     removeFolder: async (folderId) => {
-        const { directoryHandle, canvasList, folderList } = get()
-        if (!directoryHandle) return
+        const { storageMode, directoryHandle, canvasList, folderList } = get()
 
         // Collect all descendant folder IDs (recursive)
         const allDescendantFolderIds = new Set<string>()
@@ -366,23 +459,33 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
         // Remove all descendant folders + the folder itself
         const updatedFolders = folderList.filter(f => !allDescendantFolderIds.has(f.id))
 
-        // Delete folder from disk
-        const folder = folderList.find(f => f.id === folderId)
-        try {
-            await deleteFolderOnDisk(directoryHandle, folderList, folderId, folder?.parentFolderId)
-        } catch { /* might not exist */ }
-
-        // Update manifest
-        const manifest = await readManifest(directoryHandle)
-        manifest.canvases = updatedCanvases
-        manifest.folders = updatedFolders
-        await writeManifest(directoryHandle, manifest)
+        if (storageMode === 'indexeddb') {
+            // Clean up IDB data for canvases being removed
+            const removedCanvases = canvasList.filter(c => allDescendantFolderIds.has(c.parentFolderId ?? ''))
+            await Promise.all(removedCanvases.map(async (c) => {
+                await deleteCanvasStateIDB(c.id).catch(() => {})
+                await deleteThumbnailIDB(c.id).catch(() => {})
+                // PDF is keyed by canvasId in IDB mode
+                await deletePdfFromLocal(c.id).catch(() => {})
+            }))
+            const manifest = await readManifestIDB()
+            manifest.canvases = updatedCanvases; manifest.folders = updatedFolders
+            await writeManifestIDB(manifest)
+        } else {
+            if (!directoryHandle) return
+            const folder = folderList.find(f => f.id === folderId)
+            try {
+                await deleteFolderOnDisk(directoryHandle, folderList, folderId, folder?.parentFolderId)
+            } catch { /* might not exist */ }
+            const manifest = await readManifest(directoryHandle)
+            manifest.canvases = updatedCanvases; manifest.folders = updatedFolders
+            await writeManifest(directoryHandle, manifest)
+        }
         set({ canvasList: updatedCanvases, folderList: updatedFolders })
     },
 
     renameFolder: async (folderId, newName) => {
-        const { directoryHandle, canvasList, folderList } = get()
-        if (!directoryHandle) return
+        const { storageMode, directoryHandle, canvasList, folderList } = get()
 
         const folder = folderList.find(f => f.id === folderId)
         if (!folder) return
@@ -398,16 +501,21 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
         const updatedFolders = folderList.map(f =>
             f.id === folderId ? { ...f, name: newName } : f
         )
-        const manifest = await readManifest(directoryHandle)
-        manifest.canvases = canvasList
-        manifest.folders = updatedFolders
-        await writeManifest(directoryHandle, manifest)
+        if (storageMode === 'indexeddb') {
+            const manifest = await readManifestIDB()
+            manifest.canvases = canvasList; manifest.folders = updatedFolders
+            await writeManifestIDB(manifest)
+        } else {
+            if (!directoryHandle) return
+            const manifest = await readManifest(directoryHandle)
+            manifest.canvases = canvasList; manifest.folders = updatedFolders
+            await writeManifest(directoryHandle, manifest)
+        }
         set({ folderList: updatedFolders })
     },
 
     moveCanvas: async (canvasId, targetFolderId) => {
-        const { directoryHandle, canvasList, folderList } = get()
-        if (!directoryHandle) return null
+        const { storageMode, directoryHandle, canvasList, folderList } = get()
 
         const canvas = canvasList.find(c => c.id === canvasId)
         if (!canvas) return 'Canvas not found.'
@@ -422,24 +530,27 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
             return `A canvas named "${canvas.title}" already exists in this folder.`
         }
 
-        // Move on disk
-        await moveCanvasOnDisk(directoryHandle, folderList, canvasId, fromFolderId, targetFolderId)
-
-        // Update manifest
         const updatedCanvases = canvasList.map(c =>
             c.id === canvasId ? { ...c, parentFolderId: targetFolderId } : c
         )
-        const manifest = await readManifest(directoryHandle)
-        manifest.canvases = updatedCanvases
-        manifest.folders = folderList
-        await writeManifest(directoryHandle, manifest)
+        if (storageMode === 'indexeddb') {
+            // IDB mode: canvas data is keyed by canvasId so no physical move needed
+            const manifest = await readManifestIDB()
+            manifest.canvases = updatedCanvases; manifest.folders = folderList
+            await writeManifestIDB(manifest)
+        } else {
+            if (!directoryHandle) return null
+            await moveCanvasOnDisk(directoryHandle, folderList, canvasId, fromFolderId, targetFolderId)
+            const manifest = await readManifest(directoryHandle)
+            manifest.canvases = updatedCanvases; manifest.folders = folderList
+            await writeManifest(directoryHandle, manifest)
+        }
         set({ canvasList: updatedCanvases })
         return null
     },
 
     moveFolder: async (folderId, targetParentId) => {
-        const { directoryHandle, canvasList, folderList } = get()
-        if (!directoryHandle) return null
+        const { storageMode, directoryHandle, canvasList, folderList } = get()
 
         const folder = folderList.find(f => f.id === folderId)
         if (!folder) return 'Folder not found.'
@@ -472,17 +583,21 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
             return `A folder named "${folder.name}" already exists in the destination.`
         }
 
-        // Move on disk
-        await moveFolderOnDisk(directoryHandle, folderList, folderId, fromParentId, targetParentId)
-
-        // Update manifest
         const updatedFolders = folderList.map(f =>
             f.id === folderId ? { ...f, parentFolderId: targetParentId } : f
         )
-        const manifest = await readManifest(directoryHandle)
-        manifest.canvases = canvasList
-        manifest.folders = updatedFolders
-        await writeManifest(directoryHandle, manifest)
+        if (storageMode === 'indexeddb') {
+            // IDB mode: canvas data is keyed by canvasId so no physical move needed
+            const manifest = await readManifestIDB()
+            manifest.canvases = canvasList; manifest.folders = updatedFolders
+            await writeManifestIDB(manifest)
+        } else {
+            if (!directoryHandle) return null
+            await moveFolderOnDisk(directoryHandle, folderList, folderId, fromParentId, targetParentId)
+            const manifest = await readManifest(directoryHandle)
+            manifest.canvases = canvasList; manifest.folders = updatedFolders
+            await writeManifest(directoryHandle, manifest)
+        }
         set({ folderList: updatedFolders })
         return null
     },

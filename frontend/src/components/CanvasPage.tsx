@@ -16,6 +16,11 @@ import {
     saveVoiceAudio as fsSaveVoiceAudio,
     loadVoiceAudio as fsLoadVoiceAudio,
 } from '../services/fileSystemService'
+import {
+    saveCanvasStateIDB,
+    loadCanvasStateIDB,
+    saveThumbnailIDB,
+} from '../services/idbStorageService'
 import { savePdfToLocal, loadPdfFromLocal } from '../utils/pdfStorage'
 import { extractPdfPagesTextFromBuffer } from '../utils/pdfTextExtractor'
 import { saveCanvasBackup, loadCanvasBackup } from '../utils/canvasBackup'
@@ -40,29 +45,20 @@ export default function CanvasPage() {
     const mountedRef = useRef(true)
 
     const directoryHandle = useAppStore((s) => s.directoryHandle)
+    const storageMode = useAppStore((s) => s.storageMode)
     const isDirty = useAppStore((s) => s.isDirty)
     const setDirty = useAppStore((s) => s.setDirty)
     const setActiveCanvasId = useAppStore((s) => s.setActiveCanvasId)
     const touchCanvas = useAppStore((s) => s.touchCanvas)
     const autoSaveInterval = useAppStore((s) => s.autoSaveInterval)
 
-    // ── Save current canvas to the local folder ──────────────────────────────
+    // ── Save current canvas ──────────────────────────────────────────────────
     const saveCanvas = useCallback(async (onProgress?: (pct: number, label: string) => void) => {
-        if (!directoryHandle || !canvasId || savingRef.current) return
+        if (!canvasId || savingRef.current) return
+        if (storageMode !== 'indexeddb' && !directoryHandle) return
         savingRef.current = true
         try {
             onProgress?.(5, 'Preparing to save…')
-
-            // Resolve the correct parent directory for this canvas (may be inside a folder)
-            const appState = useAppStore.getState()
-            const canvasMeta = appState.canvasList.find(c => c.id === canvasId)
-            const parentHandle = await resolveParentHandle(
-                directoryHandle,
-                appState.folderList,
-                canvasMeta?.parentFolderId,
-            )
-
-            onProgress?.(12, 'Reading canvas state…')
 
             const store = useCanvasStore.getState()
             const {
@@ -71,28 +67,23 @@ export default function CanvasPage() {
                 drawingStrokes, savedColors, toolSettings,
             } = store
 
-            // 1. Save state.json — strip large recoverable fields to prevent
-            //    main-thread freezes from multi-MB JSON.stringify calls.
-            //    raw_text & markdown_content are re-derivable from the PDF binary.
-            //    Image node data URLs are individually large; we strip them and
-            //    save images as separate files in a future iteration.
+            // Build the state object (strip large recoverable fields)
             const lightFileData = fileData ? {
                 ...fileData,
                 raw_text: '',            // recoverable from PDF
                 markdown_content: '',    // recoverable from PDF
             } : null
-            // Strip base64 image data from image nodes to reduce state size
             const lightNodes = nodes.map((n: any) => {
                 if (n.type === 'imageNode' && n.data?.imageDataUrl) {
-                    return { ...n, data: { ...n.data } }  // keep imageDataUrl for now (needed for display)
+                    return { ...n, data: { ...n.data } }
                 }
                 return n
             })
             const stateObj = { nodes: lightNodes, edges, fileData: lightFileData, highlights, userDetails, currentPage, pageMarkdowns, zoomLevel, scrollPositions, canvasViewport, drawingStrokes, savedColors, toolSettings }
-            
+
             onProgress?.(20, 'Serializing canvas…')
 
-            // Use a Web Worker (via Blob URL) to JSON.stringify off the main thread
+            // Use a Web Worker to JSON.stringify off the main thread
             const jsonString: string = await new Promise((resolve, reject) => {
                 const workerCode = `self.onmessage = function(e) { try { self.postMessage(JSON.stringify(e.data)); } catch(err) { self.postMessage('__SERIALIZE_ERROR__'); } };`
                 const blob = new Blob([workerCode], { type: 'application/javascript' })
@@ -107,90 +98,120 @@ export default function CanvasPage() {
                 worker.onerror = () => {
                     worker.terminate()
                     URL.revokeObjectURL(url)
-                    // Fallback: serialize on main thread
                     try { resolve(JSON.stringify(stateObj)) } catch { reject(new Error('Serialization failed')) }
                 }
                 worker.postMessage(stateObj)
             })
 
             onProgress?.(45, 'Writing canvas data…')
-            await saveCanvasState(parentHandle, canvasId, jsonString as any)
 
-            // 2. Save PDF to the local folder (if we have it in memory or IndexedDB)
-            onProgress?.(58, 'Saving PDF…')
-            const pdfBuffer = store.pdfArrayBuffer
-            if (pdfBuffer) {
-                await fsSavePdf(parentHandle, canvasId, pdfBuffer)
-            } else if (fileData) {
-                // Try loading from IndexedDB cache
-                const key = fileData.pdf_id || fileData.filename || 'current_pdf'
-                const cached = await loadPdfFromLocal(key)
-                if (cached) {
-                    await fsSavePdf(parentHandle, canvasId, cached)
+            if (storageMode === 'indexeddb') {
+                // ── IDB save path ─────────────────────────────────────────────
+                await saveCanvasStateIDB(canvasId, jsonString as any)
+
+                onProgress?.(58, 'Saving PDF…')
+                const pdfBuffer = store.pdfArrayBuffer
+                if (pdfBuffer) {
+                    // In IDB mode always key by canvasId so removeCanvas can reliably clean it up
+                    await savePdfToLocal(canvasId, pdfBuffer)
                 }
-            }
 
-            // 3. Save voice note audio blobs to the file system
-            onProgress?.(65, 'Saving audio…')
-            try {
-                const voiceNodes = nodes.filter((n: any) => n.type === 'voiceNoteNode' && n.data?.audioId)
-                for (const node of voiceNodes) {
-                    const audioId = (node.data as any).audioId as string
-                    const blob = await loadAudio(audioId)
-                    if (blob) {
-                        await fsSaveVoiceAudio(parentHandle, canvasId, audioId, blob).catch(() => {})
+                // Voice audio is already in IndexedDB via audioStorage.ts — no extra copy needed
+
+                onProgress?.(72, 'Capturing thumbnail…')
+                try {
+                    const containerEl = document.querySelector('[data-tutorial="canvas-container"]') as HTMLElement | null
+                    const target = containerEl ?? (document.querySelector('.react-flow') as HTMLElement | null)
+                    if (target) {
+                        const dataUrl = await toPng(target, {
+                            quality: 0.85, pixelRatio: 0.5, backgroundColor: '#ffffff',
+                            filter: (node) => {
+                                const el = node as HTMLElement
+                                if (!el.classList) return true
+                                if (el.classList.contains('react-flow__minimap')) return false
+                                if (el.classList.contains('react-flow__controls')) return false
+                                if (el.classList.contains('react-flow__panel')) return false
+                                if (el.classList.contains('react-flow__attribution')) return false
+                                if (el.classList.contains('drawing-canvas-temp')) return false
+                                if (el.classList.contains('fixed')) return false
+                                return true
+                            },
+                        })
+                        const res = await fetch(dataUrl)
+                        const blob = await res.blob()
+                        await saveThumbnailIDB(canvasId, blob)
+                    }
+                } catch { /* best-effort */ }
+
+            } else {
+                // ── File System save path (original logic) ────────────────────
+                const appState = useAppStore.getState()
+                const canvasMeta = appState.canvasList.find(c => c.id === canvasId)
+                const parentHandle = await resolveParentHandle(
+                    directoryHandle!,
+                    appState.folderList,
+                    canvasMeta?.parentFolderId,
+                )
+
+                await saveCanvasState(parentHandle, canvasId, jsonString as any)
+
+                onProgress?.(58, 'Saving PDF…')
+                const pdfBuffer = store.pdfArrayBuffer
+                if (pdfBuffer) {
+                    await fsSavePdf(parentHandle, canvasId, pdfBuffer)
+                } else if (fileData) {
+                    const key = fileData.pdf_id || fileData.filename || 'current_pdf'
+                    const cached = await loadPdfFromLocal(key)
+                    if (cached) {
+                        await fsSavePdf(parentHandle, canvasId, cached)
                     }
                 }
-            } catch {
-                // Audio saving is best-effort
+
+                onProgress?.(65, 'Saving audio…')
+                try {
+                    const voiceNodes = nodes.filter((n: any) => n.type === 'voiceNoteNode' && n.data?.audioId)
+                    for (const node of voiceNodes) {
+                        const audioId = (node.data as any).audioId as string
+                        const blob = await loadAudio(audioId)
+                        if (blob) {
+                            await fsSaveVoiceAudio(parentHandle, canvasId, audioId, blob).catch(() => {})
+                        }
+                    }
+                } catch { /* best-effort */ }
+
+                onProgress?.(72, 'Capturing thumbnail…')
+                try {
+                    const containerEl = document.querySelector('[data-tutorial="canvas-container"]') as HTMLElement | null
+                    const target = containerEl ?? (document.querySelector('.react-flow') as HTMLElement | null)
+                    if (target) {
+                        const dataUrl = await toPng(target, {
+                            quality: 0.85, pixelRatio: 0.5, backgroundColor: '#ffffff',
+                            filter: (node) => {
+                                const el = node as HTMLElement
+                                if (!el.classList) return true
+                                if (el.classList.contains('react-flow__minimap')) return false
+                                if (el.classList.contains('react-flow__controls')) return false
+                                if (el.classList.contains('react-flow__panel')) return false
+                                if (el.classList.contains('react-flow__attribution')) return false
+                                if (el.classList.contains('drawing-canvas-temp')) return false
+                                if (el.classList.contains('fixed')) return false
+                                return true
+                            },
+                        })
+                        const res = await fetch(dataUrl)
+                        const blob = await res.blob()
+                        await saveThumbnail(parentHandle, canvasId, blob)
+                    }
+                } catch { /* best-effort */ }
             }
 
-            // 4. Capture thumbnail
-            onProgress?.(72, 'Capturing thumbnail…')
-            try {
-                // Capture the full container (DrawingCanvas + ReactFlow) so that
-                // handwritten strokes rendered on the drawing canvas are included.
-                // The container is identified by its data attribute.
-                const containerEl = document.querySelector('[data-tutorial="canvas-container"]') as HTMLElement | null
-                const target = containerEl ?? (document.querySelector('.react-flow') as HTMLElement | null)
-
-                if (target) {
-                    const dataUrl = await toPng(target, {
-                        quality: 0.85,
-                        pixelRatio: 0.5,  // Half native pixel ratio for reasonable file size
-                        backgroundColor: '#ffffff',
-                        filter: (node) => {
-                            const el = node as HTMLElement
-                            if (!el.classList) return true
-                            // Exclude React Flow chrome
-                            if (el.classList.contains('react-flow__minimap')) return false
-                            if (el.classList.contains('react-flow__controls')) return false
-                            if (el.classList.contains('react-flow__panel')) return false
-                            if (el.classList.contains('react-flow__attribution')) return false
-                            // Exclude the live-stroke temp canvas (only committed strokes needed)
-                            if (el.classList.contains('drawing-canvas-temp')) return false
-                            // Exclude all fixed-position UI chrome (toolbars, menus, overlays, toasts)
-                            if (el.classList.contains('fixed')) return false
-                            return true
-                        },
-                    })
-                    const res = await fetch(dataUrl)
-                    const blob = await res.blob()
-                    await saveThumbnail(parentHandle, canvasId, blob)
-                }
-            } catch {
-                // Thumbnail capture is best-effort
-            }
-
-            // 4. Update manifest timestamp
+            // Shared post-save steps
             onProgress?.(86, 'Updating manifest…')
             await touchCanvas(canvasId)
 
-            // 5. Also update localStorage cache
             onProgress?.(93, 'Finishing up…')
             store.persistToLocalStorage()
 
-            // 6. Save IndexedDB backup for crash recovery
             const backupState = { nodes, edges, fileData, highlights, userDetails, currentPage, pageMarkdowns, zoomLevel, scrollPositions, canvasViewport, drawingStrokes, savedColors, toolSettings }
             await saveCanvasBackup(canvasId, backupState).catch(() => {})
 
@@ -202,12 +223,17 @@ export default function CanvasPage() {
         } finally {
             savingRef.current = false
         }
-    }, [directoryHandle, canvasId, touchCanvas, setDirty])
+    }, [directoryHandle, storageMode, canvasId, touchCanvas, setDirty])
 
     // ── Load canvas on mount ─────────────────────────────────────────────────
     useEffect(() => {
         mountedRef.current = true
-        if (!directoryHandle || !canvasId) {
+        if (!canvasId) {
+            setLoadError('No canvas ID in the URL.')
+            setLoading(false)
+            return
+        }
+        if (storageMode !== 'indexeddb' && !directoryHandle) {
             setLoadError('No workspace folder available.')
             setLoading(false)
             return
@@ -217,21 +243,26 @@ export default function CanvasPage() {
 
         const load = async () => {
             try {
-                // Resolve the correct parent directory for this canvas
-                const appState = useAppStore.getState()
-                const canvasMeta = appState.canvasList.find(c => c.id === canvasId)
-                const parentHandle = await resolveParentHandle(
-                    directoryHandle,
-                    appState.folderList,
-                    canvasMeta?.parentFolderId,
-                )
+                let stateObj: Record<string, any> | null = null
 
-                // Load state.json
-                let stateObj = await loadCanvasState(parentHandle, canvasId)
-                
-                // Fallback: if state.json is missing or corrupt, try IndexedDB backup
+                if (storageMode === 'indexeddb') {
+                    // ── IDB load path ─────────────────────────────────────────
+                    stateObj = await loadCanvasStateIDB(canvasId!)
+                } else {
+                    // ── File System load path (original) ──────────────────────
+                    const appState = useAppStore.getState()
+                    const canvasMeta = appState.canvasList.find(c => c.id === canvasId)
+                    const parentHandle = await resolveParentHandle(
+                        directoryHandle!,
+                        appState.folderList,
+                        canvasMeta?.parentFolderId,
+                    )
+                    stateObj = await loadCanvasState(parentHandle, canvasId!)
+                }
+
+                // Fallback: if primary storage missing or corrupt, try IndexedDB crash-recovery backup
                 if (!stateObj) {
-                    console.warn('[CanvasPage] state.json missing, trying IndexedDB backup…')
+                    console.warn('[CanvasPage] primary state missing, trying IndexedDB backup…')
                     stateObj = await loadCanvasBackup(canvasId!)
                     if (stateObj) {
                         console.info('[CanvasPage] Recovered canvas from IndexedDB backup')
@@ -242,8 +273,6 @@ export default function CanvasPage() {
                 if (stateObj) {
                     if (stateObj.nodes) store.setNodes(stateObj.nodes)
                     if (stateObj.edges) {
-                        // Migrate old edges
-                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
                         const migrated = (stateObj.edges as any[]).map((e: any) =>
                             e.targetHandle === 'right-target' ? { ...e, targetHandle: 'right' } : e
                         )
@@ -269,22 +298,21 @@ export default function CanvasPage() {
                     if (stateObj.drawingStrokes) store.setDrawingStrokes(stateObj.drawingStrokes)
                     if (stateObj.savedColors) store.setSavedColors(stateObj.savedColors)
                     if (stateObj.toolSettings) store.setToolSettings(stateObj.toolSettings)
+                    if (stateObj.pageMarkdowns && Array.isArray(stateObj.pageMarkdowns)) store.setPageMarkdowns(stateObj.pageMarkdowns)
                 }
 
                 // Always hydrate canvasStore.userDetails from the global user context
-                // so every canvas query uses the latest context
                 const globalCtx = useAppStore.getState().userContext
                 if (globalCtx.name || globalCtx.age || globalCtx.status || globalCtx.educationLevel) {
                     store.setUserDetails(globalCtx)
                 }
 
-                // Tutorial canvas: inject pre-built sample content when loading fresh (no state.json)
+                // Tutorial canvas: inject pre-built sample content when loading fresh
                 const { tutorialCanvasId } = useTutorialStore.getState()
                 if (canvasId === tutorialCanvasId && !stateObj) {
                     store.setFileData(TUTORIAL_FILE_DATA)
                     const firstPageMarkdown = useCanvasStore.getState().pageMarkdowns[0] ?? TUTORIAL_FILE_DATA.markdown_content
                     store.setNodes([createTutorialContentNode(firstPageMarkdown)])
-                    // Generate a real PDF so the content node renders in PDF mode
                     try {
                         const tutorialPdfBuffer = generateTutorialPdf()
                         store.setPdfArrayBuffer(tutorialPdfBuffer)
@@ -293,44 +321,59 @@ export default function CanvasPage() {
                     }
                 }
 
-                // Load PDF: try local folder first, fall back to IndexedDB
-                const pdfBuf = await fsLoadPdf(parentHandle, canvasId)
-                if (pdfBuf) {
-                    store.setPdfArrayBuffer(pdfBuf)
-                    // Also cache in IndexedDB for fast access
-                    if (stateObj?.fileData) {
-                        const key = stateObj.fileData.pdf_id || stateObj.fileData.filename || 'current_pdf'
-                        savePdfToLocal(key, pdfBuf).catch(() => {})
+                // Load PDF
+                if (storageMode === 'indexeddb') {
+                    // In IDB mode, PDF is keyed by canvasId for predictable cleanup
+                    const idbPdfBuf = await loadPdfFromLocal(canvasId!)
+                    if (idbPdfBuf) {
+                        store.setPdfArrayBuffer(idbPdfBuf)
+                    } else {
+                        // Fallback: try legacy key based on fileData (for data saved before this fix)
+                        await store.loadPdfFromStorage()
                     }
-                } else if (stateObj?.fileData) {
-                    // Try IndexedDB
-                    await store.loadPdfFromStorage()
-                }
+                } else {
+                    // FS mode: load from disk, cache to IndexedDB for fast repeat access
+                    const appState = useAppStore.getState()
+                    const canvasMeta = appState.canvasList.find(c => c.id === canvasId)
+                    const parentHandle = await resolveParentHandle(
+                        directoryHandle!,
+                        appState.folderList,
+                        canvasMeta?.parentFolderId,
+                    )
+                    const pdfBuf = await fsLoadPdf(parentHandle, canvasId!)
+                    if (pdfBuf) {
+                        store.setPdfArrayBuffer(pdfBuf)
+                        if (stateObj?.fileData) {
+                            const key = stateObj.fileData.pdf_id || stateObj.fileData.filename || 'current_pdf'
+                            savePdfToLocal(key, pdfBuf).catch(() => {})
+                        }
+                    } else if (stateObj?.fileData) {
+                        await store.loadPdfFromStorage()
+                    }
 
-                // Re-hydrate voice note audio blobs from file system into IndexedDB
-                // (handles the case where IndexedDB was cleared, e.g. after logout/login
-                // or on a different browser session).
-                const loadedNodes = stateObj?.nodes ?? []
-                const voiceNodesToHydrate = (loadedNodes as any[]).filter(
-                    (n: any) => n.type === 'voiceNoteNode' && n.data?.audioId
-                )
-                for (const node of voiceNodesToHydrate) {
-                    const audioId = node.data.audioId as string
-                    const existingBlob = await loadAudio(audioId).catch(() => null)
-                    if (!existingBlob) {
-                        const blob = await fsLoadVoiceAudio(parentHandle, canvasId, audioId).catch(() => null)
-                        if (blob) {
-                            await saveAudio(audioId, blob).catch(() => {})
+                    // Re-hydrate voice note audio blobs from file system into IndexedDB
+                    // (handles the case where IndexedDB was cleared, e.g. after logout/login)
+                    const loadedNodes = stateObj?.nodes ?? []
+                    const voiceNodesToHydrate = (loadedNodes as any[]).filter(
+                        (n: any) => n.type === 'voiceNoteNode' && n.data?.audioId
+                    )
+                    for (const node of voiceNodesToHydrate) {
+                        const audioId = node.data.audioId as string
+                        const existingBlob = await loadAudio(audioId).catch(() => null)
+                        if (!existingBlob) {
+                            const blob = await fsLoadVoiceAudio(parentHandle, canvasId!, audioId).catch(() => null)
+                            if (blob) {
+                                await saveAudio(audioId, blob).catch(() => {})
+                            }
                         }
                     }
                 }
 
                 // Re-derive raw_text & markdown_content if they were stripped during save.
-                // This runs lazily after the UI has loaded so it doesn't block rendering.
+                // Runs lazily in background so it doesn't block rendering.
                 const currentFileData = useCanvasStore.getState().fileData
                 const loadedPdf = useCanvasStore.getState().pdfArrayBuffer
                 if (currentFileData && (!currentFileData.raw_text || currentFileData.raw_text.length === 0) && loadedPdf) {
-                    // Fire-and-forget: re-extract text in the background
                     extractPdfPagesTextFromBuffer(loadedPdf).then((pages) => {
                         if (!mountedRef.current) return
                         const rawText = pages.join('\n\n')
@@ -359,7 +402,7 @@ export default function CanvasPage() {
             mountedRef.current = false
             setActiveCanvasId(null)
         }
-    }, [directoryHandle, canvasId, setActiveCanvasId, setDirty])
+    }, [directoryHandle, storageMode, canvasId, setActiveCanvasId, setDirty])
 
     // ── Mark dirty on store changes ──────────────────────────────────────────
     useEffect(() => {
