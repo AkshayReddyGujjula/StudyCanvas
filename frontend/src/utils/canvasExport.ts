@@ -31,9 +31,6 @@ const MAX_EXPORT_PAGES = 50
 /** Browser canvas pixel limit per dimension */
 const MAX_CANVAS_DIMENSION = 16384
 
-/** Maximum total image memory budget in bytes (1 GB) */
-const MAX_MEMORY_BYTES = 1_073_741_824
-
 /** Per-page capture timeout in milliseconds */
 const PAGE_CAPTURE_TIMEOUT_MS = 30_000
 
@@ -43,16 +40,21 @@ const SETTLE_DELAY_MS = 800
 /** Default capture scale factor (2× for high resolution) */
 const DEFAULT_SCALE = 2
 
+/** Maximum pixel ratio used when capturing a tile (prevents out-of-memory at very low zooms).
+ *  Quality scales up automatically as zoom decreases, but is hard-capped here. */
+const MAX_CAPTURE_SCALE = 8
+
 /** Auto-tile when the full-fit zoom falls below this level — content would be unreadably small.
  *  Raised from 0.2 → 0.5 so that medium-large canvases are also split into tiles,
  *  producing higher-quality PDF output instead of one greatly zoomed-out page. */
 const MIN_TILE_ZOOM = 0.5
 
-/** Zoom level used for each individual tile — gives comfortable reading zoom.
- *  Raised from 0.55 → 0.75 for sharper tile captures. */
+/** Reference zoom used to calibrate quality scaling.
+ *  At this zoom level DEFAULT_SCALE gives acceptable quality;
+ *  lower zooms receive proportionally higher scale values. */
 const TARGET_TILE_ZOOM = 0.75
 
-/** Fraction of tile width/height shared between adjacent tiles (prevents edge clipping) */
+/** Fraction of tile HEIGHT shared between adjacent tiles (prevents edge clipping) */
 const TILE_OVERLAP = 0.05
 
 // ─── Mutual-exclusion flag ───────────────────────────────────────────────────
@@ -141,22 +143,6 @@ function computeSafeScale(w: number, h: number, desired: number): number {
     if (maxDim * scale > MAX_CANVAS_DIMENSION) {
         scale = Math.floor(MAX_CANVAS_DIMENSION / maxDim)
         if (scale < 1) scale = 1
-    }
-    return scale
-}
-
-/** Lower scale when total memory across multiple pages would exceed budget. */
-function computeSafeScaleMulti(w: number, h: number, numPages: number, desired: number): number {
-    let scale = computeSafeScale(w, h, desired)
-    const estimatedBytes = w * h * 4 * scale * scale * numPages
-    if (estimatedBytes > MAX_MEMORY_BYTES && scale > 1) {
-        scale = 1
-        const recheck = w * h * 4 * numPages
-        if (recheck > MAX_MEMORY_BYTES) {
-            console.warn(
-                `[canvasExport] Estimated memory ${(recheck / 1e9).toFixed(2)} GB at scale=1 for ${numPages} pages`,
-            )
-        }
     }
     return scale
 }
@@ -387,27 +373,33 @@ async function prepareViewportAndPlan(
         return [{ ...fullFitVp, label: 'full canvas' }]
     }
 
-    // ── 4. Large canvas: build tile grid at TARGET_TILE_ZOOM ─────────────────
+    // ── 4. Large canvas: build HORIZONTAL-ONLY tile strips ─────────────────
+    //
+    // Tiles are split only by HEIGHT (rows), never by width (cols = 1).
+    // Each strip shows the FULL content width — no vertical dividers in the PDF.
+    // The zoom is chosen to make the entire content width visible in the viewport.
     const contentW = bounds.maxX - bounds.minX
     const contentH = bounds.maxY - bounds.minY
 
-    // Visible flow area per tile at the target zoom
-    const visW = cw / TARGET_TILE_ZOOM
-    const visH = ch / TARGET_TILE_ZOOM
+    // Compute the zoom that fits the full content width into the viewport
+    // (with a small 5 % horizontal padding on each side).
+    const tilePadding = 0.05
+    const zoomForWidth = (cw * (1 - 2 * tilePadding)) / contentW
+    // Never go below a tiny minimum that would produce a blank capture.
+    const tileZoom = Math.max(zoomForWidth, 0.02)
 
-    // Step between tile origins (with overlap so edges aren't cut)
-    const stepW = visW * (1 - TILE_OVERLAP)
+    // Visible height per tile strip at this zoom
+    const visH = ch / tileZoom
+
+    // Step between strip origins (overlap prevents content being clipped at edges)
     const stepH = visH * (1 - TILE_OVERLAP)
-
-    const cols = Math.max(1, Math.ceil(contentW / stepW))
     const rows = Math.max(1, Math.ceil(contentH / stepH))
 
     // Safety cap — never exceed MAX_EXPORT_PAGES tiles
-    const totalTiles = rows * cols
-    if (totalTiles > MAX_EXPORT_PAGES) {
+    if (rows > MAX_EXPORT_PAGES) {
         // Fall back to a single low-zoom page rather than exploding page count
         console.warn(
-            `[canvasExport] Tile count ${totalTiles} exceeds MAX_EXPORT_PAGES; falling back to single-page.`,
+            `[canvasExport] Strip count ${rows} exceeds MAX_EXPORT_PAGES; falling back to single-page.`,
         )
         setViewport(fullFitVp, { duration: 0 })
         await new Promise((r) => setTimeout(r, 500))
@@ -415,24 +407,24 @@ async function prepareViewportAndPlan(
     }
 
     const tiles: TileViewport[] = []
-    // Centre the tile grid on the content bounds (any leftover space is shared)
-    const gridW = cols * stepW + visW * TILE_OVERLAP
+
+    // Horizontal centre of content — all strips share the same X pan
+    const centerFlowX = bounds.minX + contentW / 2
+
+    // Vertically centre the strip grid on the content bounds
     const gridH = rows * stepH + visH * TILE_OVERLAP
-    const originX = bounds.minX - (gridW - contentW) / 2
     const originY = bounds.minY - (gridH - contentH) / 2
 
     for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) {
-            const tileFlowLeft = originX + c * stepW
-            const tileFlowTop = originY + r * stepH
-            // Place top-left of tile at screen origin
-            tiles.push({
-                zoom: TARGET_TILE_ZOOM,
-                x: -tileFlowLeft * TARGET_TILE_ZOOM,
-                y: -tileFlowTop * TARGET_TILE_ZOOM,
-                label: `row ${r + 1} col ${c + 1}`,
-            })
-        }
+        const tileFlowTop = originY + r * stepH
+        tiles.push({
+            zoom: tileZoom,
+            // X: keep content horizontally centred in the viewport
+            x: cw / 2 - centerFlowX * tileZoom,
+            // Y: position this strip at the top of the viewport
+            y: -tileFlowTop * tileZoom,
+            label: rows > 1 ? `row ${r + 1} of ${rows}` : 'full canvas',
+        })
     }
 
     return tiles
@@ -595,12 +587,11 @@ export async function exportCurrentPage(options: ExportOptions): Promise<Blob | 
 
         const w = containerEl.offsetWidth
         const h = containerEl.offsetHeight
-        const scale = computeSafeScale(w, h, DEFAULT_SCALE)
 
         // ── 1. Plan viewport tiles (includes drawing strokes in bounds) ────
         //    prepareViewportAndPlan calls fitView, expands the bounding box to
-        //    include all pen/highlighter strokes, then splits into multiple tiles
-        //    if the canvas is too wide/tall to render at a readable zoom level.
+        //    include all pen/highlighter strokes, then splits into HORIZONTAL
+        //    strips only if the canvas is too tall to render at a readable zoom.
         const tiles = await prepareViewportAndPlan(
             currentPage, getNodes, containerEl, fitView, getViewport, setViewport,
         )
@@ -613,7 +604,7 @@ export async function exportCurrentPage(options: ExportOptions): Promise<Blob | 
             const tile = tiles[t]
 
             if (tiles.length > 1) {
-                onProgress?.(`Capturing tile ${t + 1} of ${tiles.length} (${tile.label})…`)
+                onProgress?.(`Capturing strip ${t + 1} of ${tiles.length} (${tile.label})…`)
             } else {
                 onProgress?.('Capturing canvas…')
             }
@@ -622,6 +613,15 @@ export async function exportCurrentPage(options: ExportOptions): Promise<Blob | 
             setViewport(tile, { duration: 0 })
             await new Promise((r) => setTimeout(r, 500))
             if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError')
+
+            // Quality scales up as the zoom decreases so small content stays sharp.
+            // At TARGET_TILE_ZOOM the default scale is used; below that it increases
+            // proportionally, capped at MAX_CAPTURE_SCALE to prevent OOM.
+            const desiredScale = Math.max(
+                DEFAULT_SCALE,
+                Math.round(DEFAULT_SCALE * TARGET_TILE_ZOOM / tile.zoom),
+            )
+            const scale = computeSafeScale(w, h, Math.min(desiredScale, MAX_CAPTURE_SCALE))
 
             const capturePromise = captureContainer(containerEl, scale, signal)
             const timeoutPromise = new Promise<never>((_, reject) =>
@@ -653,7 +653,7 @@ export async function exportCurrentPage(options: ExportOptions): Promise<Blob | 
         if (!doc) throw new Error('Capture produced no output')
 
         onProgress?.('Building PDF…')
-        const suffix = tiles.length > 1 ? `-tiled(${tiles.length}pages)` : ''
+        const suffix = tiles.length > 1 ? `-strips(${tiles.length}pages)` : ''
         const blob = doc.output('blob')
         triggerDownload(blob, `${filenameBase}-Page${currentPage}${suffix}.pdf`)
         onProgress?.('Done!')
@@ -708,7 +708,6 @@ export async function exportAllPages(options: ExportAllOptions): Promise<Blob | 
     try {
         const w = containerEl.offsetWidth
         const h = containerEl.offsetHeight
-        const scale = computeSafeScaleMulti(w, h, annotatedPages.length, DEFAULT_SCALE)
 
         // ── Incremental PDF assembly ───────────────────────────────────────
         // The jsPDF document is created lazily when the first page is captured
@@ -749,7 +748,16 @@ export async function exportAllPages(options: ExportAllOptions): Promise<Blob | 
                     await new Promise((r) => setTimeout(r, 500))
                     if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError')
 
-                    const capturePromise = captureContainer(containerEl, scale, signal)
+                    // Quality scales up as the zoom decreases — same formula as single-page.
+                    // For multi-page exports we use a slightly lower cap to stay within
+                    // memory budget across many pages.
+                    const desiredScale = Math.max(
+                        DEFAULT_SCALE,
+                        Math.round(DEFAULT_SCALE * TARGET_TILE_ZOOM / tile.zoom),
+                    )
+                    const tileScale = computeSafeScale(w, h, Math.min(desiredScale, MAX_CAPTURE_SCALE - 2))
+
+                    const capturePromise = captureContainer(containerEl, tileScale, signal)
                     const timeoutPromise = new Promise<never>((_, reject) =>
                         setTimeout(
                             () => reject(new Error(`Capture timed out for page ${pageNum} tile ${t + 1}`)),
