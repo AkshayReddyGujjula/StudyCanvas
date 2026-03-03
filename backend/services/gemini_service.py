@@ -237,6 +237,23 @@ Student's question:
 
     full_prompt += f"\n\nNew follow-up question: {question}" if chat_history else ""
 
+    # ── Canvas screenshot vision extraction ─────────────────────────────────
+    # When a canvas screenshot is provided, use Gemini 2.5 Flash Lite (MODEL_LITE)
+    # to extract text from the image — capturing handwritten notes, whiteboard
+    # annotations, sticky note content, and any other visual canvas context.
+    # The raw extracted text is added to the prompt so the answering model has
+    # full textual context even for handwritten or non-PDF content.
+    if image_base64:
+        canvas_vision_text = await extract_text_from_image_b64(image_base64)
+        if canvas_vision_text:
+            full_prompt += (
+                "\n\n---\n\n"
+                "Canvas Visual Content (extracted via vision AI from canvas screenshot — "
+                "includes handwritten notes, whiteboard annotations, sticky notes, and "
+                "other visible canvas elements):\n"
+                f"{canvas_vision_text}"
+            )
+
     try:
         # Build a multimodal request when a page image is available.
         # The image gives Gemini visual context for diagrams, handwriting, and
@@ -1029,8 +1046,12 @@ async def transcribe_audio(audio_base64: str, mime_type: str) -> str:
     prompt = (
         "You are a precise transcription assistant. "
         "Transcribe the following audio clip exactly as spoken. "
-        "Do not add punctuation that was not clearly spoken. "
-        "Do not add commentary, labels, or explanations — output only the transcription text."
+        "Output ONLY the spoken words as plain text — a continuous transcript with no timestamps, "
+        "no timecodes, no WebVTT headers, no SRT sequence numbers, no speaker labels, "
+        "no punctuation that was not clearly spoken, no commentary, and no explanations. "
+        "Do NOT output any lines like '00:00:00 --> 00:00:05' or 'WEBVTT' or sequence numbers. "
+        "If the audio contains no speech, silence, or only background noise with no intelligible words, "
+        "output exactly: [NO_SPEECH_DETECTED]"
     )
 
     response = await _client.aio.models.generate_content(
@@ -1043,14 +1064,44 @@ async def transcribe_audio(audio_base64: str, mime_type: str) -> str:
     )
 
     if response.text is not None:
-        return response.text.strip()
-    try:
-        cands = response.candidates
-        text = (
-            (cands[0].content.parts[0].text or "")
-            if cands and cands[0].content and cands[0].content.parts
-            else ""
-        )
-        return text.strip()
-    except Exception:
-        return ""
+        result = response.text.strip()
+    else:
+        try:
+            cands = response.candidates
+            result = (
+                (cands[0].content.parts[0].text or "")
+                if cands and cands[0].content and cands[0].content.parts
+                else ""
+            )
+            result = result.strip()
+        except Exception:
+            result = ""
+
+    if not result or result == "[NO_SPEECH_DETECTED]":
+        raise ValueError("No speech detected in the recording. Please speak clearly and try again.")
+
+    # Strip any WebVTT / SRT formatting lines Gemini may still inject.
+    # These look like: "WEBVTT", "00:00:00.000 --> 00:00:05.000",
+    # "00:00:00:000 --> 00:00:05:000", or bare sequence numbers on their own line.
+    import re as _re
+    lines = result.splitlines()
+    cleaned: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        # Skip WEBVTT header
+        if stripped.upper() in ("WEBVTT", ""):
+            continue
+        # Skip timestamp lines: hh:mm:ss.mmm --> hh:mm:ss.mmm (both . and : as ms separator)
+        if _re.match(r'^\d{1,2}:\d{2}:\d{2}[:.]\d{3}\s*-->\s*\d{1,2}:\d{2}:\d{2}[:.]\d{3}', stripped):
+            continue
+        # Skip bare SRT sequence numbers (a line that is just digits)
+        if _re.match(r'^\d+$', stripped):
+            continue
+        cleaned.append(line)
+
+    result = "\n".join(cleaned).strip()
+
+    if not result:
+        raise ValueError("No speech detected in the recording. Please speak clearly and try again.")
+
+    return result

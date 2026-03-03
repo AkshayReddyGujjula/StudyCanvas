@@ -900,7 +900,18 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
         persistToLocalStorage()
     }, [getViewportCenter, currentPage, nodes, setNodes, persistToLocalStorage])
 
+    const FLASHCARD_PAGE_LIMIT = 20
+
     const handleSpawnCustomFlashcard = useCallback(() => {
+        const pageFlashcardCount = nodes.filter(
+            (n) => n.type === 'flashcardNode' &&
+            ((n.data as unknown as FlashcardNodeData).pageIndex === currentPage ||
+             (n.data as unknown as FlashcardNodeData).isPinned === true)
+        ).length
+        if (pageFlashcardCount >= FLASHCARD_PAGE_LIMIT) {
+            showToast(`Maximum of ${FLASHCARD_PAGE_LIMIT} flashcards per page reached. Delete some to add more.`)
+            return
+        }
         const center = getViewportCenter()
         const pos = findNonOverlappingPosition(center, 380, 260, nodes)
         const nodeId = `flashcard-custom-${Date.now()}`
@@ -924,7 +935,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
         }
         setNodes((prev) => [...prev, newNode])
         persistToLocalStorage()
-    }, [getViewportCenter, currentPage, nodes, setNodes, persistToLocalStorage])
+    }, [getViewportCenter, currentPage, nodes, setNodes, persistToLocalStorage, showToast])
 
     const handleSpawnTimer = useCallback(() => {
         const center = getViewportCenter()
@@ -1630,6 +1641,50 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                     ? pm.slice(Math.max(0, cpIdx - 2), cpIdx + 1).join('\n')
                     : (fileData.raw_text ?? '').slice(0, 50000)
 
+                // ── Capture full canvas screenshot for vision AI context ─────────
+                // Always take a screenshot regardless of question type so Gemini can
+                // read handwritten notes, whiteboard strokes, and canvas annotations
+                // via Gemini 2.5 Flash Lite vision text extraction on the backend.
+                let canvasScreenshotBase64: string | undefined
+                try {
+                    const el = containerRef.current
+                    if (el) {
+                        const capture = await domToCanvas(el, {
+                            pixelRatio: 0.4,
+                            filter: (node) => {
+                                const el = node as Element
+                                if (el.classList?.contains('react-flow__controls')) return false
+                                if (el.classList?.contains('react-flow__minimap')) return false
+                                if ((el as HTMLElement).tagName === 'CANVAS') return false
+                                return true
+                            },
+                        })
+                        // Composite whiteboard drawing strokes (separate canvas) on top
+                        const drawingMain = el.querySelector<HTMLCanvasElement>('.drawing-canvas-main')
+                        if (drawingMain) {
+                            const ctx = capture.getContext('2d')
+                            if (ctx) {
+                                const drawingRect = drawingMain.getBoundingClientRect()
+                                const captureRect = el.getBoundingClientRect()
+                                const scaleX = capture.width / captureRect.width
+                                const scaleY = capture.height / captureRect.height
+                                ctx.drawImage(
+                                    drawingMain,
+                                    0, 0, drawingMain.width, drawingMain.height,
+                                    (drawingRect.left - captureRect.left) * scaleX,
+                                    (drawingRect.top - captureRect.top) * scaleY,
+                                    drawingRect.width * scaleX,
+                                    drawingRect.height * scaleY,
+                                )
+                            }
+                        }
+                        const dataUrl = capture.toDataURL('image/jpeg', 0.75)
+                        canvasScreenshotBase64 = dataUrl.split(',')[1]
+                    }
+                } catch (screenshotErr) {
+                    console.warn('[Canvas] Screenshot capture failed, proceeding without image context:', screenshotErr)
+                }
+
                 const response = await streamQuery(
                     {
                         question,
@@ -1637,6 +1692,7 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
                         raw_text: scopedContext,
                         parent_response: parentResponse,
                         user_details: userDetails,
+                        image_base64: canvasScreenshotBase64,
                     },
                     controller.signal
                 )
@@ -2017,6 +2073,17 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
             pIndex = currentPage - 1
         }
 
+        const existingPageFlashcardCount = nodes.filter(
+            (n) => n.type === 'flashcardNode' &&
+            ((n.data as unknown as FlashcardNodeData).pageIndex === currentPage ||
+             (n.data as unknown as FlashcardNodeData).isPinned === true)
+        ).length
+
+        if (existingPageFlashcardCount >= 20) {
+            showToast(`Maximum of 20 flashcards per page reached. Delete some to generate more.`)
+            return
+        }
+
         startGenProgress('flashcards', sourceType === 'struggling' ? 'Generating flashcards from struggling topics…' : 'Generating flashcards for this page…')
 
         setIsGeneratingFlashcards(true)
@@ -2079,6 +2146,13 @@ export default function Canvas({ onGoHome, onSave }: { onGoHome?: () => void; on
             showToast('No flashcards were generated — try again.')
             setIsGeneratingFlashcards(false)
             return
+        }
+
+        // Enforce 20-flashcard-per-page limit on the generated set
+        const slotsRemaining = 20 - existingPageFlashcardCount
+        if (cards.length > slotsRemaining) {
+            cards = cards.slice(0, slotsRemaining)
+            showToast(`Only ${slotsRemaining} flashcard${slotsRemaining !== 1 ? 's' : ''} added to stay within the 20-per-page limit.`)
         }
 
         // Place flashcard row ABOVE the content node, avoiding overlaps

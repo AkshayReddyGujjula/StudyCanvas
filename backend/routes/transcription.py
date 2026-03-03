@@ -76,8 +76,8 @@ async def transcribe_audio(request: Request, payload: TranscribeRequest):
         )
         return TranscribeResponse(text=text, model_used=MODEL_LITE)
     except ValueError as exc:
-        # Validation errors from the Pydantic model surface here
-        raise HTTPException(status_code=400, detail=str(exc))
+        # Includes "no speech detected" errors raised by the service layer
+        raise HTTPException(status_code=422, detail=str(exc))
     except Exception as exc:
         logger.error(f"Transcription error: {exc}")
         raise HTTPException(
