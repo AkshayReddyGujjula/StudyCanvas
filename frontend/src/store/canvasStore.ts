@@ -99,6 +99,8 @@ interface CanvasActions {
     removeStroke: (id: string) => void
     removeStrokes: (ids: string[]) => void
     clearStrokesForPage: (pageIndex: number) => void
+    /** Move selected strokes by (dx, dy) in flow coordinates; detaches node-attached strokes */
+    moveStrokes: (ids: string[], dx: number, dy: number) => void
     setActiveTool: (tool: WhiteboardTool) => void
     setToolSettings: (partial: Partial<ToolSettings>) => void
     setSavedColors: (colors: string[]) => void
@@ -377,6 +379,32 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
         }))
     },
 
+    moveStrokes: (ids, dx, dy) => {
+        const idSet = new Set(ids)
+        const nodes = get().nodes
+        const strokes = get().drawingStrokes
+        const before = strokes.filter((s) => idSet.has(s.id))
+        const newStrokes = strokes.map((stroke) => {
+            if (!idSet.has(stroke.id)) return stroke
+            let points = stroke.points
+            if (stroke.nodeId) {
+                // Convert node-relative points to global coords, apply delta, detach from node
+                const node = nodes.find((n) => n.id === stroke.nodeId)
+                const ox = node?.position.x ?? stroke.nodeOffset?.x ?? 0
+                const oy = node?.position.y ?? stroke.nodeOffset?.y ?? 0
+                points = stroke.points.map((p) => ({ ...p, x: p.x + ox + dx, y: p.y + oy + dy }))
+                return { ...stroke, points, nodeId: undefined, nodeOffset: undefined }
+            }
+            return { ...stroke, points: points.map((p) => ({ ...p, x: p.x + dx, y: p.y + dy })) }
+        })
+        const after = newStrokes.filter((s) => idSet.has(s.id))
+        set((state) => ({
+            drawingStrokes: newStrokes,
+            whiteboardUndoStack: [...state.whiteboardUndoStack.slice(-49), { type: 'moveStrokes' as const, before, after }],
+            whiteboardRedoStack: [],
+        }))
+    },
+
     setActiveTool: (tool) => set({ activeTool: tool }),
 
     setToolSettings: (partial) =>
@@ -500,6 +528,16 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
                     whiteboardRedoStack: [...state.whiteboardRedoStack, action],
                 }))
                 break
+            case 'moveStrokes': {
+                // Undo a move → restore before-strokes
+                const afterIds = new Set(action.after.map((s) => s.id))
+                set((state) => ({
+                    drawingStrokes: [...state.drawingStrokes.filter((s) => !afterIds.has(s.id)), ...action.before],
+                    whiteboardUndoStack: newUndo,
+                    whiteboardRedoStack: [...state.whiteboardRedoStack, action],
+                }))
+                break
+            }
             case 'addText': {
                 // Undo text add → remove the node
                 const nodeToRemove = nodes.find((n) => n.id === action.nodeId)
@@ -560,6 +598,16 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
                     }
                 })
                 break
+            case 'moveStrokes': {
+                // Redo a move → apply after-strokes
+                const beforeIds = new Set(action.before.map((s) => s.id))
+                set((state) => ({
+                    drawingStrokes: [...state.drawingStrokes.filter((s) => !beforeIds.has(s.id)), ...action.after],
+                    whiteboardRedoStack: newRedo,
+                    whiteboardUndoStack: [...state.whiteboardUndoStack, action],
+                }))
+                break
+            }
             case 'addText':
                 // Redo text add → restore the node (we need snapshot from the previous undo)
                 // This case only fires if the redo stack has the right snapshot

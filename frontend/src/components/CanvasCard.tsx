@@ -6,11 +6,15 @@ import type { CanvasMeta } from '../types'
 
 interface Props {
     canvas: CanvasMeta
-    onClick: () => void
+    /** Open the canvas (double-click) */
+    onOpen: () => void
+    /** Select this card (single-click), receives the mouse event for modifier key detection */
+    onSelect: (e: React.MouseEvent) => void
+    isSelected?: boolean
     onDragStart?: (e: React.DragEvent) => void
 }
 
-export default function CanvasCard({ canvas, onClick, onDragStart }: Props) {
+export default function CanvasCard({ canvas, onOpen, onSelect, isSelected, onDragStart }: Props) {
     const directoryHandle = useAppStore((s) => s.directoryHandle)
     const storageMode = useAppStore((s) => s.storageMode)
     const renameCanvas = useAppStore((s) => s.renameCanvas)
@@ -90,8 +94,13 @@ export default function CanvasCard({ canvas, onClick, onDragStart }: Props) {
                     if (isRenaming) { e.preventDefault(); return }
                     onDragStart?.(e)
                 }}
-                className="group relative bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all cursor-pointer"
-                onClick={() => !isRenaming && onClick()}
+                className={`group relative bg-white rounded-xl border shadow-sm hover:shadow-md transition-all cursor-pointer ${
+                    isSelected
+                        ? 'border-indigo-400 ring-2 ring-indigo-200 bg-indigo-50'
+                        : 'border-gray-200'
+                }`}
+                onClick={(e) => { if (!isRenaming) onSelect(e) }}
+                onDoubleClick={() => { if (!isRenaming) onOpen() }}
             >
                 {/* Thumbnail area */}
                 <div className="h-36 bg-gray-50 flex items-center justify-center overflow-hidden rounded-t-xl">

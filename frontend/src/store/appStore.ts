@@ -118,6 +118,8 @@ interface AppActions {
     moveCanvas: (canvasId: string, targetFolderId: string | null) => Promise<string | null>
     /** Move a folder into a different parent folder. Returns error string if validation fails. */
     moveFolder: (folderId: string, targetParentId: string | null) => Promise<string | null>
+    /** Move multiple canvases/folders to a target folder. Returns first error string or null. */
+    moveItems: (items: { id: string; type: 'canvas' | 'folder' }[], targetFolderId: string | null) => Promise<string | null>
 }
 
 export const useAppStore = create<AppState & AppActions>((set, get) => ({
@@ -599,6 +601,17 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
             await writeManifest(directoryHandle, manifest)
         }
         set({ folderList: updatedFolders })
+        return null
+    },
+
+    moveItems: async (items, targetFolderId) => {
+        const { moveCanvas, moveFolder } = get()
+        for (const item of items) {
+            const err = item.type === 'canvas'
+                ? await moveCanvas(item.id, targetFolderId)
+                : await moveFolder(item.id, targetFolderId)
+            if (err) return err
+        }
         return null
     },
 }))

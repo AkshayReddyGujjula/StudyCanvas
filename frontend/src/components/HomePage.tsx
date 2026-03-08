@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAppStore } from '../store/appStore'
 import { useTutorialStore } from '../store/tutorialStore'
@@ -15,8 +15,7 @@ export default function HomePage() {
     const folderList = useAppStore((s) => s.folderList)
     const addCanvas = useAppStore((s) => s.addCanvas)
     const addFolder = useAppStore((s) => s.addFolder)
-    const moveCanvas = useAppStore((s) => s.moveCanvas)
-    const moveFolder = useAppStore((s) => s.moveFolder)
+    const moveItems = useAppStore((s) => s.moveItems)
     const directoryHandle = useAppStore((s) => s.directoryHandle)
     const needsPermission = useAppStore((s) => s.needsPermission)
     const setDirectoryHandle = useAppStore((s) => s.setDirectoryHandle)
@@ -45,6 +44,10 @@ export default function HomePage() {
     const [dragError, setDragError] = useState<string | null>(null)
     const [isDragOverBack, setIsDragOverBack] = useState(false)
 
+    // ─── Multi-select state ───────────────────────────────────────────────
+    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+    const [lastSelectedId, setLastSelectedId] = useState<string | null>(null)
+
     // Close settings menu on click outside
     useEffect(() => {
         const handler = (e: MouseEvent) => {
@@ -62,6 +65,15 @@ export default function HomePage() {
         const t = setTimeout(() => setDragError(null), 4000)
         return () => clearTimeout(t)
     }, [dragError])
+
+    // Escape key clears selection
+    useEffect(() => {
+        const handler = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') setSelectedIds(new Set())
+        }
+        document.addEventListener('keydown', handler)
+        return () => document.removeEventListener('keydown', handler)
+    }, [])
 
     const handleNewCanvas = () => {
         setNewItemName('')
@@ -124,6 +136,7 @@ export default function HomePage() {
 
     const handleOpenFolder = (folderId: string) => {
         setCurrentFolderId(folderId)
+        setSelectedIds(new Set()) // clear selection when navigating into a folder
     }
 
     const handleGrantPermission = async () => {
@@ -145,31 +158,123 @@ export default function HomePage() {
         }
     }
 
+    // ─── Items in current folder ─────────────────────────────────────────
+
+    const foldersInView = folderList
+        .filter(f => (f.parentFolderId ?? null) === currentFolderId)
+        .sort((a, b) => a.name.localeCompare(b.name))
+
+    const canvasesInView = canvasList
+        .filter(c => (c.parentFolderId ?? null) === currentFolderId)
+        .sort((a, b) => new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime())
+
+    // Combined ordered list for shift-click range selection (folders first, then canvases)
+    const orderedItems = useMemo(() => [
+        ...foldersInView.map(f => ({ id: f.id, type: 'folder' as const })),
+        ...canvasesInView.map(c => ({ id: c.id, type: 'canvas' as const })),
+    ], [foldersInView, canvasesInView])
+
+    // ─── Selection handler ───────────────────────────────────────────────
+
+    const handleItemSelect = useCallback((id: string, e: React.MouseEvent) => {
+        e.stopPropagation()
+
+        if (e.shiftKey && lastSelectedId) {
+            // Range select from last selected to this item
+            const lastIdx = orderedItems.findIndex(item => item.id === lastSelectedId)
+            const curIdx = orderedItems.findIndex(item => item.id === id)
+            if (lastIdx >= 0 && curIdx >= 0) {
+                const start = Math.min(lastIdx, curIdx)
+                const end = Math.max(lastIdx, curIdx)
+                const rangeIds = orderedItems.slice(start, end + 1).map(item => item.id)
+                setSelectedIds(prev => {
+                    const next = new Set(prev)
+                    rangeIds.forEach(rid => next.add(rid))
+                    return next
+                })
+            }
+        } else if (e.ctrlKey || e.metaKey) {
+            // Toggle individual item
+            setSelectedIds(prev => {
+                const next = new Set(prev)
+                if (next.has(id)) next.delete(id)
+                else next.add(id)
+                return next
+            })
+            setLastSelectedId(id)
+        } else {
+            // Single select
+            setSelectedIds(new Set([id]))
+            setLastSelectedId(id)
+        }
+    }, [lastSelectedId, orderedItems])
+
     // ─── Drag & drop handlers ────────────────────────────────────────────
 
     const handleDragStartCanvas = useCallback((e: React.DragEvent, canvasId: string) => {
-        e.dataTransfer.setData('application/studycanvas-canvas', canvasId)
+        let itemsToDrag: { id: string; type: 'canvas' | 'folder' }[]
+
+        if (selectedIds.has(canvasId)) {
+            // Drag all selected items
+            itemsToDrag = [...selectedIds].map(id => {
+                const isCanvas = canvasList.some(c => c.id === id)
+                return { id, type: isCanvas ? 'canvas' as const : 'folder' as const }
+            })
+        } else {
+            // Drag only this canvas (don't affect selection)
+            itemsToDrag = [{ id: canvasId, type: 'canvas' }]
+        }
+
+        e.dataTransfer.setData('application/studycanvas-items', JSON.stringify(itemsToDrag))
         e.dataTransfer.effectAllowed = 'move'
-    }, [])
+
+        // Custom drag ghost showing item count when dragging multiple
+        if (itemsToDrag.length > 1) {
+            const ghost = document.createElement('div')
+            ghost.style.cssText = 'position:fixed;top:-9999px;background:#6366f1;color:white;padding:6px 14px;border-radius:20px;font-size:13px;font-weight:600;white-space:nowrap;'
+            ghost.textContent = `${itemsToDrag.length} items`
+            document.body.appendChild(ghost)
+            e.dataTransfer.setDragImage(ghost, ghost.offsetWidth / 2, 16)
+            requestAnimationFrame(() => ghost.remove())
+        }
+    }, [selectedIds, canvasList])
 
     const handleDragStartFolder = useCallback((e: React.DragEvent, folderId: string) => {
-        e.dataTransfer.setData('application/studycanvas-folder', folderId)
+        let itemsToDrag: { id: string; type: 'canvas' | 'folder' }[]
+
+        if (selectedIds.has(folderId)) {
+            itemsToDrag = [...selectedIds].map(id => {
+                const isCanvas = canvasList.some(c => c.id === id)
+                return { id, type: isCanvas ? 'canvas' as const : 'folder' as const }
+            })
+        } else {
+            itemsToDrag = [{ id: folderId, type: 'folder' }]
+        }
+
+        e.dataTransfer.setData('application/studycanvas-items', JSON.stringify(itemsToDrag))
         e.dataTransfer.effectAllowed = 'move'
-    }, [])
+
+        if (itemsToDrag.length > 1) {
+            const ghost = document.createElement('div')
+            ghost.style.cssText = 'position:fixed;top:-9999px;background:#6366f1;color:white;padding:6px 14px;border-radius:20px;font-size:13px;font-weight:600;white-space:nowrap;'
+            ghost.textContent = `${itemsToDrag.length} items`
+            document.body.appendChild(ghost)
+            e.dataTransfer.setDragImage(ghost, ghost.offsetWidth / 2, 16)
+            requestAnimationFrame(() => ghost.remove())
+        }
+    }, [selectedIds, canvasList])
 
     const handleDropOnFolder = useCallback(async (e: React.DragEvent, targetFolderId: string) => {
-        const canvasId = e.dataTransfer.getData('application/studycanvas-canvas')
-        const folderId = e.dataTransfer.getData('application/studycanvas-folder')
-
-        if (canvasId) {
-            const err = await moveCanvas(canvasId, targetFolderId)
-            if (err) setDragError(err)
-        } else if (folderId) {
-            if (folderId === targetFolderId) return
-            const err = await moveFolder(folderId, targetFolderId)
-            if (err) setDragError(err)
-        }
-    }, [moveCanvas, moveFolder])
+        const itemsJson = e.dataTransfer.getData('application/studycanvas-items')
+        if (!itemsJson) return
+        const items = JSON.parse(itemsJson) as { id: string; type: 'canvas' | 'folder' }[]
+        // Prevent a folder from being dropped into itself
+        const safeItems = items.filter(item => !(item.type === 'folder' && item.id === targetFolderId))
+        if (safeItems.length === 0) return
+        const err = await moveItems(safeItems, targetFolderId)
+        if (err) setDragError(err)
+        setSelectedIds(new Set())
+    }, [moveItems])
 
     // Drop on the Back button = move item to parent folder
     const handleDropOnBack = useCallback(async (e: React.DragEvent) => {
@@ -181,32 +286,24 @@ export default function HomePage() {
         const currentFolder = folderList.find(f => f.id === currentFolderId)
         const parentId = currentFolder?.parentFolderId ?? null
 
-        const canvasId = e.dataTransfer.getData('application/studycanvas-canvas')
-        const folderId = e.dataTransfer.getData('application/studycanvas-folder')
-
-        if (canvasId) {
-            const err = await moveCanvas(canvasId, parentId)
-            if (err) setDragError(err)
-        } else if (folderId) {
-            const err = await moveFolder(folderId, parentId)
-            if (err) setDragError(err)
-        }
-    }, [moveCanvas, moveFolder, currentFolderId, folderList])
+        const itemsJson = e.dataTransfer.getData('application/studycanvas-items')
+        if (!itemsJson) return
+        const items = JSON.parse(itemsJson) as { id: string; type: 'canvas' | 'folder' }[]
+        const err = await moveItems(items, parentId)
+        if (err) setDragError(err)
+        setSelectedIds(new Set())
+    }, [moveItems, currentFolderId, folderList])
 
     // Drop on the "background" area = move to current folder (or root)
     const handleDropOnBackground = useCallback(async (e: React.DragEvent) => {
         e.preventDefault()
-        const canvasId = e.dataTransfer.getData('application/studycanvas-canvas')
-        const folderId = e.dataTransfer.getData('application/studycanvas-folder')
-
-        if (canvasId) {
-            const err = await moveCanvas(canvasId, currentFolderId)
-            if (err) setDragError(err)
-        } else if (folderId) {
-            const err = await moveFolder(folderId, currentFolderId)
-            if (err) setDragError(err)
-        }
-    }, [moveCanvas, moveFolder, currentFolderId])
+        const itemsJson = e.dataTransfer.getData('application/studycanvas-items')
+        if (!itemsJson) return
+        const items = JSON.parse(itemsJson) as { id: string; type: 'canvas' | 'folder' }[]
+        const err = await moveItems(items, currentFolderId)
+        if (err) setDragError(err)
+        setSelectedIds(new Set())
+    }, [moveItems, currentFolderId])
 
     // ─── Breadcrumb path ─────────────────────────────────────────────────
 
@@ -226,16 +323,6 @@ export default function HomePage() {
         const rest = path.slice(1).reverse()
         return [root, ...rest]
     })()
-
-    // ─── Items in current folder ─────────────────────────────────────────
-
-    const foldersInView = folderList
-        .filter(f => (f.parentFolderId ?? null) === currentFolderId)
-        .sort((a, b) => a.name.localeCompare(b.name))
-
-    const canvasesInView = canvasList
-        .filter(c => (c.parentFolderId ?? null) === currentFolderId)
-        .sort((a, b) => new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime())
 
     if (needsPermission && storageMode !== 'indexeddb') {
         return (
@@ -261,7 +348,7 @@ export default function HomePage() {
 
     return (
         <>
-        <div className="min-h-screen bg-gray-100">
+        <div className="min-h-screen bg-gray-100" onClick={() => setSelectedIds(new Set())}>
             {/* Header */}
             <header className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-30">
                 <div className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between">
@@ -347,6 +434,7 @@ export default function HomePage() {
                 className="max-w-7xl mx-auto px-6 py-8"
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={handleDropOnBackground}
+                onClick={() => selectedIds.size > 0 && setSelectedIds(new Set())}
             >
                 {/* Breadcrumbs */}
                 {currentFolderId && (
@@ -359,7 +447,7 @@ export default function HomePage() {
                                     </svg>
                                 )}
                                 <button
-                                    onClick={() => setCurrentFolderId(crumb.id)}
+                                    onClick={(e) => { e.stopPropagation(); setCurrentFolderId(crumb.id); setSelectedIds(new Set()) }}
                                     className={`hover:text-indigo-600 transition-colors ${
                                         i === breadcrumbPath.length - 1
                                             ? 'text-gray-800 font-medium'
@@ -376,7 +464,7 @@ export default function HomePage() {
                 {/* Action buttons row */}
                 <div className="flex items-center gap-4 mb-6">
                     <button
-                        onClick={handleNewCanvas}
+                        onClick={(e) => { e.stopPropagation(); handleNewCanvas() }}
                         className="h-[52px] px-5 flex items-center gap-2.5 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 transition-colors cursor-pointer font-medium text-sm shadow-sm"
                     >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -386,7 +474,7 @@ export default function HomePage() {
                         New Canvas
                     </button>
                     <button
-                        onClick={handleNewFolder}
+                        onClick={(e) => { e.stopPropagation(); handleNewFolder() }}
                         className="h-[52px] px-5 flex items-center gap-2.5 rounded-xl bg-amber-500 text-white hover:bg-amber-600 transition-colors cursor-pointer font-medium text-sm shadow-sm"
                     >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -400,9 +488,11 @@ export default function HomePage() {
                     {/* Back button when in a folder — also a drop target */}
                     {currentFolderId && (
                         <button
-                            onClick={() => {
+                            onClick={(e) => {
+                                e.stopPropagation()
                                 const currentFolder = folderList.find(f => f.id === currentFolderId)
                                 setCurrentFolderId(currentFolder?.parentFolderId ?? null)
+                                setSelectedIds(new Set())
                             }}
                             onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragOverBack(true) }}
                             onDragLeave={() => setIsDragOverBack(false)}
@@ -434,13 +524,18 @@ export default function HomePage() {
                 )}
 
                 {/* Items grid */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                <div
+                    className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6"
+                    onClick={(e) => { e.stopPropagation(); setSelectedIds(new Set()) }}
+                >
                     {/* Folders first */}
                     {foldersInView.map((folder) => (
                         <FolderCard
                             key={folder.id}
                             folder={folder}
                             onOpen={() => handleOpenFolder(folder.id)}
+                            onSelect={(e) => handleItemSelect(folder.id, e)}
+                            isSelected={selectedIds.has(folder.id)}
                             onDragStart={(e) => handleDragStartFolder(e, folder.id)}
                             onDropItem={(e) => handleDropOnFolder(e, folder.id)}
                         />
@@ -451,7 +546,9 @@ export default function HomePage() {
                         <CanvasCard
                             key={canvas.id}
                             canvas={canvas}
-                            onClick={() => handleOpenCanvas(canvas.id)}
+                            onOpen={() => handleOpenCanvas(canvas.id)}
+                            onSelect={(e) => handleItemSelect(canvas.id, e)}
+                            isSelected={selectedIds.has(canvas.id)}
                             onDragStart={(e) => handleDragStartCanvas(e, canvas.id)}
                         />
                     ))}
@@ -636,6 +733,25 @@ export default function HomePage() {
 
         {/* Tutorial welcome modal - shown once for new users */}
         {!tutorialCompleted && <TutorialWelcomeModal />}
+
+        {/* Multi-select status bar */}
+        {selectedIds.size > 0 && (
+            <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-gray-900 text-white px-5 py-2.5 rounded-full shadow-xl text-sm font-medium pointer-events-auto select-none">
+                <span>{selectedIds.size} item{selectedIds.size !== 1 ? 's' : ''} selected</span>
+                <span className="text-gray-500">·</span>
+                <span className="text-gray-400 text-xs">Drag to move · Double-click to open · Esc to clear</span>
+                <button
+                    onClick={() => setSelectedIds(new Set())}
+                    className="ml-1 text-gray-400 hover:text-white transition-colors"
+                    title="Clear selection"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18" />
+                        <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                </button>
+            </div>
+        )}
         </>
     )
 }

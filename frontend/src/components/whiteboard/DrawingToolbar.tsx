@@ -44,12 +44,9 @@ export default function DrawingToolbar() {
         return () => document.removeEventListener('mousedown', handler)
     }, [])
 
-    // Sync panel state when tool changes programmatically (e.g. text → cursor after placement)
-    useEffect(() => {
-        if (activeTool === 'cursor') {
-            setOpenPanel(null)
-        }
-    }, [activeTool])
+    // A panel only makes sense when its tool is active — derive instead of syncing via effect.
+    // This handles programmatic tool changes (e.g. text → cursor after placement) without setState in effects.
+    const effectiveOpenPanel: ToolPanel = (openPanel === activeTool) ? openPanel : null
 
     // Collapse hover detection — show when cursor is near the right edge
     useEffect(() => {
@@ -147,13 +144,13 @@ export default function DrawingToolbar() {
             }}
         >
             {/* Sub-panel (appears to the left of toolbar) */}
-            {openPanel && (
+            {effectiveOpenPanel && (
                 <div
                     className="bg-white/95 backdrop-blur-sm border border-gray-200 rounded-xl shadow-lg p-3 min-w-[200px] max-w-[240px] select-none"
                     style={{ marginRight: 4 }}
                 >
                     {/* Pen 1 settings */}
-                    {openPanel === 'pen1' && (
+                    {effectiveOpenPanel === 'pen1' && (
                         <PenPanel
                             label="Pen 1"
                             settings={toolSettings.pen1}
@@ -162,7 +159,7 @@ export default function DrawingToolbar() {
                         />
                     )}
                     {/* Pen 2 settings */}
-                    {openPanel === 'pen2' && (
+                    {effectiveOpenPanel === 'pen2' && (
                         <PenPanel
                             label="Pen 2"
                             settings={toolSettings.pen2}
@@ -171,7 +168,7 @@ export default function DrawingToolbar() {
                         />
                     )}
                     {/* Highlighter settings */}
-                    {openPanel === 'highlighter' && (
+                    {effectiveOpenPanel === 'highlighter' && (
                         <div className="flex flex-col gap-3">
                             <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Highlighter</div>
                             <ColorPicker currentColor={toolSettings.highlighter.color} onColorChange={handleHighlighterColorChange} />
@@ -192,7 +189,7 @@ export default function DrawingToolbar() {
                         </div>
                     )}
                     {/* Eraser settings */}
-                    {openPanel === 'eraser' && (
+                    {effectiveOpenPanel === 'eraser' && (
                         <div className="flex flex-col gap-3">
                             <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Eraser</div>
                             <div>
@@ -235,7 +232,7 @@ export default function DrawingToolbar() {
                         </div>
                     )}
                     {/* Text settings */}
-                    {openPanel === 'text' && (
+                    {effectiveOpenPanel === 'text' && (
                         <div className="flex flex-col gap-3">
                             <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Text</div>
                             <div>
@@ -298,6 +295,15 @@ export default function DrawingToolbar() {
                 </button>
 
                 <div className="h-px bg-gray-200 mx-1" />
+
+                {/* Lasso Select */}
+                <button onClick={() => selectTool('lasso')} className={toolBtnClass('lasso')} title="Lasso Select — draw a circle to select strokes, then drag or Delete">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 3C7 3 3 6.5 3 11c0 3.3 2 6 5 7.5" strokeDasharray="3 1.5" />
+                        <path d="M12 3c5 0 9 3.5 9 8s-4 8-9 8c-1.2 0-2.4-.2-3.5-.6" strokeDasharray="3 1.5" />
+                        <path d="M8.5 19l2 3 2-3" />
+                    </svg>
+                </button>
 
                 {/* Eraser */}
                 <button onClick={() => selectTool('eraser')} className={toolBtnClass('eraser')} title="Eraser">

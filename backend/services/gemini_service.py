@@ -13,10 +13,12 @@ logger = logging.getLogger(__name__)
 _client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY", ""))
 
 # ── Model tier constants ──────────────────────────────────────────────────────
-# Lite: cheaper & faster — ideal for simple tasks (OCR, titles, simple Q&A)
-# Flash: smarter — for complex analysis, quiz generation, grading with nuance
+# Lite:  gemini-2.5-flash-lite — only for trivially simple/mechanical tasks
+#        (title generation, audio transcription)
+# Flash: gemini-3.1-flash-lite — primary model; smarter & faster for the
+#        majority of AI tasks (Q&A, quiz, OCR, summaries, grading, etc.)
 MODEL_LITE = "gemini-2.5-flash-lite"
-MODEL_FLASH = "gemini-2.5-flash"
+MODEL_FLASH = "gemini-3.1-flash-lite"
 
 
 def classify_query_complexity(
@@ -292,7 +294,7 @@ async def extract_text_from_image_b64(img_b64: str) -> str:
     )
     contents = [_make_image_part(img_b64), prompt]
     try:
-        response = await _client.aio.models.generate_content(model=MODEL_LITE, contents=contents)
+        response = await _client.aio.models.generate_content(model=MODEL_FLASH, contents=contents)
         extracted = (response.text or "").strip()
         logger.info(f"OCR extracted {len(extracted)} chars from image")
         return extracted
@@ -692,8 +694,8 @@ async def generate_page_summary(
     )
     contents.append(prompt)
     
-    model_name = MODEL_LITE
-    
+    model_name = MODEL_FLASH
+
     try:
         async for chunk in await _client.aio.models.generate_content_stream(
             model=model_name, contents=contents
@@ -973,7 +975,7 @@ async def validate_answer(
     )
 
     response = await _client.aio.models.generate_content(
-        model=MODEL_LITE,
+        model=MODEL_FLASH,
         contents=prompt,
         config=types.GenerateContentConfig(response_mime_type="application/json"),
     )
@@ -1119,8 +1121,7 @@ async def quiz_followup_chat(
     Streams a follow-up explanation after a revision quiz question has been answered
     and graded. The student can ask clarification questions to deepen understanding.
 
-    Uses MODEL_LITE (Flash Lite) — these are short conversational clarifications that
-    don't warrant the heavier Flash model.
+    Uses MODEL_FLASH — explaining concepts benefits from the smarter model.
     """
     context_block = ""
     if raw_text and raw_text.strip():
@@ -1152,7 +1153,7 @@ async def quiz_followup_chat(
 
     try:
         async for chunk in await _client.aio.models.generate_content_stream(
-            model=MODEL_LITE,
+            model=MODEL_FLASH,
             contents=[prompt],
         ):
             text = chunk.text

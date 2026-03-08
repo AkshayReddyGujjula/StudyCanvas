@@ -12,10 +12,8 @@ export default function ModelIndicator({ model }: { model?: string }) {
 
     if (!model) return null
 
-    // Shorten display name: "gemini-2.5-flash-lite" → "2.5 flash-lite"
-    const short = model
-        .replace('gemini-', '')
-        .replace(/-/, ' ')
+    // Shorten display name: "gemini-3.1-flash-lite" → "3.1-flash-lite", "gemini-2.5-flash-lite" → "2.5-flash-lite"
+    const short = model.replace('gemini-', '')
 
     const handleMouseEnter = () => {
         if (ref.current) {

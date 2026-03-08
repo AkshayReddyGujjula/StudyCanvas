@@ -113,7 +113,7 @@ export interface QuizQuestionNodeData {
 
 // ─── Left Toolbar Node types ─────────────────────────────────────────────────
 
-export type PromptModel = 'gemini-2.5-flash' | 'gemini-2.5-flash-lite'
+export type PromptModel = 'gemini-3.1-flash-lite' | 'gemini-2.5-flash-lite'
 
 export interface CustomPromptNodeData {
     chatHistory: ChatMessage[]
@@ -232,7 +232,7 @@ export interface TranscriptionNodeData {
 }
 // ─── Whiteboard / Drawing types ──────────────────────────────────────────────
 
-export type WhiteboardTool = 'cursor' | 'pen1' | 'pen2' | 'highlighter' | 'eraser' | 'text'
+export type WhiteboardTool = 'cursor' | 'pen1' | 'pen2' | 'highlighter' | 'eraser' | 'text' | 'lasso'
 
 export type EraserMode = 'stroke' | 'area'
 
@@ -309,6 +309,7 @@ export type WhiteboardUndoAction =
     | { type: 'removeStrokes'; strokes: DrawingStroke[] }
     | { type: 'addText'; nodeId: string }
     | { type: 'removeText'; nodeId: string; nodeSnapshot: Record<string, unknown> }
+    | { type: 'moveStrokes'; before: DrawingStroke[]; after: DrawingStroke[] }
 
 export const DEFAULT_TOOL_SETTINGS: ToolSettings = {
     pen1: { color: '#000000', width: 3 },

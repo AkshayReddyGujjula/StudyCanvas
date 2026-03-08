@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
+import { useState, useCallback, useEffect, useRef, useMemo, type MouseEvent as ReactMouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import {
     ReactFlow,
@@ -893,6 +893,14 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
         }
     }, [])
 
+    // ── MiniMap node click → center viewport on that node (same zoom) ──────
+    const handleMinimapNodeClick = useCallback((_: ReactMouseEvent, node: Node) => {
+        const { zoom } = getViewport()
+        const w = node.measured?.width ?? 200
+        const h = node.measured?.height ?? 100
+        setCenter(node.position.x + w / 2, node.position.y + h / 2, { zoom, duration: 600 })
+    }, [getViewport, setCenter])
+
     // ── Left Toolbar node spawning ──────────────────────────────────────────
     const getViewportCenter = useCallback(() => {
         const container = containerRef.current
@@ -918,7 +926,7 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
                 isStreaming: false,
                 status: 'unread',
                 useContext: true,
-                selectedModel: 'gemini-2.5-flash',
+                selectedModel: 'gemini-3.1-flash-lite',
                 pageIndex: currentPage,
             } as unknown as Record<string, unknown>,
             style: { width: 440, height: 380 },
@@ -2134,7 +2142,7 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
     const getStrugglingPayload = useCallback(() => {
         return nodes
             .filter((n) => {
-                const status = (n.data as any)?.status
+                const status = (n.data as unknown as { status?: string })?.status
                 return status === 'struggling' && (
                     n.type === 'answerNode' ||
                     n.type === 'quizQuestionNode' ||
@@ -2200,7 +2208,7 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
         setShowRevisionMenu(false)
         if (!fileData) return
 
-        let payload: any[] = []
+        let payload: { highlighted_text: string; question: string; answer: string; page_index?: number }[] = []
         let pageContent: string | undefined = undefined;
         let pIndex: number | undefined = undefined;
 
@@ -2705,7 +2713,7 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
                         const selectChanges = changes.filter((c) => c.type === 'select')
                         if (selectChanges.length > 0) {
                             setNodes((prev) => {
-                                let next = [...prev]
+                                const next = [...prev]
                                 for (const change of selectChanges) {
                                     if (change.type === 'select') {
                                         const idx = next.findIndex((n) => n.id === change.id)
@@ -2835,6 +2843,8 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
                             maskColor="rgba(148,163,184,0.18)"
                             pannable
                             zoomable
+                            onNodeClick={handleMinimapNodeClick}
+                            style={{ cursor: 'default' }}
                         />,
                         document.body
                     )}

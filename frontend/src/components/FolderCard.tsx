@@ -5,11 +5,14 @@ import type { FolderMeta } from '../types'
 interface Props {
     folder: FolderMeta
     onOpen: () => void
+    /** Select this card (single-click), receives the mouse event for modifier key detection */
+    onSelect: (e: React.MouseEvent) => void
+    isSelected?: boolean
     onDragStart: (e: React.DragEvent) => void
     onDropItem: (e: React.DragEvent) => void
 }
 
-export default function FolderCard({ folder, onOpen, onDragStart, onDropItem }: Props) {
+export default function FolderCard({ folder, onOpen, onSelect, isSelected, onDragStart, onDropItem }: Props) {
     const renameFolder = useAppStore((s) => s.renameFolder)
     const removeFolder = useAppStore((s) => s.removeFolder)
     const [showMenu, setShowMenu] = useState(false)
@@ -90,10 +93,12 @@ export default function FolderCard({ folder, onOpen, onDragStart, onDropItem }: 
                 className={`group relative bg-white rounded-xl border shadow-sm hover:shadow-md transition-all cursor-pointer ${
                     isDragOver
                         ? 'border-primary-400 bg-primary-50 ring-2 ring-primary-200'
-                        : 'border-gray-200'
+                        : isSelected
+                            ? 'border-indigo-400 ring-2 ring-indigo-200 bg-indigo-50'
+                            : 'border-gray-200'
                 }`}
                 onDoubleClick={() => !isRenaming && onOpen()}
-                onClick={() => !isRenaming && onOpen()}
+                onClick={(e) => !isRenaming && onSelect(e)}
             >
                 {/* Folder icon area */}
                 <div className="h-36 bg-primary-50 flex items-center justify-center rounded-t-xl">

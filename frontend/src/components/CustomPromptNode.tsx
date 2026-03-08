@@ -184,7 +184,7 @@ function CustomPromptNode({ id, data }: CustomPromptNodeProps) {
     }, [input, isLoading, data, fileData, userDetails, currentPage, pageMarkdowns, pdfArrayBuffer, updateNodeData, persistToLocalStorage, id])
 
     const toggleModel = useCallback(() => {
-        const newModel: PromptModel = data.selectedModel === 'gemini-2.5-flash' ? 'gemini-2.5-flash-lite' : 'gemini-2.5-flash'
+        const newModel: PromptModel = data.selectedModel === 'gemini-3.1-flash-lite' ? 'gemini-2.5-flash-lite' : 'gemini-3.1-flash-lite'
         updateNodeData(id, { selectedModel: newModel })
         persistToLocalStorage()
     }, [data.selectedModel, id, updateNodeData, persistToLocalStorage])
@@ -412,13 +412,13 @@ function CustomPromptNode({ id, data }: CustomPromptNodeProps) {
                     <button
                         type="button"
                         onClick={toggleModel}
-                        title={`Model: ${data.selectedModel === 'gemini-2.5-flash' ? 'Flash' : 'Lite'}`}
-                        className={`shrink-0 px-1.5 py-1 rounded text-[9px] font-bold tracking-wide border transition-all ${data.selectedModel === 'gemini-2.5-flash'
+                        title={`Model: ${data.selectedModel === 'gemini-3.1-flash-lite' ? 'Gemini 3.1 Flash Lite' : 'Gemini 2.5 Flash Lite'}`}
+                        className={`shrink-0 px-1.5 py-1 rounded text-[9px] font-bold tracking-wide border transition-all ${data.selectedModel !== 'gemini-2.5-flash-lite'
                             ? 'bg-indigo-100 text-indigo-700 border-indigo-300'
                             : 'bg-gray-100 text-gray-500 border-gray-300'
                             }`}
                     >
-                        {data.selectedModel === 'gemini-2.5-flash' ? '⚡ FLASH' : '💡 LITE'}
+                        {data.selectedModel === 'gemini-2.5-flash-lite' ? '2.5' : '3.1'}
                     </button>
                     <input
                         type="text"
