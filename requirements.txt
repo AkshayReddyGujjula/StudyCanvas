@@ -22,3 +22,18 @@ python-multipart>=0.0.20
 
 # Environment variable loading
 python-dotenv>=1.0.0
+
+# Office document conversion: .docx and .pptx → PDF
+# All pure-Python or wheel-only — no system binaries required on Vercel.
+python-docx>=1.1.0
+python-pptx>=1.0.0
+reportlab>=4.2.0
+# docx2pdf: uses Microsoft Office COM on Windows/macOS for exact "Save As PDF"
+# quality; falls back to LibreOffice on Linux. Fails gracefully if neither is
+# available (Vercel), where the ReportLab fallback is used instead.
+docx2pdf>=0.1.8
+# comtypes: pure-Python Windows COM automation — used by _try_powerpoint_com to
+# convert .pptx via PowerPoint "Save As PDF" (identical to manual export).
+# Safe to install on non-Windows: it's a no-op there. Not available on Vercel
+# (Linux), where the ReportLab fallback is used instead.
+comtypes>=1.4.0

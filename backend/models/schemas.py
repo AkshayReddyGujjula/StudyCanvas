@@ -10,6 +10,15 @@ class UploadResponse(BaseModel):
     pdf_id: Optional[str] = None
 
 
+class ConvertResponse(UploadResponse):
+    """
+    Returned by /api/convert-to-pdf.
+    Extends UploadResponse with the converted PDF encoded as base64 so the
+    browser's PDF viewer can display it without an extra round-trip.
+    """
+    pdf_data: str  # base64-encoded PDF bytes
+
+
 class UserDetails(BaseModel):
     name: str
     age: str

@@ -12,7 +12,7 @@ from rate_limiter import limiter
 
 load_dotenv()
 
-from routes import upload, query, quiz, page_quiz, flashcards, ocr, transcription, quiz_followup
+from routes import upload, query, quiz, page_quiz, flashcards, ocr, transcription, quiz_followup, convert
 
 logger = logging.getLogger(__name__)
 app = FastAPI(title="StudyCanvas API")
@@ -50,6 +50,7 @@ app.include_router(flashcards.router, prefix="/api")
 app.include_router(ocr.router, prefix="/api")
 app.include_router(transcription.router, prefix="/api")
 app.include_router(quiz_followup.router, prefix="/api")
+app.include_router(convert.router, prefix="/api")
 
 
 @app.get("/api/health")

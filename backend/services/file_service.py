@@ -23,6 +23,20 @@ async def save_temp_file(file: UploadFile) -> str:
     return tmp_path
 
 
+def save_bytes_as_temp(data: bytes, suffix: str = ".pdf") -> str:
+    """
+    Write raw bytes to a temporary file and return its path.
+    Designed to be called from asyncio.to_thread (synchronous, non-blocking at call site).
+    """
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=suffix)
+    try:
+        with os.fdopen(tmp_fd, "wb") as tmp:
+            tmp.write(data)
+    except Exception:
+        raise
+    return tmp_path
+
+
 def delete_file(path: str) -> None:
     """
     Deletes the file at the given path.

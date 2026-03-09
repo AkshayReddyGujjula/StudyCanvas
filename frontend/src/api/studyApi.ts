@@ -1,5 +1,5 @@
 import axios from 'axios'
-import type { UploadResponse, QuizQuestion, QuizNodeInput, ValidateAnswerResponse } from '../types'
+import type { UploadResponse, ConvertResponse, QuizQuestion, QuizNodeInput, ValidateAnswerResponse } from '../types'
 import { extractPdfPagesText } from '../utils/pdfTextExtractor'
 import { useUsageStore } from '../store/usageStore'
 
@@ -85,6 +85,21 @@ export const uploadPdf = async (file: File): Promise<UploadResponse> => {
     const response = await api.post<UploadResponse>('/api/upload-text', {
         pages,
         filename: file.name,
+    })
+    return response.data
+}
+
+/**
+ * Upload a .docx or .pptx file to /api/convert-to-pdf.
+ * The backend converts it to a text-selectable PDF and returns:
+ *   - All standard UploadResponse fields (for AI features)
+ *   - pdf_data: base64-encoded PDF bytes (for the PDF viewer)
+ */
+export const uploadDocFile = async (file: File): Promise<ConvertResponse> => {
+    const formData = new FormData()
+    formData.append('file', file)
+    const response = await api.post<ConvertResponse>('/api/convert-to-pdf', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
     })
     return response.data
 }

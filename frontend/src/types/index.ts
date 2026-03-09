@@ -55,6 +55,11 @@ export interface UploadResponse {
     pdf_id?: string
 }
 
+/** Returned by /api/convert-to-pdf — extends UploadResponse with the PDF binary */
+export interface ConvertResponse extends UploadResponse {
+    pdf_data: string  // base64-encoded PDF bytes
+}
+
 export interface QuizQuestion {
     question: string
     question_type: 'short_answer' | 'mcq'
