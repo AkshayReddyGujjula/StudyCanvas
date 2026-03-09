@@ -244,16 +244,15 @@ export default function DrawingCanvas() {
         const sh = (maxY - minY) * vp.zoom
 
         ctx.save()
-        ctx.fillStyle = 'rgba(59, 130, 246, 0.06)'
+        ctx.fillStyle = 'rgba(59, 130, 246, 0.12)'
         ctx.fillRect(sx, sy, sw, sh)
         ctx.strokeStyle = '#3B82F6'
-        ctx.lineWidth = 1.5
-        ctx.setLineDash([6, 3])
+        ctx.lineWidth = 2
+        ctx.setLineDash([])
         ctx.strokeRect(sx, sy, sw, sh)
         // Corner handles
-        const hs = 6
+        const hs = 8
         ctx.fillStyle = '#3B82F6'
-        ctx.setLineDash([])
         for (const [cx, cy] of [[sx, sy], [sx + sw, sy], [sx, sy + sh], [sx + sw, sy + sh]] as [number, number][]) {
             ctx.fillRect(cx - hs / 2, cy - hs / 2, hs, hs)
         }
@@ -666,7 +665,7 @@ export default function DrawingCanvas() {
             const size = Math.max(toolSettings.eraser.width, 8)
             const svg = [
                 `<svg xmlns='http://www.w3.org/2000/svg' width='${size}' height='${size}' viewBox='0 0 ${size} ${size}'>`,
-                `<circle cx='${size / 2}' cy='${size / 2}' r='${size / 2 - 1}' fill='rgba(255,255,255,0.3)' stroke='%23555' stroke-width='1.5' stroke-dasharray='3,2'/>`,
+                `<circle cx='${size / 2}' cy='${size / 2}' r='${size / 2 - 1}' fill='rgba(255,255,255,0.3)' stroke='#555' stroke-width='1.5' stroke-dasharray='3,2'/>`,
                 `</svg>`,
             ].join('')
             return `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${size / 2} ${size / 2}, auto`
@@ -677,11 +676,10 @@ export default function DrawingCanvas() {
             const color = settings.color
             const dotSize = Math.max(6, Math.min(settings.width, 32))
             const r = dotSize / 2
-            const hexColor = color.replace('#', '%23')
             const opacity = tool === 'highlighter' ? toolSettings.highlighter.opacity : 1
             const svg = [
                 `<svg xmlns='http://www.w3.org/2000/svg' width='${dotSize}' height='${dotSize}' viewBox='0 0 ${dotSize} ${dotSize}'>`,
-                `<circle cx='${r}' cy='${r}' r='${r - 0.5}' fill='${hexColor}' fill-opacity='${opacity}' stroke='%23ffffff' stroke-width='1'/>`,
+                `<circle cx='${r}' cy='${r}' r='${r - 0.5}' fill='${color}' fill-opacity='${opacity}' stroke='#ffffff' stroke-width='1'/>`,
                 `</svg>`,
             ].join('')
             return `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${r} ${r}, crosshair`

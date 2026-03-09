@@ -185,16 +185,9 @@ body.rf-connecting .react-flow__node .nodrag * {
   fill: rgba(0, 0, 0, 0.6);
 }
 
-/* Clickable minimap nodes show a pointer cursor and enlarge slightly on hover */
+/* Clickable minimap nodes show a pointer cursor */
 .react-flow__minimap-node {
   cursor: pointer;
-  transform-box: fill-box;
-  transform-origin: center;
-  transition: transform 0.15s ease;
-}
-
-.react-flow__minimap-node:hover {
-  transform: scale(1.35);
 }
 
 /* ReactFlow edge labels */
