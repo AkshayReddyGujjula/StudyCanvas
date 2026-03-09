@@ -31,6 +31,7 @@ import SummaryNode from './SummaryNode'
 import VoiceNoteNode from './VoiceNoteNode'
 import TranscriptionNode from './TranscriptionNode'
 import CodeEditorNode from './CodeEditorNode'
+import CalculatorNode from './CalculatorNode'
 import LeftToolbar from './LeftToolbar'
 import AskGeminiPopup from './AskGeminiPopup'
 import QuestionModal from './QuestionModal'
@@ -47,7 +48,7 @@ import type { AnswerNodeData, QuizQuestionNodeData, FlashcardNodeData, TextNodeD
 import { pdf } from '@react-pdf/renderer'
 import { buildQATree } from '../utils/buildQATree'
 import StudyNotePDF from './StudyNotePDF'
-import type { StickyNoteEntry, CustomPromptEntry, ImageEntry, SummaryEntry } from './StudyNotePDF'
+import type { StickyNoteEntry, CustomPromptEntry, ImageEntry, SummaryEntry, CodeEntry } from './StudyNotePDF'
 import { exportCurrentPage, exportAllPages, isExportInProgress, pageHasContent } from '../utils/canvasExport'
 import { CanvasCallbackContext } from './CanvasCallbackContext'
 
@@ -78,6 +79,7 @@ function computeNodeColor(node: Node): string {
             return '#EF4444'
         }
         case 'codeEditorNode':
+        case 'calculatorNode':
             return '#2D9CDB'
         case 'voiceNoteNode':
         case 'transcriptionNode':
@@ -105,6 +107,7 @@ const NODE_TYPES = {
     voiceNoteNode: VoiceNoteNode,
     transcriptionNode: TranscriptionNode,
     codeEditorNode: CodeEditorNode,
+    calculatorNode: CalculatorNode,
 }
 
 // StudyCanvas Minimalist Colour Palette
@@ -981,6 +984,26 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
         persistToLocalStorage()
     }, [getViewportCenter, currentPage, nodes, setNodes, persistToLocalStorage])
 
+    const handleSpawnCalculator = useCallback(() => {
+        const center = getViewportCenter()
+        const pos = findNonOverlappingPosition(center, 260, 360, nodes)
+        const nodeId = `calculator-${Date.now()}`
+        const newNode: Node = {
+            id: nodeId,
+            type: 'calculatorNode',
+            position: pos,
+            data: {
+                isPinned: false,
+                isMinimized: false,
+                isScientific: false,
+                pageIndex: currentPage,
+            } as unknown as Record<string, unknown>,
+            style: { width: 260 },
+        }
+        setNodes((prev) => [...prev, newNode])
+        persistToLocalStorage()
+    }, [getViewportCenter, currentPage, nodes, setNodes, persistToLocalStorage])
+
     const handleSpawnStickyNote = useCallback(() => {
         const center = getViewportCenter()
         const nodeWidth = 260
@@ -1815,6 +1838,47 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
                     ? pm.slice(Math.max(0, cpIdx - 2), cpIdx + 1).join('\n')
                     : (fileData.raw_text ?? '').slice(0, 50000)
 
+                // ── Include full text of the source node as additional context ────
+                // When the user highlights text from within a canvas node (answer,
+                // sticky note, summary, transcription, code, custom prompt), append
+                // that node's full content so Gemini has richer, more personalised
+                // context beyond just the selected snippet.
+                let nodeContextText: string | null = null
+                if (parentNode && sourceNodeId !== contentNodeId) {
+                    const nd = parentNode.data as unknown as Record<string, unknown>
+                    switch (parentNode.type) {
+                        case 'stickyNoteNode':
+                            nodeContextText = (nd.content as string | null) ?? null
+                            break
+                        case 'summaryNode':
+                            nodeContextText = (nd.summary as string | null) ?? null
+                            break
+                        case 'transcriptionNode':
+                            nodeContextText = (nd.text as string | null) ?? null
+                            break
+                        case 'codeEditorNode':
+                            if (nd.code) nodeContextText = `[Code — ${String(nd.language ?? 'code')}]\n${String(nd.code)}`
+                            break
+                        case 'customPromptNode': {
+                            const hist = (nd.chatHistory as ChatMessage[]) ?? []
+                            if (hist.length > 0) {
+                                nodeContextText = hist
+                                    .map((m) => `${m.role === 'user' ? 'User' : 'AI'}: ${m.content}`)
+                                    .join('\n')
+                            }
+                            break
+                        }
+                        // answerNode is already handled via parentResponse above
+                        default:
+                            break
+                    }
+                }
+
+                // Prepend node context to the scoped page markdown when available
+                const enrichedContext = nodeContextText
+                    ? `[Context from canvas node]\n${nodeContextText}\n\n---\n${scopedContext}`
+                    : scopedContext
+
                 // ── Capture full canvas screenshot for vision AI context ─────────
                 // Always take a screenshot regardless of question type so Gemini can
                 // read handwritten notes, whiteboard strokes, and canvas annotations
@@ -1863,7 +1927,7 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
                     {
                         question,
                         highlighted_text: selectedText,
-                        raw_text: scopedContext,
+                        raw_text: enrichedContext,
                         parent_response: parentResponse,
                         user_details: userDetails,
                         image_base64: canvasScreenshotBase64,
@@ -2445,9 +2509,23 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
             })
             .filter((s) => s.summary.trim().length > 0)
 
+        // Extract code editor nodes
+        const codeEntries: CodeEntry[] = nodes
+            .filter((n) => n.type === 'codeEditorNode')
+            .map((n) => {
+                const d = n.data as unknown as { title?: string; language?: string; code?: string; pageIndex?: number }
+                return {
+                    title: d.title?.trim() || 'Untitled Snippet',
+                    language: d.language ?? 'code',
+                    code: d.code ?? '',
+                    pageIndex: d.pageIndex,
+                }
+            })
+            .filter((c) => c.code.trim().length > 0)
+
         const hasContent = qaTree.length > 0 || pageQuizzes.length > 0 ||
             stickyNotes.length > 0 || customPrompts.length > 0 ||
-            imageEntries.length > 0 || summaryEntries.length > 0
+            imageEntries.length > 0 || summaryEntries.length > 0 || codeEntries.length > 0
 
         if (!hasContent) {
             showToast('Nothing to export — add some content first!')
@@ -2492,6 +2570,7 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
                     customPrompts={customPrompts}
                     images={imageEntries}
                     summaries={summaryEntries}
+                    codeEntries={codeEntries}
                     filename={fileData?.filename ?? 'Document'}
                     exportDate={exportDate}
                     totalQuestions={qaTree.length}
@@ -2974,6 +3053,7 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
                     onAddImage={handleSpawnImage}
                     onCustomFlashcard={handleSpawnCustomFlashcard}
                     onCodeEditor={handleSpawnCodeEditor}
+                    onCalculator={handleSpawnCalculator}
                     onStickyNote={handleSpawnStickyNote}
                     onVoiceNote={handleSpawnVoiceNote}
                     onTimer={handleSpawnTimer}

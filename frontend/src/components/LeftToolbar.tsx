@@ -6,6 +6,7 @@ interface LeftToolbarProps {
     onAddImage: (dataUrl: string, fileName: string) => void
     onCustomFlashcard: () => void
     onCodeEditor: () => void
+    onCalculator: () => void
     onStickyNote: () => void
     onVoiceNote: () => void
     onTimer: () => void
@@ -42,6 +43,7 @@ export default function LeftToolbar({
     onAddImage,
     onCustomFlashcard,
     onCodeEditor,
+    onCalculator,
     onStickyNote,
     onVoiceNote,
     onTimer,
@@ -171,6 +173,20 @@ export default function LeftToolbar({
                     <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <polyline points="16 18 22 12 16 6" />
                         <polyline points="8 6 2 12 8 18" />
+                    </svg>
+                </button>
+
+                {/* Calculator */}
+                <button onClick={onCalculator} className={btnClass} title="Calculator">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="4" y="2" width="16" height="20" rx="2" />
+                        <line x1="8" y1="6" x2="16" y2="6" />
+                        <line x1="8" y1="10" x2="10" y2="10" />
+                        <line x1="14" y1="10" x2="16" y2="10" />
+                        <line x1="8" y1="14" x2="10" y2="14" />
+                        <line x1="14" y1="14" x2="16" y2="14" />
+                        <line x1="8" y1="18" x2="10" y2="18" />
+                        <line x1="14" y1="18" x2="16" y2="18" />
                     </svg>
                 </button>
 

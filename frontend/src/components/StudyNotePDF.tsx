@@ -37,6 +37,13 @@ export interface SummaryEntry {
     sourcePage: number
 }
 
+export interface CodeEntry {
+    title: string
+    language: string
+    code: string
+    pageIndex?: number
+}
+
 // Use only built-in fonts — no network requests, instant render
 Font.registerHyphenationCallback((w) => [w])
 
@@ -677,6 +684,60 @@ const s = StyleSheet.create({
         textTransform: 'uppercase' as const,
         marginBottom: 6,
     },
+
+    // ── code snippets section ──
+    codeSectionHeader: {
+        fontFamily: 'Helvetica-Bold',
+        fontSize: 13,
+        color: '#0F766E',
+        marginBottom: 10,
+        marginTop: 16,
+        paddingBottom: 6,
+        borderBottomWidth: 1.5,
+        borderBottomColor: '#A3BBD3',
+    },
+    codeBlock: {
+        marginBottom: 16,
+        borderRadius: 4,
+        overflow: 'hidden' as const,
+    },
+    codeBlockHeader: {
+        backgroundColor: '#1a1a2e',
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+        flexDirection: 'row' as const,
+        alignItems: 'center' as const,
+        justifyContent: 'space-between' as const,
+    },
+    codeBlockTitle: {
+        fontFamily: 'Helvetica-Bold',
+        fontSize: 9,
+        color: '#67E8F9',
+    },
+    codeBlockLang: {
+        fontSize: 8,
+        color: '#6B7280',
+        fontFamily: 'Helvetica-Bold',
+        textTransform: 'uppercase' as const,
+        letterSpacing: 0.8,
+    },
+    codePageLabel: {
+        fontSize: 7.5,
+        color: '#6B7280',
+        fontFamily: 'Helvetica-Bold',
+        marginBottom: 3,
+    },
+    codeContent: {
+        backgroundColor: '#12122a',
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+    },
+    codeLine: {
+        fontFamily: 'Courier',
+        fontSize: 8,
+        color: '#E2E8F0',
+        lineHeight: 1.55,
+    },
 })
 
 // ─── Markdown → PDF helpers ──────────────────────────────────────────────────
@@ -1174,6 +1235,40 @@ function SummarySection({ summaries }: { summaries: SummaryEntry[] }) {
     )
 }
 
+// ─── Code Snippets Section ────────────────────────────────────────────────────
+
+function CodeSection({ codeEntries }: { codeEntries: CodeEntry[] }) {
+    if (!codeEntries || codeEntries.length === 0) return null
+    return (
+        <View>
+            <Text style={s.codeSectionHeader}>Code Snippets</Text>
+            {codeEntries.map((entry, idx) => (
+                <View key={idx} style={s.codeBlock} wrap={false}>
+                    <View style={s.codeBlockHeader}>
+                        <Text style={s.codeBlockTitle}>{entry.title || 'Untitled Snippet'}</Text>
+                        <Text style={s.codeBlockLang}>{entry.language}</Text>
+                    </View>
+                    {entry.pageIndex != null && (
+                        <Text style={[s.codePageLabel, { paddingHorizontal: 10, paddingTop: 4, backgroundColor: '#1a1a2e' }]}>
+                            Page {entry.pageIndex}
+                        </Text>
+                    )}
+                    <View style={s.codeContent}>
+                        {entry.code.split('\n').map((line, li) => {
+                            // react-pdf collapses leading whitespace; replace with non-breaking spaces
+                            const content = line === ''
+                                ? '\u00A0'
+                                : line.replace(/^[ \t]+/, (m) =>
+                                    m.replace(/ /g, '\u00A0').replace(/\t/g, '\u00A0\u00A0\u00A0\u00A0'))
+                            return <Text key={li} style={s.codeLine}>{content}</Text>
+                        })}
+                    </View>
+                </View>
+            ))}
+        </View>
+    )
+}
+
 // ─── Document ────────────────────────────────────────────────────────────────
 
 interface Props {
@@ -1183,6 +1278,7 @@ interface Props {
     customPrompts?: CustomPromptEntry[]
     images?: ImageEntry[]
     summaries?: SummaryEntry[]
+    codeEntries?: CodeEntry[]
     filename: string
     exportDate: string
     totalQuestions: number
@@ -1196,6 +1292,7 @@ export default function StudyNotePDF({
     customPrompts = [],
     images = [],
     summaries = [],
+    codeEntries = [],
     filename,
     exportDate,
     totalQuestions,
@@ -1265,6 +1362,9 @@ export default function StudyNotePDF({
                         {summaries.length > 0 && (
                             <Text style={s.coverTag}>{summaries.length} Summaries</Text>
                         )}
+                        {codeEntries.length > 0 && (
+                            <Text style={s.coverTag}>{codeEntries.length} Code Snippets</Text>
+                        )}
                     </View>
                 </View>
 
@@ -1285,8 +1385,11 @@ export default function StudyNotePDF({
                 {/* Uploaded Images — after quizzes */}
                 <ImagesSection images={images} />
 
-                {/* Page Summaries — at the very end */}
+                {/* Page Summaries */}
                 <SummarySection summaries={summaries} />
+
+                {/* Code Snippets — at the very end */}
+                <CodeSection codeEntries={codeEntries} />
             </Page>
         </Document>
     )

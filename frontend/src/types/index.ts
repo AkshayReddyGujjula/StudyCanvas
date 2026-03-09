@@ -257,6 +257,14 @@ export interface CodeEditorNodeData {
     savedWidth?: number
     savedHeight?: number
 }
+export interface CalculatorNodeData {
+    isPinned?: boolean
+    isMinimized?: boolean
+    pageIndex?: number
+    isScientific?: boolean
+    lastResult?: string  // shown when minimized
+}
+
 // ─── Whiteboard / Drawing types ──────────────────────────────────────────────
 
 export type WhiteboardTool = 'cursor' | 'pen1' | 'pen2' | 'highlighter' | 'eraser' | 'text' | 'lasso'

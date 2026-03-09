@@ -200,45 +200,55 @@ export function generateTutorialPdf(): ArrayBuffer {
         return y + lines.length * (size * 0.4 + 1.2) + 1
     }
 
-    // Helper: add a callout box
+    // Helper: add a callout box (no emoji in text — jsPDF Helvetica doesn't support them)
     function calloutBox(text: string, y: number, bgColor: [number, number, number], textColor: [number, number, number]): number {
-        const lines = doc.splitTextToSize(text, BODY_W - 8) as string[]
-        const boxH = lines.length * 5 + 8
-        doc.setFillColor(...bgColor)
-        doc.roundedRect(ML, y, BODY_W, boxH, 2, 2, 'F')
         doc.setFontSize(9)
         doc.setFont('helvetica', 'italic')
+        const lines = doc.splitTextToSize(text, BODY_W - 12) as string[]
+        const lineH = 5.2
+        const boxH = lines.length * lineH + 10
+        doc.setFillColor(...bgColor)
+        doc.roundedRect(ML, y, BODY_W, boxH, 2, 2, 'F')
         doc.setTextColor(...textColor)
-        doc.text(lines, ML + 4, y + 6)
+        doc.text(lines, ML + 6, y + 7, { lineHeightFactor: 1.4 })
         doc.setTextColor(30, 30, 30)
         return y + boxH + 4
     }
 
-    // Helper: simple two-column table
+    // Helper: simple multi-column table with dynamic row heights
     function miniTable(headers: string[], rows: string[][], y: number): number {
         const colW = BODY_W / headers.length
+        const cellPadX = 2
+        const headerH = 7
+        const lineH = 4.5
+        const cellPadY = 5
         // Header row
         doc.setFillColor(237, 233, 254)
-        doc.rect(ML, y, BODY_W, 7, 'F')
+        doc.rect(ML, y, BODY_W, headerH, 'F')
         doc.setFontSize(8.5)
         doc.setFont('helvetica', 'bold')
         doc.setTextColor(79, 70, 229)
-        headers.forEach((h, i) => doc.text(h, ML + i * colW + 2, y + 5))
-        y += 7
-        // Data rows
+        headers.forEach((h, i) => doc.text(h, ML + i * colW + cellPadX, y + cellPadY))
+        y += headerH
+        // Data rows — use dynamic row height based on max lines in any cell
         doc.setFont('helvetica', 'normal')
         doc.setTextColor(60, 60, 60)
         rows.forEach((row, ri) => {
+            // Calculate how many lines each cell needs
+            const cellLineArrays = row.map((cell) =>
+                doc.splitTextToSize(cell, colW - cellPadX * 2) as string[]
+            )
+            const maxLines = Math.max(...cellLineArrays.map((l) => l.length))
+            const rowH = Math.max(7, maxLines * lineH + 4)
             if (ri % 2 === 1) {
                 doc.setFillColor(248, 248, 252)
-                doc.rect(ML, y, BODY_W, 7, 'F')
+                doc.rect(ML, y, BODY_W, rowH, 'F')
             }
-            row.forEach((cell, ci) => {
-                const cellLines = doc.splitTextToSize(cell, colW - 4) as string[]
-                doc.setFontSize(8.5)
-                doc.text(cellLines, ML + ci * colW + 2, y + 5)
+            doc.setFontSize(8.5)
+            cellLineArrays.forEach((cellLines, ci) => {
+                doc.text(cellLines, ML + ci * colW + cellPadX, y + cellPadY - (maxLines > 1 ? 1 : 0))
             })
-            y += 7
+            y += rowH
         })
         return y + 4
     }
@@ -271,7 +281,7 @@ export function generateTutorialPdf(): ArrayBuffer {
     y = sectionHeading('Why Highlighting Fails', y)
     y = bodyText("Many students rely on highlighting and re-reading. These create a feeling of familiarity that is often mistaken for knowledge. When exam day arrives the material hasn't been memorised — it just feels familiar.", y)
     y += 3
-    y = calloutBox('💡 Try this now: Select any text in this card and click the Ask Gemini button that appears to get an instant AI explanation!', y, [238, 242, 255], [55, 48, 163])
+    y = calloutBox('TRY THIS: Select any text in this card and click the Ask Gemini button that appears to get an instant AI explanation!', y, [238, 242, 255], [55, 48, 163])
 
     // Page footer
     doc.setFontSize(8)
@@ -316,7 +326,7 @@ export function generateTutorialPdf(): ArrayBuffer {
     y = sectionHeading('The 80/20 Rule in Studying', y, [16, 122, 87])
     y = bodyText('80% of exam results come from 20% of the material. Identify the high-yield 20% early by reviewing past exam papers, tracking topics you mark as Struggling in quiz nodes, and asking the AI for the most frequently tested concepts.', y)
     y += 3
-    y = calloutBox('💡 Try this now: Click "Test me on this page" at the bottom of this card to generate AI quiz questions!', y, [240, 253, 244], [21, 128, 61])
+    y = calloutBox('TRY THIS: Click "Test me on this page" at the bottom of this card to generate AI quiz questions!', y, [240, 253, 244], [21, 128, 61])
 
     doc.setFontSize(8)
     doc.setTextColor(160, 160, 160)
@@ -364,7 +374,7 @@ export function generateTutorialPdf(): ArrayBuffer {
         y,
     )
     y += 2
-    calloutBox('💡 Try this now: Use the Timer button on the left toolbar to add a Pomodoro timer to your canvas!', y, [255, 251, 235], [146, 64, 14])
+    calloutBox('TRY THIS: Use the Timer button on the left toolbar to add a Pomodoro timer to your canvas!', y, [255, 251, 235], [146, 64, 14])
 
     doc.setFontSize(8)
     doc.setTextColor(160, 160, 160)
