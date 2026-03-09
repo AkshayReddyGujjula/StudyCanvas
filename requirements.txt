@@ -31,9 +31,6 @@ reportlab>=4.2.0
 # docx2pdf: uses Microsoft Office COM on Windows/macOS for exact "Save As PDF"
 # quality; falls back to LibreOffice on Linux. Fails gracefully if neither is
 # available (Vercel), where the ReportLab fallback is used instead.
+# On Windows, docx2pdf brings in pywin32 as a dependency — _try_powerpoint_com
+# uses win32com.client + pythoncom.CoInitialize() from that same package.
 docx2pdf>=0.1.8
-# comtypes: pure-Python Windows COM automation — used by _try_powerpoint_com to
-# convert .pptx via PowerPoint "Save As PDF" (identical to manual export).
-# Safe to install on non-Windows: it's a no-op there. Not available on Vercel
-# (Linux), where the ReportLab fallback is used instead.
-comtypes>=1.4.0

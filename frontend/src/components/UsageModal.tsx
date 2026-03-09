@@ -76,8 +76,10 @@ function formatBucketLabel(ts: number, bucketMs: number): string {
 
 function formatY(value: number, metric: Metric): string {
     if (metric === 'cost') {
-        if (value < 0.001) return `$${(value * 1000).toFixed(3)}m`
-        return `$${value.toFixed(4)}`
+        if (value === 0) return '$0'
+        if (value < 0.0001) return `$${value.toFixed(6)}`
+        if (value < 0.01)   return `$${value.toFixed(4)}`
+        return `$${value.toFixed(2)}`
     }
     if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
     if (value >= 1_000)     return `${(value / 1_000).toFixed(1)}k`
@@ -91,8 +93,9 @@ function calcCost(entries: UsageEntry[]): number {
 
 function formatCost(cost: number): string {
     if (cost === 0) return '$0.00'
-    if (cost < 0.001) return `$${(cost * 1000).toFixed(3)}m`
-    return `$${cost.toFixed(4)}`
+    if (cost < 0.0001) return `$${cost.toFixed(6)}`
+    if (cost < 0.01)   return `$${cost.toFixed(4)}`
+    return `$${cost.toFixed(2)}`
 }
 
 function formatTokens(n: number): string {
@@ -107,11 +110,9 @@ interface Props { onClose: () => void }
 
 export default function UsageModal({ onClose }: Props) {
     const entries = useUsageStore(s => s.entries)
-    const clearAll = useUsageStore(s => s.clearAll)
 
-    const [range, setRange]     = useState<TimeRange>('7d')
-    const [metric, setMetric]   = useState<Metric>('input')
-    const [showClear, setShowClear] = useState(false)
+    const [range, setRange]   = useState<TimeRange>('7d')
+    const [metric, setMetric] = useState<Metric>('input')
 
     // ── Filter entries to selected range ──────────────────────────────────────
     const rangeConfig = TIME_RANGES.find(r => r.key === range)!
@@ -424,41 +425,15 @@ export default function UsageModal({ onClose }: Props) {
                         </div>
                         <div className="flex gap-2">
                             {hasData && (
-                                <>
-                                    <button
-                                        onClick={exportCsv}
-                                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-600 border border-gray-200 rounded-md hover:bg-gray-50 transition-colors"
-                                    >
-                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-                                        </svg>
-                                        Export CSV
-                                    </button>
-                                    {!showClear ? (
-                                        <button
-                                            onClick={() => setShowClear(true)}
-                                            className="px-3 py-1.5 text-xs text-red-500 border border-red-100 rounded-md hover:bg-red-50 transition-colors"
-                                        >
-                                            Clear All Data
-                                        </button>
-                                    ) : (
-                                        <div className="flex items-center gap-1.5">
-                                            <span className="text-xs text-gray-500">Are you sure?</span>
-                                            <button
-                                                onClick={() => { clearAll(); setShowClear(false) }}
-                                                className="px-3 py-1.5 text-xs text-white bg-red-500 rounded-md hover:bg-red-600 transition-colors"
-                                            >
-                                                Yes, clear
-                                            </button>
-                                            <button
-                                                onClick={() => setShowClear(false)}
-                                                className="px-3 py-1.5 text-xs text-gray-600 border border-gray-200 rounded-md hover:bg-gray-50 transition-colors"
-                                            >
-                                                Cancel
-                                            </button>
-                                        </div>
-                                    )}
-                                </>
+                                <button
+                                    onClick={exportCsv}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-600 border border-gray-200 rounded-md hover:bg-gray-50 transition-colors"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                                    </svg>
+                                    Export CSV
+                                </button>
                             )}
                         </div>
                     </div>

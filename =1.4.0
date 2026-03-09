@@ -1,8 +1,0 @@
-Defaulting to user installation because normal site-packages is not writeable
-Collecting comtypes
-  Downloading comtypes-1.4.16-py3-none-any.whl.metadata (7.8 kB)
-Downloading comtypes-1.4.16-py3-none-any.whl (296 kB)
-Installing collected packages: comtypes
-  WARNING: The script clear_comtypes_cache.exe is installed in 'C:\Users\aksha\AppData\Roaming\Python\Python312\Scripts' which is not on PATH.
-  Consider adding this directory to PATH or, if you prefer to suppress this warning, use --no-warn-script-location.
-Successfully installed comtypes-1.4.16
