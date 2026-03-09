@@ -22,7 +22,7 @@ async def generate_quiz(request: Request, payload: QuizRequest):
     struggling_nodes = [n.model_dump() for n in payload.struggling_nodes]
 
     try:
-        result = await gemini_service.generate_quiz(
+        result, input_t, output_t = await gemini_service.generate_quiz(
             struggling_nodes,
             payload.raw_text,
             pdf_id=payload.pdf_id,
@@ -33,12 +33,12 @@ async def generate_quiz(request: Request, payload: QuizRequest):
             canvas_context=payload.canvas_context
         )
         _validate_quiz(result)
-        return {"questions": result, "model_used": MODEL_FLASH}
+        return {"questions": result, "model_used": MODEL_FLASH, "input_tokens": input_t, "output_tokens": output_t}
     except Exception as e:
         logger.warning("Quiz generation attempt 1 failed: %s — retrying...", e)
 
     try:
-        result = await gemini_service.generate_quiz(
+        result, input_t, output_t = await gemini_service.generate_quiz(
             struggling_nodes,
             payload.raw_text,
             pdf_id=payload.pdf_id,
@@ -49,7 +49,7 @@ async def generate_quiz(request: Request, payload: QuizRequest):
             canvas_context=payload.canvas_context
         )
         _validate_quiz(result)
-        return {"questions": result, "model_used": MODEL_FLASH}
+        return {"questions": result, "model_used": MODEL_FLASH, "input_tokens": input_t, "output_tokens": output_t}
     except Exception as e:
         logger.error("Quiz generation attempt 2 failed: %s", e)
         raise HTTPException(status_code=500, detail="Quiz generation failed after retry due to an internal error.")
@@ -75,7 +75,7 @@ async def validate_answer(request: Request, payload: ValidateAnswerRequest):
     Validates the user's answer (short-answer via Gemini, MCQ via index comparison).
     """
     try:
-        result = await gemini_service.validate_answer(
+        result, input_t, output_t = await gemini_service.validate_answer(
             payload.question,
             payload.student_answer,
             payload.raw_text,
@@ -84,7 +84,7 @@ async def validate_answer(request: Request, payload: ValidateAnswerRequest):
         )
         # MCQ uses no LLM; short_answer uses Lite
         used_model = MODEL_LITE if (payload.question_type or "short_answer") == "short_answer" else "none"
-        return {**result, "model_used": used_model}
+        return {**result, "model_used": used_model, "input_tokens": input_t, "output_tokens": output_t}
     except Exception as e:
         logger.error("Answer validation failed: %s", e)
         raise HTTPException(status_code=500, detail="Answer validation failed.")

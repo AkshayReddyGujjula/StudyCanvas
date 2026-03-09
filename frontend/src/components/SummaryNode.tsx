@@ -7,7 +7,7 @@ import rehypeRaw from 'rehype-raw'
 import rehypeSanitize, { defaultSchema, type Options as SanitizeOptions } from 'rehype-sanitize'
 import type { SummaryNodeData } from '../types'
 import { useCanvasStore } from '../store/canvasStore'
-import { streamPageSummary } from '../api/studyApi'
+import { streamPageSummary, parseStreamChunk } from '../api/studyApi'
 import { extractPageImageBase64 } from '../utils/pdfImageExtractor'
 import ModelIndicator from './ModelIndicator'
 
@@ -105,7 +105,7 @@ function SummaryNode({ id, data }: SummaryNodeProps) {
             while (true) {
                 const { done, value } = await reader.read()
                 if (done) break
-                fullText += decoder.decode(value, { stream: true })
+                fullText += parseStreamChunk(decoder.decode(value, { stream: true }), 'summarize', modelUsed ?? '')
                 updateNodeData(id, { summary: fullText, isLoading: false, modelUsed })
             }
 

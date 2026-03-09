@@ -27,7 +27,7 @@ async def create_flashcards(request: Request, payload: FlashcardsRequest):
     ]
 
     try:
-        cards = await generate_flashcards(
+        cards, input_t, output_t = await generate_flashcards(
             nodes_payload,
             payload.raw_text,
             pdf_id=payload.pdf_id,
@@ -38,7 +38,7 @@ async def create_flashcards(request: Request, payload: FlashcardsRequest):
             image_base64=payload.image_base64,
             canvas_context=payload.canvas_context
         )
-        return {"flashcards": cards, "model_used": MODEL_FLASH}
+        return {"flashcards": cards, "model_used": MODEL_FLASH, "input_tokens": input_t, "output_tokens": output_t}
     except Exception as e:
         import logging
         logging.error(f"Flash card generation failed: {e}")

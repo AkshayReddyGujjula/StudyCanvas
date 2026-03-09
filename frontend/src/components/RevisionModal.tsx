@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import type { Node } from '@xyflow/react'
 import { useCanvasStore } from '../store/canvasStore'
 import { extractPageImageBase64 } from '../utils/pdfImageExtractor'
-import { generateQuiz, validateAnswer, streamQuizFollowUp } from '../api/studyApi'
+import { generateQuiz, validateAnswer, streamQuizFollowUp, parseStreamChunk } from '../api/studyApi'
 import type { AnswerNodeData, QuizQuestion, ValidateAnswerResponse } from '../types'
 import ModelIndicator from './ModelIndicator'
 
@@ -309,7 +309,7 @@ export default function RevisionModal({
             while (true) {
                 const { done, value } = await reader.read()
                 if (done) break
-                accumulated += decoder.decode(value, { stream: true })
+                accumulated += parseStreamChunk(decoder.decode(value, { stream: true }), 'followup', 'gemini-3.1-flash-lite')
                 // Update the last message (model placeholder) with the accumulated text
                 setFollowUpHistories((prev) => {
                     const next = [...prev]

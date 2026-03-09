@@ -8,7 +8,7 @@ import rehypeSanitize, { defaultSchema, type Options as SanitizeOptions } from '
 import type { AnswerNodeData, ChatMessage } from '../types'
 import { useCanvasStore } from '../store/canvasStore'
 import { useCanvasCallbacks } from './CanvasCallbackContext'
-import { streamQuery } from '../api/studyApi'
+import { streamQuery, parseStreamChunk } from '../api/studyApi'
 import ModelIndicator from './ModelIndicator'
 
 const customSchema: SanitizeOptions = {
@@ -120,7 +120,7 @@ function AnswerNode({ id, data }: AnswerNodeProps) {
             while (true) {
                 const { done, value } = await reader.read()
                 if (done) break
-                streamingAnswer += decoder.decode(value, { stream: true })
+                streamingAnswer += parseStreamChunk(decoder.decode(value, { stream: true }), 'query', followUpModel ?? '')
                 updateNodeData(id, {
                     // Update the last history item (model response) or add it
                     chatHistory: [

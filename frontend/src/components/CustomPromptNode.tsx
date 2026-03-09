@@ -7,7 +7,7 @@ import rehypeRaw from 'rehype-raw'
 import rehypeSanitize, { defaultSchema, type Options as SanitizeOptions } from 'rehype-sanitize'
 import type { CustomPromptNodeData, ChatMessage, PromptModel } from '../types'
 import { useCanvasStore } from '../store/canvasStore'
-import { streamQuery } from '../api/studyApi'
+import { streamQuery, parseStreamChunk } from '../api/studyApi'
 import { extractPageImageBase64 } from '../utils/pdfImageExtractor'
 import ModelIndicator from './ModelIndicator'
 
@@ -156,7 +156,7 @@ function CustomPromptNode({ id, data }: CustomPromptNodeProps) {
             while (true) {
                 const { done, value } = await reader.read()
                 if (done) break
-                streamingAnswer += decoder.decode(value, { stream: true })
+                streamingAnswer += parseStreamChunk(decoder.decode(value, { stream: true }), 'query', modelUsed ?? '')
                 updateNodeData(id, {
                     chatHistory: [
                         ...newHistory,

@@ -1,5 +1,13 @@
 export type NodeStatus = "loading" | "unread" | "understood" | "struggling"
 
+export interface UsageEntry {
+    timestamp: number       // Unix ms
+    model: 'lite' | 'flash'
+    inputTokens: number
+    outputTokens: number
+    endpoint: string        // 'query' | 'quiz' | 'flashcards' | 'summarize' | 'page-quiz' | 'grade' | 'validate' | 'ocr' | 'transcribe' | 'title' | 'followup'
+}
+
 export interface HighlightEntry {
     id: string
     text: string

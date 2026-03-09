@@ -14,6 +14,8 @@ class OCRRequest(BaseModel):
 class OCRResponse(BaseModel):
     text: str
     model_used: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 @router.post("/vision", response_model=OCRResponse)
 @limiter.limit("10/minute; 100/hour; 500/day")
@@ -26,8 +28,8 @@ async def extract_text_from_image(request: Request, payload: OCRRequest):
         if not payload.image_base64:
             raise HTTPException(status_code=400, detail="Base64 image data is required")
             
-        extracted_text = await gemini_service.image_to_text(payload.image_base64)
-        return OCRResponse(text=extracted_text, model_used=MODEL_FLASH)
+        extracted_text, input_t, output_t = await gemini_service.image_to_text(payload.image_base64)
+        return OCRResponse(text=extracted_text, model_used=MODEL_FLASH, input_tokens=input_t, output_tokens=output_t)
     except Exception as e:
         logger.error(f"Error in OCR vision endpoint: {e}")
         raise HTTPException(status_code=500, detail="Failed to extract text from image due to an internal error.")

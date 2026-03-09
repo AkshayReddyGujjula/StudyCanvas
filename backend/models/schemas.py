@@ -83,6 +83,8 @@ class ValidateAnswerRequest(BaseModel):
 class ValidateAnswerResponse(BaseModel):
     status: Literal["correct", "incorrect", "partial"]
     explanation: str
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 class FlashcardsRequest(BaseModel):

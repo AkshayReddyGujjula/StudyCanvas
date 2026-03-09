@@ -58,6 +58,8 @@ class TranscribeRequest(BaseModel):
 class TranscribeResponse(BaseModel):
     text: str
     model_used: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 @router.post("/transcribe", response_model=TranscribeResponse)
@@ -71,10 +73,10 @@ async def transcribe_audio(request: Request, payload: TranscribeRequest):
     most expensive modality and we want to prevent abuse / accidental spam.
     """
     try:
-        text = await gemini_service.transcribe_audio(
+        text, input_t, output_t = await gemini_service.transcribe_audio(
             payload.audio_base64, payload.mime_type
         )
-        return TranscribeResponse(text=text, model_used=MODEL_LITE)
+        return TranscribeResponse(text=text, model_used=MODEL_LITE, input_tokens=input_t, output_tokens=output_t)
     except ValueError as exc:
         # Includes "no speech detected" errors raised by the service layer
         raise HTTPException(status_code=422, detail=str(exc))

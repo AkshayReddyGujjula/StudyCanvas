@@ -46,5 +46,5 @@ async def query_stream(request: Request, payload: QueryRequest):
 @router.post("/generate-title")
 @limiter.limit("10/minute; 100/hour")
 async def generate_title(request: Request, payload: GenerateTitleRequest):
-    title = await gemini_service.generate_title(payload.raw_text)
-    return {"title": title, "model_used": MODEL_LITE}
+    title, input_t, output_t = await gemini_service.generate_title(payload.raw_text)
+    return {"title": title, "model_used": MODEL_LITE, "input_tokens": input_t, "output_tokens": output_t}

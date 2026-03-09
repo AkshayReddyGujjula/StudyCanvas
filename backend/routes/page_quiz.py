@@ -22,6 +22,8 @@ class PageQuizRequest(BaseModel):
 class PageQuizResponse(BaseModel):
     questions: list[str]
     model_used: str = MODEL_FLASH
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 class GradeAnswerRequest(BaseModel):
@@ -37,6 +39,8 @@ class GradeAnswerRequest(BaseModel):
 class GradeAnswerResponse(BaseModel):
     feedback: str
     model_used: str = MODEL_FLASH
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 @router.post("/page-quiz", response_model=PageQuizResponse)
@@ -44,10 +48,10 @@ class GradeAnswerResponse(BaseModel):
 async def generate_page_quiz(request: Request, payload: PageQuizRequest):
     """Generate 3-5 short-answer questions based solely on a single page's content."""
     try:
-        questions = await gemini_service.generate_page_quiz(
+        questions, input_t, output_t = await gemini_service.generate_page_quiz(
             payload.page_content, pdf_id=payload.pdf_id, page_index=payload.page_index, image_base64=payload.image_base64, user_details=payload.user_details, canvas_context=payload.canvas_context
         )
-        return PageQuizResponse(questions=questions, model_used=MODEL_FLASH)
+        return PageQuizResponse(questions=questions, model_used=MODEL_FLASH, input_tokens=input_t, output_tokens=output_t)
     except HTTPException:
         raise  # Re-raise 422 errors as-is
     except Exception as e:
@@ -59,7 +63,7 @@ async def generate_page_quiz(request: Request, payload: PageQuizRequest):
 @limiter.limit("30/minute; 200/hour; 1000/day")
 async def grade_answer(request: Request, payload: GradeAnswerRequest):
     """Grade a student's answer to a page-quiz question and return direct feedback."""
-    feedback = await gemini_service.grade_answer(
+    feedback, input_t, output_t = await gemini_service.grade_answer(
         question=payload.question,
         student_answer=payload.student_answer,
         page_content=payload.page_content,
@@ -68,7 +72,7 @@ async def grade_answer(request: Request, payload: GradeAnswerRequest):
         page_index=payload.page_index,
         image_base64=payload.image_base64,
     )
-    return GradeAnswerResponse(feedback=feedback, model_used=MODEL_FLASH)
+    return GradeAnswerResponse(feedback=feedback, model_used=MODEL_FLASH, input_tokens=input_t, output_tokens=output_t)
 
 
 class SummarizePageRequest(BaseModel):

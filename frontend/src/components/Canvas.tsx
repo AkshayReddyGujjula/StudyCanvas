@@ -40,7 +40,7 @@ import { DrawingCanvas, DrawingToolbar, TextNode } from './whiteboard'
 import { useTextSelection } from '../hooks/useTextSelection'
 import { useCanvasStore } from '../store/canvasStore'
 import { extractPageImageBase64 } from '../utils/pdfImageExtractor'
-import { streamQuery, streamPageSummary, generateTitle, generatePageQuiz, gradeAnswer, generateFlashcards } from '../api/studyApi'
+import { streamQuery, streamPageSummary, generateTitle, generatePageQuiz, gradeAnswer, generateFlashcards, parseStreamChunk } from '../api/studyApi'
 import { getNewNodePosition, recalculateSiblingPositions, resolveOverlaps, isOverlapping, rerouteEdgeHandles, getQuizNodePositions, getFlashcardPositions, findNonOverlappingPosition } from '../utils/positioning'
 import type { AnswerNodeData, QuizQuestionNodeData, FlashcardNodeData, TextNodeData, CustomPromptNodeData, ImageNodeData, StickyNoteNodeData, TimerNodeData, SummaryNodeData, TranscriptionNodeData, ChatMessage } from '../types'
 import { pdf } from '@react-pdf/renderer'
@@ -1142,8 +1142,7 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
             while (true) {
                 const { value, done } = await reader.read()
                 if (done) break
-                const chunk = decoder.decode(value, { stream: true })
-                accumulated += chunk
+                accumulated += parseStreamChunk(decoder.decode(value, { stream: true }), 'summarize', modelUsed)
                 updateNodeData(nodeId, { summary: accumulated })
             }
 
@@ -1859,8 +1858,7 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
                 while (true) {
                     const { done, value } = await reader.read()
                     if (done) break
-                    const chunk = decoder.decode(value, { stream: true })
-                    fullText += chunk
+                    fullText += parseStreamChunk(decoder.decode(value, { stream: true }), 'query', modelUsed ?? '')
                     updateNodeData(preGeneratedNodeId, {
                         answer: fullText,
                         isLoading: false,

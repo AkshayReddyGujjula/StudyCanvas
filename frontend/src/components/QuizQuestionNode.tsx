@@ -8,7 +8,7 @@ import rehypeSanitize, { defaultSchema, type Options as SanitizeOptions } from '
 import type { QuizQuestionNodeData, ChatMessage, NodeStatus } from '../types'
 import { useCanvasStore } from '../store/canvasStore'
 import { useCanvasCallbacks } from './CanvasCallbackContext'
-import { streamQuery } from '../api/studyApi'
+import { streamQuery, parseStreamChunk } from '../api/studyApi'
 import ModelIndicator from './ModelIndicator'
 
 const customSchema: SanitizeOptions = {
@@ -122,7 +122,7 @@ function QuizQuestionNode({ id, data }: QuizQuestionNodeProps) {
             while (true) {
                 const { done, value } = await reader.read()
                 if (done) break
-                streamingAnswer += decoder.decode(value, { stream: true })
+                streamingAnswer += parseStreamChunk(decoder.decode(value, { stream: true }), 'followup', followUpModel ?? '')
                 // Replace placeholder using captured historyWithUser (avoids stale closure)
                 updateQuizNodeData(id, {
                     chatHistory: [...historyWithUser, { role: 'model' as const, content: streamingAnswer }],

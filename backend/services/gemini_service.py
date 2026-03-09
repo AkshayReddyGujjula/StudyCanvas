@@ -15,10 +15,21 @@ _client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY", ""))
 # ── Model tier constants ──────────────────────────────────────────────────────
 # Lite:  gemini-2.5-flash-lite — only for trivially simple/mechanical tasks
 #        (title generation, audio transcription)
-# Flash: gemini-3.1-flash-lite — primary model; smarter & faster for the
+# Flash: gemini-3.1-flash-lite-preview — primary model; smarter & faster for the
 #        majority of AI tasks (Q&A, quiz, OCR, summaries, grading, etc.)
 MODEL_LITE = "gemini-2.5-flash-lite"
-MODEL_FLASH = "gemini-3.1-flash-lite"
+MODEL_FLASH = "gemini-3.1-flash-lite-preview"
+
+
+def _extract_usage(response) -> tuple[int, int]:
+    """Safely extract (input_tokens, output_tokens) from a Gemini response object."""
+    meta = getattr(response, 'usage_metadata', None)
+    if not meta:
+        return 0, 0
+    return (
+        getattr(meta, 'prompt_token_count', 0) or 0,
+        getattr(meta, 'candidates_token_count', 0) or 0,
+    )
 
 
 def classify_query_complexity(
@@ -92,6 +103,7 @@ async def generate_title(raw_text: str) -> str:
         contents=prompt,
         config=types.GenerateContentConfig(max_output_tokens=50, temperature=0.3),
     )
+    input_t, output_t = _extract_usage(response)
     # Safely extract text — response.text is None when the model is blocked
     # or hits MAX_TOKENS in the new SDK (no ValueError is raised).
     raw = response.text
@@ -104,15 +116,15 @@ async def generate_title(raw_text: str) -> str:
                 else ""
             )
         except Exception:
-            return "Study Notes"
+            return "Study Notes", input_t, output_t
     if not raw:
-        return "Study Notes"
+        return "Study Notes", input_t, output_t
     title = raw.strip().strip('"').strip("'")
     # Hard-cap at 6 words as a safety net
     words = title.split()
     if len(words) > 6:
         title = " ".join(words[:6])
-    return title
+    return title, input_t, output_t
 
 
 
@@ -256,6 +268,8 @@ Student's question:
                 f"{canvas_vision_text}"
             )
 
+    _usage_input = 0
+    _usage_output = 0
     try:
         # Build a multimodal request when a page image is available.
         # The image gives Gemini visual context for diagrams, handwriting, and
@@ -270,9 +284,15 @@ Student's question:
             text = chunk.text
             if text:
                 yield text
+            meta = getattr(chunk, 'usage_metadata', None)
+            if meta:
+                _usage_input = getattr(meta, 'prompt_token_count', 0) or 0
+                _usage_output = getattr(meta, 'candidates_token_count', 0) or 0
     except Exception as e:
         logger.error(f"Gemini API streaming error: {str(e)}")
         yield f"\n\n[API Error: {str(e)}]"
+    if _usage_input > 0 or _usage_output > 0:
+        yield f"\x00USAGE:{_usage_input}:{_usage_output}"
 
 
 from services.pdf_service import get_page_image_base64
@@ -471,6 +491,7 @@ async def generate_quiz(
         contents=contents,
         config=types.GenerateContentConfig(response_mime_type="application/json"),
     )
+    input_t, output_t = _extract_usage(response)
     text = (response.text or "").strip()
     if text.startswith("```json"):
         text = text[7:]
@@ -478,7 +499,7 @@ async def generate_quiz(
         text = text[3:]
     if text.endswith("```"):
         text = text[:-3]
-    return json.loads(text.strip())
+    return json.loads(text.strip()), input_t, output_t
 
 
 async def generate_flashcards(
@@ -622,6 +643,7 @@ async def generate_flashcards(
         contents=contents,
         config=types.GenerateContentConfig(response_mime_type="application/json"),
     )
+    input_t, output_t = _extract_usage(response)
     text = (response.text or "").strip()
     if text.startswith("```json"):
         text = text[7:]
@@ -629,7 +651,7 @@ async def generate_flashcards(
         text = text[3:]
     if text.endswith("```"):
         text = text[:-3]
-    return json.loads(text.strip())
+    return json.loads(text.strip()), input_t, output_t
 
 
 async def generate_page_summary(
@@ -695,6 +717,8 @@ async def generate_page_summary(
     contents.append(prompt)
     
     model_name = MODEL_FLASH
+    _usage_input = 0
+    _usage_output = 0
 
     try:
         async for chunk in await _client.aio.models.generate_content_stream(
@@ -703,12 +727,18 @@ async def generate_page_summary(
             text = chunk.text
             if text:
                 yield text
+            meta = getattr(chunk, 'usage_metadata', None)
+            if meta:
+                _usage_input = getattr(meta, 'prompt_token_count', 0) or 0
+                _usage_output = getattr(meta, 'candidates_token_count', 0) or 0
     except Exception as e:
         logger.error(f"Summary generation error: {e}")
         yield f"\n\n[Error generating summary: {str(e)}]"
+    if _usage_input > 0 or _usage_output > 0:
+        yield f"\x00USAGE:{_usage_input}:{_usage_output}"
 
 
-async def generate_page_quiz(page_content: str, pdf_id: str | None = None, page_index: int | None = None, image_base64: str | None = None, user_details: dict | None = None, canvas_context: str | None = None) -> list[str]:
+async def generate_page_quiz(page_content: str, pdf_id: str | None = None, page_index: int | None = None, image_base64: str | None = None, user_details: dict | None = None, canvas_context: str | None = None) -> tuple[list[str], int, int]:
     """
     Generates 3-5 short-answer questions based ONLY on the provided page content.
     No struggling nodes, no user context — pure page comprehension test.
@@ -830,6 +860,7 @@ async def generate_page_quiz(page_content: str, pdf_id: str | None = None, page_
         contents=contents,
         config=types.GenerateContentConfig(response_mime_type="application/json"),
     )
+    input_t, output_t = _extract_usage(response)
     text = (response.text or "").strip()
     if text.startswith("```json"):
         text = text[7:]
@@ -840,8 +871,8 @@ async def generate_page_quiz(page_content: str, pdf_id: str | None = None, page_
     data = json.loads(text.strip())
     # Ensure we always return a flat list of strings
     if isinstance(data, list):
-        return [str(q) for q in data]
-    return []
+        return [str(q) for q in data], input_t, output_t
+    return [], input_t, output_t
 
 
 async def grade_answer(
@@ -852,7 +883,7 @@ async def grade_answer(
     pdf_id: str | None = None,
     page_index: int | None = None,
     image_base64: str | None = None,
-) -> str:
+) -> tuple[str, int, int]:
     """
     Grades a student's answer to a page-quiz question and returns direct, personalised
     feedback as a plain text string (not JSON).
@@ -909,8 +940,9 @@ async def grade_answer(
         contents=contents,
         config=types.GenerateContentConfig(max_output_tokens=8192, temperature=0.4),
     )
+    input_t, output_t = _extract_usage(response)
     if response.text is not None:
-        return response.text.strip()
+        return response.text.strip(), input_t, output_t
     try:
         cands = response.candidates
         text = (
@@ -918,9 +950,10 @@ async def grade_answer(
             if cands and cands[0].content and cands[0].content.parts
             else ""
         )
-        return text.strip() if text else "Unable to grade your answer at this time. Please try again."
+        result = text.strip() if text else "Unable to grade your answer at this time. Please try again."
+        return result, input_t, output_t
     except Exception:
-        return "Unable to grade your answer at this time. Please try again."
+        return "Unable to grade your answer at this time. Please try again.", input_t, output_t
 
 
 async def validate_answer(
@@ -929,7 +962,7 @@ async def validate_answer(
     raw_text: str,
     question_type: str = "short_answer",
     correct_option: int | None = None,
-) -> dict:
+) -> tuple[dict, int, int]:
     """
     Validates a student's answer.
     For MCQ: the student_answer is the index (as a string) of the option they selected.
@@ -950,7 +983,7 @@ async def validate_answer(
                 if is_correct
                 else f"Actually, the correct answer was choice {correct_option + 1}. Review this topic once more!"
             ),
-        }
+        }, 0, 0
 
     # ── Short answer: ask Gemini ────────────────────────────────────────────
     prompt = (
@@ -979,12 +1012,13 @@ async def validate_answer(
         contents=prompt,
         config=types.GenerateContentConfig(response_mime_type="application/json"),
     )
+    input_t, output_t = _extract_usage(response)
     if not response.text:
         raise HTTPException(status_code=500, detail="Empty response from model during answer validation")
-    return json.loads(response.text)
+    return json.loads(response.text), input_t, output_t
 
 
-async def image_to_text(base64_image: str) -> str:
+async def image_to_text(base64_image: str) -> tuple[str, int, int]:
     """
     Takes a base64 encoded image string (e.g., from a user's bounding box snip),
     sends it to Gemini Vision, and extracts the text exactly as it appears.
@@ -1014,8 +1048,9 @@ async def image_to_text(base64_image: str) -> str:
         ],
         config=types.GenerateContentConfig(temperature=0.1),
     )
+    input_t, output_t = _extract_usage(response)
     if response.text is not None:
-        return response.text.strip()
+        return response.text.strip(), input_t, output_t
     try:
         cands = response.candidates
         text = (
@@ -1023,14 +1058,14 @@ async def image_to_text(base64_image: str) -> str:
             if cands and cands[0].content and cands[0].content.parts
             else ""
         )
-        return text.strip()
+        return text.strip(), input_t, output_t
     except Exception:
-        return ""
+        return "", input_t, output_t
 
 
 # ── Audio Transcription ───────────────────────────────────────────────────────
 
-async def transcribe_audio(audio_base64: str, mime_type: str) -> str:
+async def transcribe_audio(audio_base64: str, mime_type: str) -> tuple[str, int, int]:
     """
     Transcribes a base64-encoded audio clip using Gemini Flash Lite.
 
@@ -1064,6 +1099,7 @@ async def transcribe_audio(audio_base64: str, mime_type: str) -> str:
         ],
         config=types.GenerateContentConfig(temperature=0.0),
     )
+    input_t, output_t = _extract_usage(response)
 
     if response.text is not None:
         result = response.text.strip()
@@ -1106,7 +1142,7 @@ async def transcribe_audio(audio_base64: str, mime_type: str) -> str:
     if not result:
         raise ValueError("No speech detected in the recording. Please speak clearly and try again.")
 
-    return result
+    return result, input_t, output_t
 
 
 async def quiz_followup_chat(
@@ -1151,6 +1187,8 @@ async def quiz_followup_chat(
         f"Student's follow-up: {follow_up_message}"
     )
 
+    _usage_input = 0
+    _usage_output = 0
     try:
         async for chunk in await _client.aio.models.generate_content_stream(
             model=MODEL_FLASH,
@@ -1159,7 +1197,13 @@ async def quiz_followup_chat(
             text = chunk.text
             if text:
                 yield text
+            meta = getattr(chunk, 'usage_metadata', None)
+            if meta:
+                _usage_input = getattr(meta, 'prompt_token_count', 0) or 0
+                _usage_output = getattr(meta, 'candidates_token_count', 0) or 0
     except Exception as e:
         logger.error(f"Quiz follow-up chat error: {str(e)}")
         yield f"\n\n[Error: {str(e)}]"
+    if _usage_input > 0 or _usage_output > 0:
+        yield f"\x00USAGE:{_usage_input}:{_usage_output}"
 

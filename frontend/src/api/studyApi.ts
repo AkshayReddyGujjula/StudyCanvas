@@ -1,6 +1,7 @@
 import axios from 'axios'
 import type { UploadResponse, QuizQuestion, QuizNodeInput, ValidateAnswerResponse } from '../types'
 import { extractPdfPagesText } from '../utils/pdfTextExtractor'
+import { useUsageStore } from '../store/usageStore'
 
 // In production (Vercel) VITE_API_BASE_URL is not set → '' → relative same-origin calls.
 // In local dev it is set via .env.development → 'http://localhost:8000'.
@@ -9,6 +10,55 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 const api = axios.create({
     baseURL: API_BASE,
 })
+
+// The lite model ID (matches backend MODEL_LITE constant)
+const LITE_MODEL_ID = 'gemini-2.5-flash-lite'
+
+function modelTier(modelUsed: string): 'lite' | 'flash' {
+    return modelUsed === LITE_MODEL_ID ? 'lite' : 'flash'
+}
+
+function recordUsage(modelUsed: string, inputTokens: number, outputTokens: number, endpoint: string) {
+    if (inputTokens > 0 || outputTokens > 0) {
+        useUsageStore.getState().addEntry({
+            timestamp: Date.now(),
+            model: modelTier(modelUsed),
+            inputTokens,
+            outputTokens,
+            endpoint,
+        })
+    }
+}
+
+/**
+ * Streaming usage sentinel format: \x00USAGE:{inputTokens}:{outputTokens}
+ * Backend appends this as the final chunk after all text chunks.
+ */
+export const USAGE_SENTINEL = '\x00USAGE:'
+
+/**
+ * Parse a raw stream chunk. Strips the usage sentinel if present, records
+ * usage in the store, and returns only the displayable text portion.
+ *
+ * @param raw       Raw decoded chunk string from the stream
+ * @param endpoint  Endpoint label for usage tracking (e.g. 'query', 'summarize')
+ * @param modelUsed Model string from X-Model-Used response header
+ * @returns         The displayable text portion of the chunk (sentinel stripped)
+ */
+export function parseStreamChunk(raw: string, endpoint: string, modelUsed: string): string {
+    if (!raw.includes(USAGE_SENTINEL)) return raw
+
+    const idx = raw.indexOf(USAGE_SENTINEL)
+    const displayText = raw.slice(0, idx)
+    const meta = raw.slice(idx + USAGE_SENTINEL.length)
+    const parts = meta.split(':')
+    if (parts.length >= 2) {
+        const inputT = parseInt(parts[0], 10) || 0
+        const outputT = parseInt(parts[1], 10) || 0
+        recordUsage(modelUsed, inputT, outputT, endpoint)
+    }
+    return displayText
+}
 
 /**
  * Vercel serverless functions reject request bodies larger than ~4.5 MB.
@@ -49,7 +99,7 @@ export const generateQuiz = async (
     image_base64?: string,
     canvas_context?: string
 ): Promise<{ questions: QuizQuestion[]; model_used: string }> => {
-    const response = await api.post<{ questions: QuizQuestion[]; model_used: string }>('/api/quiz', {
+    const response = await api.post<{ questions: QuizQuestion[]; model_used: string; input_tokens?: number; output_tokens?: number }>('/api/quiz', {
         struggling_nodes,
         raw_text,
         pdf_id,
@@ -59,6 +109,8 @@ export const generateQuiz = async (
         image_base64,
         canvas_context
     })
+    const { input_tokens = 0, output_tokens = 0, model_used } = response.data
+    recordUsage(model_used, input_tokens, output_tokens, 'quiz')
     return response.data
 }
 
@@ -69,13 +121,15 @@ export const validateAnswer = async (
     question_type: 'short_answer' | 'mcq' = 'short_answer',
     correct_option?: number
 ): Promise<ValidateAnswerResponse> => {
-    const response = await api.post<ValidateAnswerResponse & { model_used?: string }>('/api/validate', {
+    const response = await api.post<ValidateAnswerResponse & { model_used?: string; input_tokens?: number; output_tokens?: number }>('/api/validate', {
         question,
         student_answer,
         raw_text,
         question_type,
         correct_option,
     })
+    const { input_tokens = 0, output_tokens = 0, model_used = LITE_MODEL_ID } = response.data
+    recordUsage(model_used, input_tokens, output_tokens, 'validate')
     return response.data
 }
 
@@ -83,7 +137,9 @@ export const validateAnswer = async (
  * Ask Gemini for a short title (max 5 words) summarising the document.
  */
 export const generateTitle = async (raw_text: string): Promise<string> => {
-    const response = await api.post<{ title: string }>('/api/generate-title', { raw_text })
+    const response = await api.post<{ title: string; model_used?: string; input_tokens?: number; output_tokens?: number }>('/api/generate-title', { raw_text })
+    const { input_tokens = 0, output_tokens = 0, model_used = LITE_MODEL_ID } = response.data
+    recordUsage(model_used, input_tokens, output_tokens, 'title')
     return response.data.title
 }
 
@@ -98,7 +154,9 @@ export const generatePageQuiz = async (
     user_details?: { name: string; age: string; status: string; educationLevel: string },
     canvas_context?: string
 ): Promise<{ questions: string[]; model_used: string }> => {
-    const response = await api.post<{ questions: string[]; model_used: string }>('/api/page-quiz', { page_content, pdf_id, page_index, image_base64, user_details, canvas_context })
+    const response = await api.post<{ questions: string[]; model_used: string; input_tokens?: number; output_tokens?: number }>('/api/page-quiz', { page_content, pdf_id, page_index, image_base64, user_details, canvas_context })
+    const { input_tokens = 0, output_tokens = 0, model_used } = response.data
+    recordUsage(model_used, input_tokens, output_tokens, 'page-quiz')
     return response.data
 }
 
@@ -114,7 +172,7 @@ export const gradeAnswer = async (
     page_index?: number,
     image_base64?: string
 ): Promise<{ feedback: string; model_used: string }> => {
-    const response = await api.post<{ feedback: string; model_used: string }>('/api/grade-answer', {
+    const response = await api.post<{ feedback: string; model_used: string; input_tokens?: number; output_tokens?: number }>('/api/grade-answer', {
         question,
         student_answer,
         page_content,
@@ -123,6 +181,8 @@ export const gradeAnswer = async (
         page_index,
         image_base64,
     })
+    const { input_tokens = 0, output_tokens = 0, model_used } = response.data
+    recordUsage(model_used, input_tokens, output_tokens, 'grade')
     return response.data
 }
 
@@ -140,7 +200,7 @@ export const generateFlashcards = async (
     image_base64?: string,
     canvas_context?: string
 ): Promise<{ flashcards: { question: string; answer: string }[]; model_used: string }> => {
-    const response = await api.post<{ flashcards: { question: string; answer: string }[]; model_used: string }>('/api/flashcards', {
+    const response = await api.post<{ flashcards: { question: string; answer: string }[]; model_used: string; input_tokens?: number; output_tokens?: number }>('/api/flashcards', {
         struggling_nodes,
         raw_text,
         pdf_id,
@@ -151,6 +211,8 @@ export const generateFlashcards = async (
         image_base64,
         canvas_context
     })
+    const { input_tokens = 0, output_tokens = 0, model_used } = response.data
+    recordUsage(model_used, input_tokens, output_tokens, 'flashcards')
     return response.data
 }
 
@@ -158,6 +220,7 @@ export const generateFlashcards = async (
  * Stream a query response using native fetch + ReadableStream + AbortController.
  * Axios cannot stream in the browser. Returns the Response object for the caller
  * to read the stream via response.body.getReader().
+ * Use parseStreamChunk() on each decoded chunk to strip the usage sentinel.
  */
 export const streamQuery = async (
     request: {
@@ -189,6 +252,7 @@ export const streamQuery = async (
 /**
  * Stream a Vision AI-enhanced page summary.
  * Returns the Response object for streaming via response.body.getReader().
+ * Use parseStreamChunk() on each decoded chunk to strip the usage sentinel.
  */
 export const streamPageSummary = async (
     request: {
@@ -218,10 +282,12 @@ export const transcribeAudio = async (
     audioBase64: string,
     mimeType: string,
 ): Promise<{ text: string; model_used: string }> => {
-    const response = await api.post<{ text: string; model_used: string }>(
+    const response = await api.post<{ text: string; model_used: string; input_tokens?: number; output_tokens?: number }>(
         '/api/transcribe',
         { audio_base64: audioBase64, mime_type: mimeType },
     )
+    const { input_tokens = 0, output_tokens = 0, model_used } = response.data
+    recordUsage(model_used, input_tokens, output_tokens, 'transcribe')
     return response.data
 }
 
@@ -229,6 +295,7 @@ export const transcribeAudio = async (
  * Stream a follow-up clarification response from the AI tutor after a revision
  * quiz question has been answered and graded. Uses Flash Lite for fast, cheap
  * conversational responses. Returns the raw Response for streaming.
+ * Use parseStreamChunk() on each decoded chunk to strip the usage sentinel.
  */
 export const streamQuizFollowUp = async (
     request: {
@@ -250,3 +317,17 @@ export const streamQuizFollowUp = async (
     return response
 }
 
+/**
+ * Extract text from an image using Gemini Vision OCR.
+ */
+export const extractTextFromImage = async (
+    image_base64: string,
+): Promise<{ text: string; model_used: string }> => {
+    const response = await api.post<{ text: string; model_used: string; input_tokens?: number; output_tokens?: number }>(
+        '/api/vision',
+        { image_base64 },
+    )
+    const { input_tokens = 0, output_tokens = 0, model_used } = response.data
+    recordUsage(model_used, input_tokens, output_tokens, 'ocr')
+    return response.data
+}
