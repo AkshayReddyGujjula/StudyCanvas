@@ -446,8 +446,8 @@ export default function PDFViewer({
                             const availH = outer.clientHeight - 32
                             const scaleW = availW / pdfNaturalWidthRef.current
                             const scaleH = availH / pdfNaturalHeightRef.current
-                            // Fit entire page within viewer, with 2% margin for clean look
-                            const fitBoth = Math.min(scaleW, scaleH) * 0.98
+                            // Fit entire page within viewer, with 1% margin for clean look
+                            const fitBoth = Math.min(scaleW, scaleH) * 0.99
                             outer.scrollLeft = 0
                             outer.scrollTop = 0
                             setScale(fitBoth)

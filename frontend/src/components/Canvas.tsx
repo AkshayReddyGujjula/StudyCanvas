@@ -197,6 +197,7 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
     const [modal, setModal] = useState<ModalState | null>(null)
     const [showRevision, setShowRevision] = useState(false)
     const [showMenu, setShowMenu] = useState(false)
+    const [showSaveSubmenu, setShowSaveSubmenu] = useState(false)
     const [showRevisionMenu, setShowRevisionMenu] = useState(false)
     const [revisionSource, setRevisionSource] = useState<{ sourceType: 'struggling' | 'page'; pageIndex: number; pageContent?: string } | null>(null)
     const [isGeneratingFlashcards, setIsGeneratingFlashcards] = useState(false)
@@ -3013,14 +3014,14 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
                         Menu
                     </button>
                     {showMenu && (
-                        <div className="absolute top-full left-0 mt-2 flex flex-col gap-1 w-fit bg-white border border-gray-200 shadow-lg rounded-lg p-2">
+                        <div className="absolute top-full left-0 mt-2 flex flex-col gap-0.5 w-48 bg-white border border-gray-200 shadow-lg rounded-xl p-2.5">
                             {onGoHome && onSave && (
                                 <button
                                     onClick={() => { setShowMenu(false); runSaveWithProgress(true) }}
                                     disabled={!!saveOverlay}
-                                    className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors disabled:opacity-50"
+                                    className="text-left px-3.5 py-2.5 hover:bg-gray-100 rounded-lg text-sm text-gray-700 transition-colors disabled:opacity-50"
                                 >
-                                    <span className="flex items-center gap-1.5">
+                                    <span className="flex items-center gap-2.5">
                                         <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                             <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
                                             <polyline points="9 22 9 12 15 12 15 22" />
@@ -3032,9 +3033,9 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
                             {!fileData && (
                                 <button
                                     onClick={() => { setShowMenu(false); setShowUploadPopup(true); }}
-                                    className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors"
+                                    className="text-left px-3.5 py-2.5 hover:bg-gray-100 rounded-lg text-sm text-gray-700 transition-colors"
                                 >
-                                    <span className="flex items-center gap-1.5">
+                                    <span className="flex items-center gap-2.5">
                                         <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                                             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                                             <polyline points="14 2 14 8 20 8" />
@@ -3049,9 +3050,9 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
                                 <button
                                     onClick={() => { setShowMenu(false); runSaveWithProgress(false) }}
                                     disabled={!!saveOverlay}
-                                    className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors disabled:opacity-50"
+                                    className="text-left px-3.5 py-2.5 hover:bg-gray-100 rounded-lg text-sm text-gray-700 transition-colors disabled:opacity-50"
                                 >
-                                    <span className="flex items-center gap-1.5">
+                                    <span className="flex items-center gap-2.5">
                                         <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                             <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
                                             <polyline points="17 21 17 13 7 13 7 21" />
@@ -3063,9 +3064,9 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
                             )}
                             <button
                                 onClick={() => { setShowMenu(false); setShowTools(true); }}
-                                className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors"
+                                className="text-left px-3.5 py-2.5 hover:bg-gray-100 rounded-lg text-sm text-gray-700 transition-colors"
                             >
-                                <span className="flex items-center gap-1.5">
+                                <span className="flex items-center gap-2.5">
                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                         <circle cx="12" cy="12" r="3" />
                                         <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
@@ -3073,105 +3074,109 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
                                     Tools (Context)
                                 </span>
                             </button>
-                            <div className="h-px bg-gray-200 mx-1.5" />
-                            <div className="px-3 py-1 mb-1 text-[11px] font-bold text-gray-400 uppercase tracking-wider">Export Canvas</div>
-                            {/* Session export button */}
-                            <button
-                                onClick={handleExportSessionPages}
-                                disabled={isExportingPage || isExportingAll}
-                                className="text-left px-3 py-2 hover:bg-indigo-50 rounded-md text-sm text-indigo-700 font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                            <div className="h-px bg-gray-200 mx-1.5 my-1" />
+                            {/* Save submenu — hover to reveal export options */}
+                            <div
+                                className="relative"
+                                onMouseEnter={() => setShowSaveSubmenu(true)}
+                                onMouseLeave={() => setShowSaveSubmenu(false)}
                             >
-                                {isExportingAll ? (
-                                    <span className="flex items-center gap-1.5">
-                                        <svg className="animate-spin h-3.5 w-3.5 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                                <button
+                                    disabled={isExportingPage || isExportingAll || isGeneratingPDF}
+                                    className="w-full text-left px-3.5 py-2.5 hover:bg-gray-100 rounded-lg text-sm text-gray-700 transition-colors disabled:opacity-50 flex items-center justify-between gap-2"
+                                >
+                                    <span className="flex items-center gap-2.5">
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                                            <polyline points="17 21 17 13 7 13 7 21" />
+                                            <polyline points="7 3 7 8 15 8" />
                                         </svg>
-                                        Exporting…
+                                        {(isExportingPage || isExportingAll || isGeneratingPDF) ? 'Saving…' : 'Save'}
                                     </span>
-                                ) : (
-                                    <span className="flex items-center gap-1.5 pl-2 whitespace-nowrap">
-                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                            <polygon points="12 2 2 7 12 12 22 7 12 2" />
-                                            <polyline points="2 17 12 22 22 17" />
-                                            <polyline points="2 12 12 17 22 12" />
-                                        </svg>
-                                        Save This Session's Work
-                                    </span>
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 shrink-0 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <polyline points="9 18 15 12 9 6" />
+                                    </svg>
+                                </button>
+                                {showSaveSubmenu && (
+                                    <div className="absolute left-full top-0 ml-1 w-52 bg-white border border-gray-200 shadow-lg rounded-lg p-1.5 flex flex-col gap-0.5">
+                                        <button
+                                            onClick={() => { setShowMenu(false); setShowSaveSubmenu(false); handleExportSessionPages() }}
+                                            disabled={isExportingPage || isExportingAll}
+                                            className="text-left px-3 py-2 hover:bg-indigo-50 rounded-md text-sm text-indigo-700 font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 whitespace-nowrap"
+                                        >
+                                            {isExportingAll ? (
+                                                <svg className="animate-spin h-3.5 w-3.5 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                                                </svg>
+                                            ) : (
+                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                    <polygon points="12 2 2 7 12 12 22 7 12 2" />
+                                                    <polyline points="2 17 12 22 22 17" />
+                                                    <polyline points="2 12 12 17 22 12" />
+                                                </svg>
+                                            )}
+                                            Save This Session's Work
+                                        </button>
+                                        <button
+                                            onClick={() => { setShowMenu(false); setShowSaveSubmenu(false); handleExportCurrentPage() }}
+                                            disabled={isExportingPage || isExportingAll}
+                                            className="text-left px-3 py-2 hover:bg-indigo-50 rounded-md text-sm text-indigo-700 font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+                                        >
+                                            {isExportingPage ? (
+                                                <svg className="animate-spin h-3.5 w-3.5 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                                                </svg>
+                                            ) : (
+                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                    <rect x="3" y="3" width="18" height="18" rx="2" />
+                                                    <path d="M3 9h18" />
+                                                </svg>
+                                            )}
+                                            Save This Page
+                                        </button>
+                                        <button
+                                            onClick={() => { setShowMenu(false); setShowSaveSubmenu(false); handleExportAllPages() }}
+                                            disabled={isExportingPage || isExportingAll}
+                                            className="text-left px-3 py-2 hover:bg-indigo-50 rounded-md text-sm text-indigo-700 font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+                                        >
+                                            {isExportingAll ? (
+                                                <svg className="animate-spin h-3.5 w-3.5 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                                                </svg>
+                                            ) : (
+                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                    <rect x="3" y="3" width="18" height="18" rx="2" />
+                                                    <path d="M3 9h18" />
+                                                    <path d="M3 15h18" />
+                                                </svg>
+                                            )}
+                                            Save All Pages
+                                        </button>
+                                        <div className="h-px bg-gray-100 mx-1 my-0.5" />
+                                        <button
+                                            onClick={() => { setShowMenu(false); setShowSaveSubmenu(false); handleDownloadPDF() }}
+                                            disabled={!nodes.some((n) => n.type === 'answerNode' || n.type === 'quizQuestionNode') || isGeneratingPDF}
+                                            className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+                                        >
+                                            {isGeneratingPDF ? (
+                                                <svg className="animate-spin h-3.5 w-3.5 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                                                </svg>
+                                            ) : (
+                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                                    <polyline points="14 2 14 8 20 8" />
+                                                </svg>
+                                            )}
+                                            Save Notes (Text)
+                                        </button>
+                                    </div>
                                 )}
-                            </button>
-                            <div className="h-px bg-gray-100 mx-1.5 my-0.5" />
-
-                            <button
-                                onClick={() => { setShowMenu(false); handleExportCurrentPage() }}
-                                disabled={isExportingPage || isExportingAll}
-                                className="text-left px-3 py-2 hover:bg-indigo-50 rounded-md text-sm text-indigo-700 font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                            >
-                                {isExportingPage ? (
-                                    <span className="flex items-center gap-1.5">
-                                        <svg className="animate-spin h-3.5 w-3.5 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                                        </svg>
-                                        Exporting…
-                                    </span>
-                                ) : (
-                                    <span className="flex items-center gap-1.5 pl-2">
-                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                            <rect x="3" y="3" width="18" height="18" rx="2" />
-                                            <path d="M3 9h18" />
-                                        </svg>
-                                        Save This Page
-                                    </span>
-                                )}
-                            </button>
-                            <button
-                                onClick={() => { setShowMenu(false); handleExportAllPages() }}
-                                disabled={isExportingPage || isExportingAll}
-                                className="text-left px-3 py-2 hover:bg-indigo-50 rounded-md text-sm text-indigo-700 font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                            >
-                                {isExportingAll ? (
-                                    <span className="flex items-center gap-1.5">
-                                        <svg className="animate-spin h-3.5 w-3.5 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                                        </svg>
-                                        Exporting…
-                                    </span>
-                                ) : (
-                                    <span className="flex items-center gap-1.5 pl-2">
-                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                            <rect x="3" y="3" width="18" height="18" rx="2" />
-                                            <path d="M3 9h18" />
-                                            <path d="M3 15h18" />
-                                        </svg>
-                                        Save All Pages
-                                    </span>
-                                )}
-                            </button>
-                            <button
-                                onClick={() => { setShowMenu(false); handleDownloadPDF() }}
-                                disabled={!nodes.some((n) => n.type === 'answerNode' || n.type === 'quizQuestionNode') || isGeneratingPDF}
-                                className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                            >
-                                {isGeneratingPDF ? (
-                                    <span className="flex items-center gap-1.5">
-                                        <svg className="animate-spin h-3.5 w-3.5 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                                        </svg>
-                                        Generating…
-                                    </span>
-                                ) : (
-                                    <span className="flex items-center gap-1.5 pl-2">
-                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                                            <polyline points="14 2 14 8 20 8" />
-                                        </svg>
-                                        Save Notes (Text)
-                                    </span>
-                                )}
-                            </button>
+                            </div>
                         </div>
                     )}
                 </div>
