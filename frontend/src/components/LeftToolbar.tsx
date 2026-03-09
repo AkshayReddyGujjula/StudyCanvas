@@ -5,6 +5,7 @@ interface LeftToolbarProps {
     onSnip: () => void
     onAddImage: (dataUrl: string, fileName: string) => void
     onCustomFlashcard: () => void
+    onCodeEditor: () => void
     onStickyNote: () => void
     onVoiceNote: () => void
     onTimer: () => void
@@ -40,6 +41,7 @@ export default function LeftToolbar({
     onSnip,
     onAddImage,
     onCustomFlashcard,
+    onCodeEditor,
     onStickyNote,
     onVoiceNote,
     onTimer,
@@ -161,6 +163,14 @@ export default function LeftToolbar({
                         <path d="M2 10h20" />
                         <path d="M7 14h4" />
                         <path d="M15 14h2" />
+                    </svg>
+                </button>
+
+                {/* Code Editor */}
+                <button data-tutorial="code-editor-btn" onClick={onCodeEditor} className={btnClass} title="Code Editor">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="16 18 22 12 16 6" />
+                        <polyline points="8 6 2 12 8 18" />
                     </svg>
                 </button>
 

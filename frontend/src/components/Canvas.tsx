@@ -30,6 +30,7 @@ import TimerNode from './TimerNode'
 import SummaryNode from './SummaryNode'
 import VoiceNoteNode from './VoiceNoteNode'
 import TranscriptionNode from './TranscriptionNode'
+import CodeEditorNode from './CodeEditorNode'
 import LeftToolbar from './LeftToolbar'
 import AskGeminiPopup from './AskGeminiPopup'
 import QuestionModal from './QuestionModal'
@@ -76,6 +77,8 @@ function computeNodeColor(node: Node): string {
             if (timerData.mode === 'longBreak') return '#3B82F6'
             return '#EF4444'
         }
+        case 'codeEditorNode':
+            return '#2D9CDB'
         case 'voiceNoteNode':
         case 'transcriptionNode':
             return '#7C3AED'
@@ -101,6 +104,7 @@ const NODE_TYPES = {
     summaryNode: SummaryNode,
     voiceNoteNode: VoiceNoteNode,
     transcriptionNode: TranscriptionNode,
+    codeEditorNode: CodeEditorNode,
 }
 
 // StudyCanvas Minimalist Colour Palette
@@ -952,6 +956,26 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
                 pageIndex: currentPage,
             } as unknown as Record<string, unknown>,
             style: { width: 300 },
+        }
+        setNodes((prev) => [...prev, newNode])
+        persistToLocalStorage()
+    }, [getViewportCenter, currentPage, nodes, setNodes, persistToLocalStorage])
+
+    const handleSpawnCodeEditor = useCallback(() => {
+        const center = getViewportCenter()
+        const pos = findNonOverlappingPosition(center, 500, 400, nodes)
+        const nodeId = `code-editor-${Date.now()}`
+        const newNode: Node = {
+            id: nodeId,
+            type: 'codeEditorNode',
+            position: pos,
+            data: {
+                title: '',
+                code: '',
+                language: 'python',
+                pageIndex: currentPage,
+            } as unknown as Record<string, unknown>,
+            style: { width: 500 },
         }
         setNodes((prev) => [...prev, newNode])
         persistToLocalStorage()
@@ -2948,6 +2972,7 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
                     onSnip={() => setIsSnippingMode(true)}
                     onAddImage={handleSpawnImage}
                     onCustomFlashcard={handleSpawnCustomFlashcard}
+                    onCodeEditor={handleSpawnCodeEditor}
                     onStickyNote={handleSpawnStickyNote}
                     onVoiceNote={handleSpawnVoiceNote}
                     onTimer={handleSpawnTimer}

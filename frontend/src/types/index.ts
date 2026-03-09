@@ -243,6 +243,20 @@ export interface TranscriptionNodeData {
     /** Persisted height after user resize (px) */
     savedHeight?: number
 }
+
+export type CodeEditorLanguage = 'python' | 'java' | 'c'
+
+export interface CodeEditorNodeData {
+    title: string
+    code: string
+    language: CodeEditorLanguage
+    isPinned?: boolean
+    isMinimized?: boolean
+    pageIndex?: number
+    status?: NodeStatus
+    savedWidth?: number
+    savedHeight?: number
+}
 // ─── Whiteboard / Drawing types ──────────────────────────────────────────────
 
 export type WhiteboardTool = 'cursor' | 'pen1' | 'pen2' | 'highlighter' | 'eraser' | 'text' | 'lasso'

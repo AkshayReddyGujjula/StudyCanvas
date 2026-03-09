@@ -138,6 +138,20 @@ export const tutorialSteps: TutorialStep[] = [
 
     // ── 8 ──────────────────────────────────────────────────────────
     {
+        id: 'code-editor',
+        phaseLabel: 'Study Tools',
+        phaseIconKey: 'code',
+        title: 'Code Editor — Write Clean Code',
+        description:
+            'Click the code-brackets icon in the left toolbar to open a Code Editor node. Choose Java, Python, or C from the language menu — you get full syntax highlighting, line numbers, and auto-indentation, just like a real IDE. Perfect for annotating algorithms alongside your study notes.',
+        proTip: 'Drag any edge or corner of the node to resize it to your preferred width and height',
+        targetSelector: '[data-tutorial="code-editor-btn"]',
+        tooltipPosition: 'right',
+        highlightPadding: 10,
+    },
+
+    // ── 9 ──────────────────────────────────────────────────────────
+    {
         id: 'timer',
         phaseLabel: 'Productivity',
         phaseIconKey: 'timer',
