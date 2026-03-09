@@ -8,6 +8,8 @@ import type { ReactCodeMirrorRef } from '@uiw/react-codemirror'
 import { python } from '@codemirror/lang-python'
 import { java } from '@codemirror/lang-java'
 import { cpp } from '@codemirror/lang-cpp'
+import { EditorView } from '@codemirror/view'
+import { streamCodeAssist, parseStreamChunk } from '../api/studyApi'
 
 type CodeEditorNodeProps = NodeProps & { data: CodeEditorNodeData }
 
@@ -40,6 +42,12 @@ function getStatusBorderColor(status?: string): string {
     return '#2D9CDB'
 }
 
+/** Strip markdown code fences from AI output in case the model ignores our prompt instructions. */
+function stripCodeFences(text: string): string {
+    // Remove opening fence like ```python or ``` and closing ```
+    return text.replace(/^```[\w]*\n?/, '').replace(/\n?```\s*$/, '')
+}
+
 function CodeEditorNode({ id, data }: CodeEditorNodeProps) {
     const setNodes = useCanvasStore((s) => s.setNodes)
     const setEdges = useCanvasStore((s) => s.setEdges)
@@ -49,6 +57,21 @@ function CodeEditorNode({ id, data }: CodeEditorNodeProps) {
     const [confirmDelete, setConfirmDelete] = useState(false)
     const [showLangDropdown, setShowLangDropdown] = useState(false)
     const langDropdownRef = useRef<HTMLDivElement>(null)
+
+    // ── AI assistant state ──────────────────────────────────────────────────
+    const [showAiPanel, setShowAiPanel] = useState(false)
+    const [aiPrompt, setAiPrompt] = useState('')
+    const [isAiLoading, setIsAiLoading] = useState(false)
+    // null = auto (derived from hasCode); 'write' or 'edit' = user override
+    const [aiForceMode, setAiForceMode] = useState<'write' | 'edit' | null>(null)
+    const aiAbortRef = useRef<AbortController | null>(null)
+    const aiPanelRef = useRef<HTMLDivElement>(null)
+    const aiTextareaRef = useRef<HTMLTextAreaElement>(null)
+
+    // Keep a ref to the latest code so handleAiSubmit doesn't go stale
+    // during the stream (updateNodeData changes data.code on each chunk).
+    const latestCodeRef = useRef(data.code)
+    latestCodeRef.current = data.code
 
     useEffect(() => {
         if (!showLangDropdown) return
@@ -60,6 +83,38 @@ function CodeEditorNode({ id, data }: CodeEditorNodeProps) {
         document.addEventListener('mousedown', handleOutside)
         return () => document.removeEventListener('mousedown', handleOutside)
     }, [showLangDropdown])
+
+    // Close AI panel on click outside (but not when clicking within the panel/button wrapper)
+    useEffect(() => {
+        if (!showAiPanel) return
+        const handleOutside = (e: MouseEvent) => {
+            if (aiPanelRef.current && !aiPanelRef.current.contains(e.target as Node)) {
+                setShowAiPanel(false)
+            }
+        }
+        document.addEventListener('mousedown', handleOutside)
+        return () => document.removeEventListener('mousedown', handleOutside)
+    }, [showAiPanel])
+
+    // Close AI panel when node is minimized
+    useEffect(() => {
+        if (data.isMinimized) setShowAiPanel(false)
+    }, [data.isMinimized])
+
+    // Abort any in-flight AI request on unmount
+    useEffect(() => {
+        return () => { aiAbortRef.current?.abort() }
+    }, [])
+
+    // Auto-focus the textarea when the panel opens
+    useEffect(() => {
+        if (showAiPanel) {
+            // Small delay ensures the element is mounted before focus
+            const t = setTimeout(() => aiTextareaRef.current?.focus(), 40)
+            return () => clearTimeout(t)
+        }
+    }, [showAiPanel])
+
     const [size, setSize] = useState({
         width: data.savedWidth ?? 500,
         height: data.savedHeight ?? 400,
@@ -81,7 +136,6 @@ function CodeEditorNode({ id, data }: CodeEditorNodeProps) {
         startW: number
         startH: number
     } | null>(null)
-    // Track current size in ref to avoid stale closure in mouseup
     const currentSizeRef = useRef(size)
     currentSizeRef.current = size
 
@@ -149,7 +203,79 @@ function CodeEditorNode({ id, data }: CodeEditorNodeProps) {
         persistToLocalStorage()
     }, [id, data.status, updateNodeData, persistToLocalStorage])
 
-    const extensions = useMemo(() => getExtensions(data.language ?? 'python'), [data.language])
+    // Whether the editor currently has meaningful (non-default) code.
+    const hasCode = Boolean(data.code && data.code.trim())
+    // Resolved AI mode: user override if set, otherwise auto-detect from content.
+    const effectiveMode = aiForceMode ?? (hasCode ? 'edit' : 'write')
+
+    // ── AI code assist ───────────────────────────────────────────────────────
+    const handleAiSubmit = useCallback(async () => {
+        if (!aiPrompt.trim() || isAiLoading) return
+
+        setShowAiPanel(false)
+        setIsAiLoading(true)
+
+        const controller = new AbortController()
+        aiAbortRef.current = controller
+        let accumulated = ''
+
+        try {
+            const response = await streamCodeAssist(
+                {
+                    language: data.language ?? 'python',
+                    // Write mode sends empty string so the AI writes from scratch
+                    code: effectiveMode === 'write' ? '' : (latestCodeRef.current ?? ''),
+                    prompt: aiPrompt.trim(),
+                },
+                controller.signal,
+            )
+
+            if (!response.ok) throw new Error(`HTTP ${response.status}`)
+
+            const modelUsed = response.headers.get('X-Model-Used') ?? 'gemini-3.1-flash-lite-preview'
+            const reader = response.body!.getReader()
+            const decoder = new TextDecoder()
+
+            while (true) {
+                const { done, value } = await reader.read()
+                if (done) break
+                const chunk = parseStreamChunk(decoder.decode(value), 'code-assist', modelUsed)
+                accumulated += chunk
+                updateNodeData(id, { code: accumulated })
+            }
+
+            // Strip markdown fences if the model returned them despite instructions
+            const clean = stripCodeFences(accumulated)
+            if (clean !== accumulated) {
+                updateNodeData(id, { code: clean })
+            }
+
+            setAiPrompt('')
+        } catch (err) {
+            if ((err as Error).name !== 'AbortError') {
+                console.error('AI code assist error:', err)
+            }
+        } finally {
+            setIsAiLoading(false)
+            aiAbortRef.current = null
+            persistToLocalStorage()
+        }
+    }, [aiPrompt, isAiLoading, effectiveMode, data.language, id, updateNodeData, persistToLocalStorage])
+
+    const handleAiButtonClick = useCallback(() => {
+        // While loading, clicking the button cancels the in-flight request
+        if (isAiLoading) {
+            aiAbortRef.current?.abort()
+            setIsAiLoading(false)
+            return
+        }
+        setShowAiPanel((v) => !v)
+    }, [isAiLoading])
+
+    const extensions = useMemo(
+        () => [EditorView.lineWrapping, ...getExtensions(data.language ?? 'python')],
+        [data.language],
+    )
     const borderColor = getStatusBorderColor(data.status)
 
     return (
@@ -180,43 +306,50 @@ function CodeEditorNode({ id, data }: CodeEditorNodeProps) {
             )}
 
             {/* ── Top Toolbar ── */}
-            <div className="flex items-center justify-between px-2 py-1 shrink-0 border-b border-gray-700" style={{ backgroundColor: '#0f0f1a' }}>
+            <div className="flex items-center justify-between px-2 py-2 shrink-0 border-b border-gray-700" style={{ backgroundColor: '#0f0f1a' }}>
                 {/* Left: icon + label + language selector */}
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 min-w-0">
                     <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5 text-cyan-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <polyline points="16 18 22 12 16 6" />
                         <polyline points="8 6 2 12 8 18" />
                     </svg>
-                    <span className="text-[10px] font-bold tracking-widest text-cyan-400 uppercase">Code</span>
+                    <span className="text-[10px] font-bold tracking-widest text-cyan-400 uppercase shrink-0">Code</span>
 
-                    <div className="w-px h-3.5 bg-gray-700 mx-0.5" />
+                    <div className="w-px h-3.5 bg-gray-700 mx-0.5 shrink-0" />
 
-                    {/* Understood (tick) */}
-                    <button
-                        title="Mark as understood"
-                        onClick={() => handleStatusToggle('understood')}
-                        className={`p-1 rounded-md transition-colors ${data.status === 'understood' ? 'text-green-400 bg-green-900/40' : 'text-gray-500 hover:text-green-400 hover:bg-green-900/30'}`}
-                    >
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                        </svg>
-                    </button>
+                    {data.isMinimized ? (
+                        /* Show title when minimized */
+                        <span className="text-xs text-gray-300 truncate max-w-[180px]">
+                            {data.title?.trim() || 'Untitled snippet'}
+                        </span>
+                    ) : (
+                        <>
+                            {/* Understood (tick) */}
+                            <button
+                                title="Mark as understood"
+                                onClick={() => handleStatusToggle('understood')}
+                                className={`p-1 rounded-md transition-colors ${data.status === 'understood' ? 'text-green-400 bg-green-900/40' : 'text-gray-500 hover:text-green-400 hover:bg-green-900/30'}`}
+                            >
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                                </svg>
+                            </button>
 
-                    {/* Struggling (cross) */}
-                    <button
-                        title="Mark as struggling"
-                        onClick={() => handleStatusToggle('struggling')}
-                        className={`p-1 rounded-md transition-colors ${data.status === 'struggling' ? 'text-red-400 bg-red-900/40' : 'text-gray-500 hover:text-red-400 hover:bg-red-900/30'}`}
-                    >
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                    </button>
+                            {/* Struggling (cross) */}
+                            <button
+                                title="Mark as struggling"
+                                onClick={() => handleStatusToggle('struggling')}
+                                className={`p-1 rounded-md transition-colors ${data.status === 'struggling' ? 'text-red-400 bg-red-900/40' : 'text-gray-500 hover:text-red-400 hover:bg-red-900/30'}`}
+                            >
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
 
-                    <div className="w-px h-3.5 bg-gray-700 mx-0.5" />
+                            <div className="w-px h-3.5 bg-gray-700 mx-0.5" />
 
-                    {/* Language dropdown — custom pill */}
-                    <div ref={langDropdownRef} className="relative ml-1 nodrag nopan">
+                            {/* Language dropdown — custom pill */}
+                            <div ref={langDropdownRef} className="relative ml-1 nodrag nopan">
                         {(() => {
                             const active = LANGUAGE_OPTIONS.find((o) => o.value === (data.language ?? 'python')) ?? LANGUAGE_OPTIONS[0]
                             return (
@@ -259,6 +392,8 @@ function CodeEditorNode({ id, data }: CodeEditorNodeProps) {
                             </div>
                         )}
                     </div>
+                        </>
+                    )}
                 </div>
 
                 {/* Right: pin + delete + minimize */}
@@ -281,7 +416,7 @@ function CodeEditorNode({ id, data }: CodeEditorNodeProps) {
                         <div className="flex items-center gap-0.5" onMouseLeave={() => setConfirmDelete(false)}>
                             <span className="text-[10px] text-red-400 font-semibold whitespace-nowrap">Delete?</span>
                             <button title="Confirm delete" onClick={handleDelete} className="p-1 text-white bg-red-600 hover:bg-red-700 rounded-md transition-colors">
-                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                             </button>
                             <button title="Cancel" onClick={() => setConfirmDelete(false)} className="p-1 text-gray-400 hover:text-gray-200 rounded-md hover:bg-gray-700 transition-colors">
                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
@@ -324,31 +459,48 @@ function CodeEditorNode({ id, data }: CodeEditorNodeProps) {
                         />
                     </div>
 
-                    {/* CodeMirror editor */}
-                    <div
-                        className="flex-1 overflow-hidden relative"
-                        onWheelCapture={(e) => e.stopPropagation()}
-                    >
-                        <CodeMirror
-                            ref={editorRef}
-                            value={data.code ?? ''}
-                            extensions={extensions}
-                            onChange={(value) => updateNodeData(id, { code: value })}
-                            onBlur={() => persistToLocalStorage()}
-                            theme="dark"
-                            basicSetup={{
-                                lineNumbers: true,
-                                highlightActiveLineGutter: true,
-                                foldGutter: false,
-                                autocompletion: true,
-                                bracketMatching: true,
-                                indentOnInput: true,
-                                syntaxHighlighting: true,
-                                highlightActiveLine: true,
-                            }}
-                            className="nodrag nopan h-full"
-                            style={{ fontSize: 13, height: '100%' }}
-                        />
+                    {/* Scoped CSS: scrollbar on the native-scroll wrapper */}
+                    <style>{`
+                        [data-nodeid="${id}"] .code-scroll { scrollbar-width: thin; scrollbar-color: #6B7280 #1a1a2e; }
+                        [data-nodeid="${id}"] .code-scroll::-webkit-scrollbar { width: 8px; }
+                        [data-nodeid="${id}"] .code-scroll::-webkit-scrollbar-track { background: #1a1a2e; }
+                        [data-nodeid="${id}"] .code-scroll::-webkit-scrollbar-thumb { background: #6B7280; border-radius: 4px; }
+                        [data-nodeid="${id}"] .code-scroll::-webkit-scrollbar-thumb:hover { background: #9CA3AF; }
+                        [data-nodeid="${id}"] .cm-scroller { overflow: hidden !important; }
+                        [data-nodeid="${id}"] .cm-editor { min-height: 100%; }
+                        [data-nodeid="${id}"] .cm-gutters { padding-left: 8px; }
+                        [data-nodeid="${id}"] .cm-content { padding-bottom: 20px; }
+                    `}</style>
+
+                    {/* Browser-native scroll wrapper — identical pattern to AnswerNode/SummaryNode.
+                        CodeMirror runs in auto-height mode (no height prop), so it grows with
+                        content. The wrapper div clips it and provides the native scrollbar. */}
+                    <div className="flex-1 relative min-h-0">
+                        <div
+                            className="code-scroll absolute inset-0 overflow-y-auto nodrag nopan nowheel"
+                            onWheelCapture={(e) => e.stopPropagation()}
+                        >
+                            <CodeMirror
+                                ref={editorRef}
+                                value={data.code ?? ''}
+                                extensions={extensions}
+                                onChange={(value) => updateNodeData(id, { code: value })}
+                                onBlur={() => persistToLocalStorage()}
+                                theme="dark"
+                                basicSetup={{
+                                    lineNumbers: true,
+                                    highlightActiveLineGutter: true,
+                                    foldGutter: false,
+                                    autocompletion: true,
+                                    bracketMatching: true,
+                                    indentOnInput: true,
+                                    syntaxHighlighting: true,
+                                    highlightActiveLine: true,
+                                }}
+                                className="nodrag nopan"
+                                style={{ fontSize: 13 }}
+                            />
+                        </div>
 
                         {/* Select-all button — floats top-right inside editor */}
                         <button
@@ -361,8 +513,153 @@ function CodeEditorNode({ id, data }: CodeEditorNodeProps) {
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7h16M4 12h16M4 17h16" />
                             </svg>
                         </button>
+
+                        {/* AI loading shimmer — thin animated bar at the top of the editor */}
+                        {isAiLoading && (
+                            <div className="absolute top-0 left-0 right-0 h-0.5 z-20 overflow-hidden">
+                                <div
+                                    className="h-full animate-pulse"
+                                    style={{
+                                        background: 'linear-gradient(90deg, transparent 0%, #2D9CDB 50%, transparent 100%)',
+                                        animation: 'ai-scan 1.4s ease-in-out infinite',
+                                    }}
+                                />
+                            </div>
+                        )}
                     </div>
                 </>
+            )}
+
+            {/* ── AI Code Assistant button + popup ────────────────────────────────
+                Positioned absolute within the root div (which is `relative`) so the
+                popup is never clipped by the editor's overflow-hidden container.    */}
+            {!data.isMinimized && (
+                <div
+                    ref={aiPanelRef}
+                    className="absolute bottom-3 right-3 z-30"
+                >
+                    {/* Popup — appears above the button */}
+                    {showAiPanel && (
+                        <div
+                            className="absolute right-0 nodrag nopan"
+                            style={{ bottom: 'calc(100% + 8px)', width: 272 }}
+                        >
+                            <div
+                                className="rounded-xl border border-gray-700/80 shadow-2xl flex flex-col overflow-hidden"
+                                style={{ backgroundColor: '#0d0d1f' }}
+                            >
+                                {/* Panel header */}
+                                <div
+                                    className="flex items-center justify-between px-3 py-2 border-b border-gray-700/60 shrink-0"
+                                    style={{ backgroundColor: '#12122a' }}
+                                >
+                                    <div className="flex items-center gap-2">
+                                        {/* Sparkles icon */}
+                                        <svg className="w-3.5 h-3.5 shrink-0" style={{ color: '#2D9CDB' }} viewBox="0 0 24 24" fill="currentColor">
+                                            <path d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z" />
+                                        </svg>
+                                        <span className="text-xs font-semibold" style={{ color: '#2D9CDB' }}>AI Code Assistant</span>
+                                    </div>
+                                    <div className="flex items-center gap-1.5">
+                                        {/* Write / Edit mode badge — click to toggle */}
+                                        <button
+                                            type="button"
+                                            title={effectiveMode === 'edit' ? 'Switch to Write mode' : 'Switch to Edit mode'}
+                                            onClick={() => setAiForceMode(effectiveMode === 'edit' ? 'write' : 'edit')}
+                                            className="nodrag nopan text-[9px] px-1.5 py-0.5 rounded-full border font-semibold tracking-wide transition-all duration-150 hover:brightness-125 active:scale-95 cursor-pointer"
+                                            style={effectiveMode === 'edit'
+                                                ? { borderColor: '#F2994A50', color: '#F2994A', backgroundColor: '#F2994A12' }
+                                                : { borderColor: '#2D9CDB50', color: '#2D9CDB', backgroundColor: '#2D9CDB12' }
+                                            }
+                                        >
+                                            {effectiveMode === 'edit' ? 'EDIT' : 'WRITE'}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            title="Close AI panel"
+                                            onClick={() => setShowAiPanel(false)}
+                                            className="p-0.5 rounded text-gray-500 hover:text-gray-300 hover:bg-white/10 transition-colors"
+                                        >
+                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                            </svg>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* Prompt textarea + submit */}
+                                <div className="p-2.5 flex flex-col gap-2">
+                                    <textarea
+                                        ref={aiTextareaRef}
+                                        value={aiPrompt}
+                                        onChange={(e) => setAiPrompt(e.target.value)}
+                                        onKeyDown={(e) => {
+                                            // Ctrl+Enter or Cmd+Enter submits
+                                            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                                                e.preventDefault()
+                                                handleAiSubmit()
+                                            }
+                                            // Stop keydown from bubbling to canvas (e.g. Delete key)
+                                            e.stopPropagation()
+                                        }}
+                                        placeholder={hasCode
+                                            ? 'Describe what to change or fix…'
+                                            : 'What should I write? (e.g. binary search in Python)'
+                                        }
+                                        rows={3}
+                                        className="nodrag nopan w-full text-xs text-white placeholder-gray-600 rounded-lg p-2 resize-none border focus:outline-none transition-colors"
+                                        style={{
+                                            backgroundColor: '#1a1a2e',
+                                            borderColor: '#374151',
+                                            minHeight: 68,
+                                        }}
+                                        onFocus={(e) => { e.currentTarget.style.borderColor = '#2D9CDB' }}
+                                        onBlur={(e) => { e.currentTarget.style.borderColor = '#374151' }}
+                                    />
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-[9px] text-gray-600 select-none">⌃↵ to send</span>
+                                        <button
+                                            type="button"
+                                            onClick={handleAiSubmit}
+                                            disabled={!aiPrompt.trim()}
+                                            className="nodrag nopan px-3 py-1 rounded-lg text-xs font-semibold text-white transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed hover:brightness-110 active:scale-95"
+                                            style={{ backgroundColor: '#2D9CDB' }}
+                                        >
+                                            Generate
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* AI trigger button */}
+                    <button
+                        type="button"
+                        title={isAiLoading ? 'Cancel AI generation' : 'AI Code Assistant'}
+                        onClick={handleAiButtonClick}
+                        className="nodrag nopan w-9 h-9 rounded-xl flex items-center justify-center shadow-lg transition-all duration-150 hover:brightness-110 hover:scale-105 active:scale-95"
+                        style={{
+                            backgroundColor: showAiPanel ? '#1a7aaa' : '#2D9CDB',
+                            boxShadow: showAiPanel
+                                ? '0 0 0 2px #2D9CDB40, 0 4px 12px #2D9CDB30'
+                                : '0 4px 12px #2D9CDB30',
+                        }}
+                    >
+                        {isAiLoading ? (
+                            /* Cancel / loading spinner */
+                            <svg className="w-4 h-4 text-white animate-spin" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                            </svg>
+                        ) : (
+                            /* Sparkles icon */
+                            <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z" />
+                            </svg>
+                        )}
+                    </button>
+                </div>
             )}
 
             {/* ReactFlow Handles */}

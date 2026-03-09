@@ -1207,3 +1207,71 @@ async def quiz_followup_chat(
     if _usage_input > 0 or _usage_output > 0:
         yield f"\x00USAGE:{_usage_input}:{_usage_output}"
 
+
+async def stream_code_assist(language: str, code: str, prompt: str):
+    """
+    Streams AI-generated or AI-edited code for the code editor node.
+
+    - Write mode (empty code): writes clean code from scratch matching the prompt.
+    - Edit mode (existing code): returns the COMPLETE modified file with ONLY the
+      requested change applied, preserving the student's style, variable names, and
+      comments throughout. Raw code only — no markdown fences, no explanations.
+
+    Appends the USAGE sentinel as the final chunk for token tracking.
+    """
+    lang_label = {'python': 'Python', 'java': 'Java', 'c': 'C'}.get(language, language)
+    is_editing = bool(code and code.strip())
+
+    if is_editing:
+        # Annotate each line with its number so the AI can reference specific positions
+        lines = code.split('\n')
+        numbered = '\n'.join(f'{i + 1}: {line}' for i, line in enumerate(lines))
+        contents = (
+            f"You are an expert {lang_label} programming tutor helping a student.\n\n"
+            f"The student's current {lang_label} code (line numbers shown for reference only — do NOT include them in output):\n"
+            f"```\n{numbered}\n```\n\n"
+            f"Student's request: {prompt}\n\n"
+            f"INSTRUCTIONS:\n"
+            f"- Return the COMPLETE {lang_label} code with ONLY the requested change applied.\n"
+            f"- Leave every other line EXACTLY as the student wrote it — same variable names, "
+            f"indentation style, spacing, and comments.\n"
+            f"- Match the student's naming conventions and comment style throughout.\n"
+            f"- Add a brief inline comment next to any line you changed, but nowhere else.\n"
+            f"- Output ONLY raw {lang_label} code. No markdown fences, no explanation text.\n"
+        )
+    else:
+        contents = (
+            f"You are an expert {lang_label} programming tutor helping a student.\n\n"
+            f"Student's request: {prompt}\n\n"
+            f"INSTRUCTIONS:\n"
+            f"- Write clean, correct, beginner-friendly {lang_label} code that fulfils the request.\n"
+            f"- Use clear, descriptive variable names.\n"
+            f"- Add brief inline comments where the logic is non-obvious.\n"
+            f"- Keep it concise — only what is needed, no unnecessary boilerplate.\n"
+            f"- Output ONLY raw {lang_label} code. No markdown fences, no explanation text.\n"
+        )
+
+    config = types.GenerateContentConfig(
+        max_output_tokens=4096,
+        temperature=0.15,
+    )
+
+    _usage_input = 0
+    _usage_output = 0
+    try:
+        async for chunk in await _client.aio.models.generate_content_stream(
+            model=MODEL_FLASH, contents=contents, config=config
+        ):
+            text = chunk.text
+            if text:
+                yield text
+            meta = getattr(chunk, 'usage_metadata', None)
+            if meta:
+                _usage_input = getattr(meta, 'prompt_token_count', 0) or 0
+                _usage_output = getattr(meta, 'candidates_token_count', 0) or 0
+    except Exception as e:
+        logger.error("Gemini code assist streaming error: %s", str(e))
+        yield f"# Error: {str(e)}"
+    if _usage_input > 0 or _usage_output > 0:
+        yield f"\x00USAGE:{_usage_input}:{_usage_output}"
+

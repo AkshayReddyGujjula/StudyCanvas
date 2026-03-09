@@ -2841,6 +2841,7 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
                     fitView={false}
                     zoomOnScroll={false}
                     panOnScroll={false}
+                    preventScrolling={false}
                     panOnDrag={isCursorMode}
                     nodesDraggable={isCursorMode}
                     nodesConnectable={isCursorMode}

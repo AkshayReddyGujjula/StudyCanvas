@@ -333,6 +333,30 @@ export const streamQuizFollowUp = async (
 }
 
 /**
+ * Stream AI-generated or AI-edited code for the code editor node.
+ * Write mode: code is empty — AI writes from scratch.
+ * Edit mode:  code is present — AI returns full file with only the requested change applied.
+ * Returns the raw Response for streaming via response.body.getReader().
+ * Use parseStreamChunk() on each decoded chunk to strip the usage sentinel.
+ */
+export const streamCodeAssist = async (
+    request: {
+        language: string
+        code: string
+        prompt: string
+    },
+    signal: AbortSignal,
+): Promise<Response> => {
+    const response = await fetch(`${API_BASE}/api/code-assist`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+        signal,
+    })
+    return response
+}
+
+/**
  * Extract text from an image using Gemini Vision OCR.
  */
 export const extractTextFromImage = async (

@@ -56,6 +56,12 @@ class QueryRequest(BaseModel):
     image_base64: Optional[str] = Field(None, description="Current page rendered as base64 JPEG for vision context")
 
 
+class CodeAssistRequest(BaseModel):
+    language: str = Field(..., max_length=20, description="Programming language: python, java, or c")
+    code: str = Field("", max_length=100000, description="Current code in the editor (empty for new code)")
+    prompt: str = Field(..., max_length=2000, description="User's instruction to the AI")
+
+
 class QuizNode(BaseModel):
     highlighted_text: str = Field(..., max_length=10000)
     question: str = Field(..., max_length=2000)
