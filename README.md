@@ -54,6 +54,7 @@ The result is a **visual knowledge map** of exactly what you understood, what co
 | **Streaming Responses** | All AI answers stream token-by-token using `fetch` + `ReadableStream` with a cancel button. |
 | **Folder & Canvas Management** | Organise canvases in folders. Name prompts on creation prevent accidental duplicates. |
 | **Local File Persistence** | Canvas state and PDFs are saved to a local folder you choose via the File System Access API. |
+| **Code Editor Node** | Drop an interactive code editor onto the canvas for Python, Java, or C. Mark snippets as understood or struggling, and use the built-in AI assistant to write or edit code with streaming Gemini responses. |
 | **Rate Limiting** | All heavy LLM routes are rate-limited with `slowapi` to protect against abuse. |
 
 ---
@@ -115,6 +116,9 @@ StudyCanvas/
 │   │   ├── flashcards.py       # POST /api/flashcards
 │   │   ├── page_quiz.py        # POST /api/page-quiz & /api/grade-answer
 │   │   ├── ocr.py              # POST /api/vision — Gemini Vision OCR
+│   │   ├── quiz_followup.py    # POST /api/quiz-followup — follow-up quiz questions
+│   │   ├── transcription.py    # POST /api/transcribe — audio transcription via Gemini
+│   │   ├── code_assist.py      # POST /api/code-assist — streaming AI code write & edit
 │   │   └── convert.py          # POST /api/convert-to-pdf — DOCX/PPTX → PDF
 │   └── services/
 │       ├── gemini_service.py   # All Gemini API calls (quiz, flashcards, grading, OCR)
@@ -153,7 +157,10 @@ StudyCanvas/
         │   ├── ImageNode.tsx           # Drag-and-drop image node with resize support
         │   ├── StickyNoteNode.tsx      # Coloured sticky note node (6 pastel presets)
         │   ├── TimerNode.tsx           # Pomodoro timer node (3 modes, custom durations)
-        │   ├── LeftToolbar.tsx         # Toolbar: prompt / image / flashcard / sticky / timer / summary
+        │   ├── VoiceNoteNode.tsx       # Voice recording node with Gemini transcription
+        │   ├── TranscriptionNode.tsx   # Displays Gemini transcription result
+        │   ├── CodeEditorNode.tsx      # Code editor node (Python/Java/C) with AI assistant
+        │   ├── LeftToolbar.tsx         # Toolbar: prompt / image / flashcard / sticky / timer / summary / code
         │   ├── AskGeminiPopup.tsx      # Floating "Ask Gemini" popup on text select
         │   ├── QuestionModal.tsx       # Full question input modal
         │   ├── RevisionModal.tsx       # Revision quiz modal (MCQ + short-answer)
@@ -275,6 +282,7 @@ The app will be available at `http://localhost:5173`.
 | `POST` | `/api/page-quiz` | Generate 2–4 adaptive comprehension questions for a single page |
 | `POST` | `/api/grade-answer` | Grade a page-quiz answer with personalised feedback |
 | `POST` | `/api/vision` | Extract text from a base64 image via Gemini Vision OCR |
+| `POST` | `/api/code-assist` | Stream AI-written or AI-edited code for the code editor node |
 | `GET` | `/api/health` | Health check |
 
 ---
