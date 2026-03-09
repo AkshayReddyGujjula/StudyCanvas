@@ -440,15 +440,21 @@ export default function PDFViewer({
                     </span>
                     <button
                         onClick={() => {
-                            if (outerRef.current) {
-                                outerRef.current.scrollLeft = 0
-                                outerRef.current.scrollTop = 0
-                            }
-                            setScale(fitScaleRef.current)
-                            onZoomChangeRef.current?.(fitScaleRef.current)
+                            const outer = outerRef.current
+                            if (!outer || !pdfNaturalWidthRef.current || !pdfNaturalHeightRef.current) return
+                            const availW = outer.clientWidth - 32
+                            const availH = outer.clientHeight - 32
+                            const scaleW = availW / pdfNaturalWidthRef.current
+                            const scaleH = availH / pdfNaturalHeightRef.current
+                            // Fit entire page within viewer, with 2% margin for clean look
+                            const fitBoth = Math.min(scaleW, scaleH) * 0.98
+                            outer.scrollLeft = 0
+                            outer.scrollTop = 0
+                            setScale(fitBoth)
+                            onZoomChangeRef.current?.(fitBoth)
                         }}
                         className="text-xs text-indigo-500 hover:text-indigo-700 px-1 leading-none flex-shrink-0"
-                        title="Reset zoom to fit width"
+                        title="Fit entire page to viewer"
                     >↺</button>
                 </div>
 

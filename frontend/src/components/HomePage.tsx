@@ -31,6 +31,11 @@ export default function HomePage() {
     const [showContext, setShowContext] = useState(false)
     const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
     const [showAutosaveMenu, setShowAutosaveMenu] = useState(false)
+    const [showProfileModal, setShowProfileModal] = useState(false)
+    const [profilePic, setProfilePic] = useState<string | null>(() => {
+        try { return localStorage.getItem('studycanvas_profile_pic') } catch { return null }
+    })
+    const profilePicInputRef = useRef<HTMLInputElement>(null)
 
     // ─── New canvas / folder name modals ─────────────────────────────────
     const [showNewCanvasModal, setShowNewCanvasModal] = useState(false)
@@ -364,9 +369,18 @@ export default function HomePage() {
                     </div>
                     <div className="flex items-center gap-4">
                         <span className="text-sm text-gray-500">{userName}</span>
-                        <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-sm font-semibold text-indigo-700">
-                            {userName.charAt(0).toUpperCase()}
-                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setShowProfileModal(true)}
+                            className="w-8 h-8 rounded-full overflow-hidden bg-indigo-100 flex items-center justify-center text-sm font-semibold text-indigo-700 hover:ring-2 hover:ring-indigo-400 hover:ring-offset-1 transition-all cursor-pointer flex-shrink-0"
+                            title="Change profile picture"
+                        >
+                            {profilePic ? (
+                                <img src={profilePic} alt="Profile" className="w-full h-full object-cover" />
+                            ) : (
+                                userName.charAt(0).toUpperCase()
+                            )}
+                        </button>
                         <button
                             type="button"
                             onClick={() => setShowUsageModal(true)}
@@ -745,6 +759,80 @@ export default function HomePage() {
                 </div>
             )}
         </div>
+
+        {/* Hidden file input for profile picture upload */}
+        <input
+            ref={profilePicInputRef}
+            type="file"
+            accept="image/*"
+            aria-label="Upload profile picture"
+            className="hidden"
+            onChange={(e) => {
+                const file = e.target.files?.[0]
+                if (!file) return
+                const reader = new FileReader()
+                reader.onload = (ev) => {
+                    const dataUrl = ev.target?.result as string
+                    setProfilePic(dataUrl)
+                    try { localStorage.setItem('studycanvas_profile_pic', dataUrl) } catch { /* ignore */ }
+                    setShowProfileModal(false)
+                }
+                reader.readAsDataURL(file)
+                // reset so same file can be re-selected
+                e.target.value = ''
+            }}
+        />
+
+        {/* Profile picture modal */}
+        {showProfileModal && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40" onClick={() => setShowProfileModal(false)}>
+                <div
+                    className="bg-white rounded-xl shadow-2xl p-6 max-w-xs w-full mx-4"
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    <h3 className="text-base font-semibold text-gray-900 mb-4">Profile Picture</h3>
+                    {/* Current avatar preview */}
+                    <div className="flex justify-center mb-5">
+                        <div className="w-20 h-20 rounded-full overflow-hidden bg-indigo-100 flex items-center justify-center text-2xl font-bold text-indigo-700 ring-2 ring-indigo-200">
+                            {profilePic ? (
+                                <img src={profilePic} alt="Profile" className="w-full h-full object-cover" />
+                            ) : (
+                                userName.charAt(0).toUpperCase()
+                            )}
+                        </div>
+                    </div>
+                    <div className="flex flex-col gap-2">
+                        <button
+                            type="button"
+                            onClick={() => profilePicInputRef.current?.click()}
+                            className="w-full px-4 py-2.5 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors"
+                        >
+                            Upload Image
+                        </button>
+                        {profilePic && (
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setProfilePic(null)
+                                    try { localStorage.removeItem('studycanvas_profile_pic') } catch { /* ignore */ }
+                                    setShowProfileModal(false)
+                                }}
+                                className="w-full px-4 py-2.5 text-sm font-medium text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            >
+                                Remove Picture
+                            </button>
+                        )}
+                        <button
+                            type="button"
+                            onClick={() => setShowProfileModal(false)}
+                            className="w-full px-4 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                        >
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
 
         {/* Tutorial welcome modal - shown once for new users */}
         {!tutorialCompleted && <TutorialWelcomeModal />}

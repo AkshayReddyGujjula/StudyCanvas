@@ -166,6 +166,20 @@ export const tutorialSteps: TutorialStep[] = [
 
     // ── 10 ─────────────────────────────────────────────────────────
     {
+        id: 'minimap',
+        phaseLabel: 'Navigation',
+        phaseIconKey: 'layers',
+        title: 'Minimap — Click to Navigate',
+        description:
+            'The minimap in the bottom-right corner shows a bird\'s-eye view of your entire canvas. Click any node thumbnail in the minimap to instantly fly to that node — the viewport centres on it with a smooth animation at your current zoom level. You can also pan and zoom directly inside the minimap.',
+        proTip: 'Press F to fit all nodes into view at once — great after a long study session',
+        targetSelector: '.react-flow__minimap',
+        tooltipPosition: 'left',
+        highlightPadding: 12,
+    },
+
+    // ── 11 ─────────────────────────────────────────────────────────
+    {
         id: 'save',
         phaseLabel: 'Organisation',
         phaseIconKey: 'save',

@@ -12,7 +12,7 @@ export function clearTutorialStorage() {
 }
 
 /** Total number of spotlight steps in the tutorial (not counting the completion screen). */
-export const TUTORIAL_TOTAL_STEPS = 11
+export const TUTORIAL_TOTAL_STEPS = 12
 
 function loadCompleted(): boolean {
     try {
