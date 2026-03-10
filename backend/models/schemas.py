@@ -128,3 +128,18 @@ class QuizFollowUpRequest(BaseModel):
     chat_history: Optional[list[ChatMessage]] = Field(default=None, description="Prior follow-up chat turns")
     raw_text: Optional[str] = Field(None, max_length=50000, description="Relevant page content for additional context")
 
+
+class GenerateQuizTitleRequest(BaseModel):
+    """Request body for generating a 2-7 word title for a completed quiz session."""
+    source_type: str = "struggling"              # "page" | "struggling"
+    page_index: Optional[int] = None             # 1-based, only for 'page' quizzes
+    questions: List[str] = Field(..., description="Question strings from the completed quiz")
+
+
+class GenerateQuizTitleResponse(BaseModel):
+    """Response for quiz title generation."""
+    title: str
+    model_used: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+

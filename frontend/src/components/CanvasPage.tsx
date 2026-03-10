@@ -65,7 +65,7 @@ export default function CanvasPage() {
             const {
                 nodes, edges, fileData, highlights, userDetails,
                 currentPage, pageMarkdowns, zoomLevel, scrollPositions, canvasViewport,
-                drawingStrokes, savedColors, toolSettings,
+                drawingStrokes, savedColors, toolSettings, quizHistory,
             } = store
 
             // Build the state object (strip large recoverable fields)
@@ -80,7 +80,7 @@ export default function CanvasPage() {
                 }
                 return n
             })
-            const stateObj = { nodes: lightNodes, edges, fileData: lightFileData, highlights, userDetails, currentPage, pageMarkdowns, zoomLevel, scrollPositions, canvasViewport, drawingStrokes, savedColors, toolSettings }
+            const stateObj = { nodes: lightNodes, edges, fileData: lightFileData, highlights, userDetails, currentPage, pageMarkdowns, zoomLevel, scrollPositions, canvasViewport, drawingStrokes, savedColors, toolSettings, quizHistory }
 
             onProgress?.(20, 'Serializing canvas…')
 
@@ -300,6 +300,7 @@ export default function CanvasPage() {
                     if (stateObj.savedColors) store.setSavedColors(stateObj.savedColors)
                     if (stateObj.toolSettings) store.setToolSettings(stateObj.toolSettings)
                     if (stateObj.pageMarkdowns && Array.isArray(stateObj.pageMarkdowns)) store.setPageMarkdowns(stateObj.pageMarkdowns)
+                    if (stateObj.quizHistory && Array.isArray(stateObj.quizHistory)) store.setQuizHistory(stateObj.quizHistory)
                 }
 
                 // Always hydrate canvasStore.userDetails from the global user context

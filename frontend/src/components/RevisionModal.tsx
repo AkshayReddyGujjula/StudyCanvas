@@ -2,8 +2,8 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import type { Node } from '@xyflow/react'
 import { useCanvasStore } from '../store/canvasStore'
 import { extractPageImageBase64 } from '../utils/pdfImageExtractor'
-import { generateQuiz, validateAnswer, streamQuizFollowUp, parseStreamChunk } from '../api/studyApi'
-import type { AnswerNodeData, QuizQuestion, ValidateAnswerResponse } from '../types'
+import { generateQuiz, validateAnswer, streamQuizFollowUp, parseStreamChunk, generateQuizTitle } from '../api/studyApi'
+import type { AnswerNodeData, QuizQuestion, ValidateAnswerResponse, QuizHistoryEntry } from '../types'
 import ModelIndicator from './ModelIndicator'
 
 interface RevisionModalProps {
@@ -16,6 +16,12 @@ interface RevisionModalProps {
     pageContent?: string
     /** Collected text from sticky notes, summaries, transcriptions, custom prompts */
     canvasContext?: string
+    /** When provided, skip API fetch and use these questions directly (retake flow) */
+    initialQuestions?: QuizQuestion[]
+    /** When provided, title = "Re-take: {retakeSourceTitle}" and Gemini title call is skipped */
+    retakeSourceTitle?: string
+    /** Callback fired when the quiz completes — receives the finished history entry */
+    onQuizComplete?: (entry: QuizHistoryEntry) => void
 }
 
 interface QuestionState {
@@ -45,6 +51,9 @@ export default function RevisionModal({
     pageIndex,
     pageContent,
     canvasContext,
+    initialQuestions,
+    retakeSourceTitle,
+    onQuizComplete,
 }: RevisionModalProps) {
     const [questions, setQuestions] = useState<QuizQuestion[] | null>(null)
     const [loading, setLoading] = useState(true)
@@ -78,6 +87,15 @@ export default function RevisionModal({
     useEffect(() => {
         if (hasFetchedRef.current) return
         hasFetchedRef.current = true
+
+        // Retake path: questions already stored — skip the API call entirely
+        if (initialQuestions && initialQuestions.length > 0) {
+            setQuestions(initialQuestions)
+            setQuestionStates(initialQuestions.map(() => emptyQuestionState()))
+            setFollowUpHistories(initialQuestions.map(() => []))
+            setLoading(false)
+            return
+        }
 
         let input: any[] = []
         if (sourceType !== 'page') {
@@ -242,6 +260,38 @@ export default function RevisionModal({
         setFollowUpInput('')
         if (currentIndex >= questions.length - 1) {
             setShowScore(true)
+            // Fire-and-forget: generate title + save quiz history entry
+            void (async () => {
+                if (!onQuizComplete) return
+                try {
+                    const title = retakeSourceTitle
+                        ? `Re-take: ${retakeSourceTitle}`
+                        : await generateQuizTitle(
+                            sourceType ?? 'struggling',
+                            questions.map(q => q.question),
+                            pageIndex != null ? pageIndex + 1 : undefined, // store 1-based
+                        )
+                    onQuizComplete({
+                        id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                        title,
+                        sourceType: sourceType ?? 'struggling',
+                        pageIndex: pageIndex != null ? pageIndex + 1 : undefined, // 1-based
+                        dateCompleted: new Date().toISOString(),
+                        totalQuestions: questions.length,
+                        score,
+                        questions: questions.map(q => ({
+                            question: q.question,
+                            question_type: q.question_type,
+                            options: q.options,
+                            correct_option: q.correct_option,
+                        })),
+                        isRetake: !!retakeSourceTitle,
+                        originalTitle: retakeSourceTitle,
+                    })
+                } catch (err) {
+                    console.error('[RevisionModal] Failed to save quiz history:', err)
+                }
+            })()
         } else {
             setCurrentIndex((i) => i + 1)
         }

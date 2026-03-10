@@ -67,6 +67,28 @@ export interface QuizQuestion {
     correct_option?: number   // 0-based index of correct option for MCQ
 }
 
+/** A stored question from a completed revision quiz (same shape as QuizQuestion) */
+export interface QuizHistoryQuestion {
+    question: string
+    question_type: 'short_answer' | 'mcq'
+    options?: string[]
+    correct_option?: number
+}
+
+/** A completed revision quiz session stored per canvas */
+export interface QuizHistoryEntry {
+    id: string                        // `${Date.now()}-${Math.random().toString(36).slice(2,7)}`
+    title: string                     // AI-generated (2-7 words) or "Re-take: {originalTitle}"
+    sourceType: 'page' | 'struggling'
+    pageIndex?: number                // 1-based; only for 'page' quizzes
+    dateCompleted: string             // ISO 8601
+    totalQuestions: number
+    score: number                     // correct=1.0, partial=0.5
+    questions: QuizHistoryQuestion[]  // stored for retake
+    isRetake?: boolean
+    originalTitle?: string
+}
+
 export interface ValidateAnswerResponse {
     status: 'correct' | 'incorrect' | 'partial'
     explanation: string

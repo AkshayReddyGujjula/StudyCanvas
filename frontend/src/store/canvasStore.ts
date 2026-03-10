@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { Node, Edge } from '@xyflow/react'
-import type { HighlightEntry, DrawingStroke, StrokePoint, ToolSettings, WhiteboardTool, WhiteboardUndoAction } from '../types'
+import type { HighlightEntry, DrawingStroke, StrokePoint, ToolSettings, WhiteboardTool, WhiteboardUndoAction, QuizHistoryEntry } from '../types'
 import { DEFAULT_TOOL_SETTINGS, DEFAULT_SAVED_COLORS } from '../types'
 import { savePdfToLocal, loadPdfFromLocal, deletePdfFromLocal } from '../utils/pdfStorage'
 import { invalidatePdfProxyCache } from '../utils/pdfImageExtractor'
@@ -48,6 +48,8 @@ interface CanvasState {
     isSnippingMode: boolean
     /** Raw PDF ArrayBuffer stored in-memory (loaded from IndexedDB) */
     pdfArrayBuffer: ArrayBuffer | null
+    /** Completed revision quiz sessions for this canvas, newest first */
+    quizHistory: QuizHistoryEntry[]
 
     // ── Whiteboard / Drawing state ──────────────────────────────────────────
     drawingStrokes: DrawingStroke[]
@@ -93,6 +95,10 @@ interface CanvasActions {
     setPdfArrayBuffer: (buffer: ArrayBuffer | null) => void
     /** Load the PDF ArrayBuffer from IndexedDB into memory */
     loadPdfFromStorage: () => Promise<void>
+    /** Add a completed quiz entry to history (prepends — newest first) */
+    addQuizHistoryEntry: (entry: QuizHistoryEntry) => void
+    /** Replace the full quiz history (used when loading saved state) */
+    setQuizHistory: (entries: QuizHistoryEntry[]) => void
 
     // ── Whiteboard / Drawing actions ────────────────────────────────────────
     addStroke: (stroke: DrawingStroke) => void
@@ -133,6 +139,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
     canvasViewport: null,
     isSnippingMode: false,
     pdfArrayBuffer: null,
+    quizHistory: [],
 
     // Whiteboard defaults
     drawingStrokes: [],
@@ -212,6 +219,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
             canvasViewport: null,
             isSnippingMode: false,
             pdfArrayBuffer: null,
+            quizHistory: [],
             drawingStrokes: [],
             whiteboardUndoStack: [],
             whiteboardRedoStack: [],
@@ -236,6 +244,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
             canvasViewport: null,
             isSnippingMode: false,
             pdfArrayBuffer: null,
+            quizHistory: [],
             drawingStrokes: [],
             whiteboardUndoStack: [],
             whiteboardRedoStack: [],
@@ -251,7 +260,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
         if (_persistTimer) clearTimeout(_persistTimer)
         _persistTimer = setTimeout(() => {
             _persistTimer = null
-            const { nodes, edges, fileData, highlights, userDetails, currentPage, pageMarkdowns, zoomLevel, scrollPositions, canvasViewport, drawingStrokes, savedColors, toolSettings } = get()
+            const { nodes, edges, fileData, highlights, userDetails, currentPage, pageMarkdowns, zoomLevel, scrollPositions, canvasViewport, drawingStrokes, savedColors, toolSettings, quizHistory } = get()
             // Strip large recoverable fields to stay under the ~5MB localStorage quota.
             // raw_text & markdown_content are re-derived from the PDF on next load.
             // Image data URLs are kept (needed for display) but could be stripped in future.
@@ -260,7 +269,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
                 raw_text: '',
                 markdown_content: '',
             } : null
-            const state = { nodes, edges, fileData: lightFileData, highlights, userDetails, currentPage, pageMarkdowns, zoomLevel, scrollPositions, canvasViewport, drawingStrokes, savedColors, toolSettings }
+            const state = { nodes, edges, fileData: lightFileData, highlights, userDetails, currentPage, pageMarkdowns, zoomLevel, scrollPositions, canvasViewport, drawingStrokes, savedColors, toolSettings, quizHistory }
             try {
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
             } catch (e) {
@@ -274,7 +283,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
                         }
                         return n
                     })
-                    const minState = { nodes: minimalNodes, edges, fileData: lightFileData, highlights, userDetails, currentPage, pageMarkdowns, zoomLevel, scrollPositions, canvasViewport, drawingStrokes: [], savedColors, toolSettings }
+                    const minState = { nodes: minimalNodes, edges, fileData: lightFileData, highlights, userDetails, currentPage, pageMarkdowns, zoomLevel, scrollPositions, canvasViewport, drawingStrokes: [], savedColors, toolSettings, quizHistory }
                     localStorage.setItem(STORAGE_KEY, JSON.stringify(minState))
                 } catch {
                     console.error('[canvasStore] localStorage write failed even with minimal state')
@@ -307,6 +316,11 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
             (n) => n.type === 'quizQuestionNode' && (n.data as Record<string, unknown>).pageIndex === pageIndex
         )
     },
+
+    addQuizHistoryEntry: (entry) =>
+        set((state) => ({ quizHistory: [entry, ...state.quizHistory] })),
+
+    setQuizHistory: (entries) => set({ quizHistory: entries }),
 
     setIsSnippingMode: (isSnipping) => set({ isSnippingMode: isSnipping }),
 

@@ -127,6 +127,48 @@ async def generate_title(raw_text: str) -> str:
     return title, input_t, output_t
 
 
+async def generate_quiz_title(
+    source_type: str,
+    questions: list[str],
+    page_index: int | None = None,
+) -> tuple[str, int, int]:
+    """
+    Generate a concise 2-7 word title for a completed revision quiz session.
+    Uses MODEL_LITE — fast and cheap. Returns (title, input_tokens, output_tokens).
+    """
+    q_sample = "\n".join(f"- {q}" for q in questions[:5])
+    source_desc = (
+        f"Page {page_index} quiz" if source_type == "page" and page_index
+        else "a struggling-topics revision quiz"
+    )
+    prompt = (
+        f"You are a study tool. A student just completed {source_desc}.\n"
+        f"Quiz questions:\n{q_sample}\n\n"
+        "Generate a SHORT TITLE (2-7 words) capturing the main topic of this quiz.\n"
+        "Rules:\n"
+        "- 2 to 7 words only.\n"
+        "- Use title case (capitalise main words).\n"
+        "- Do NOT use generic words like 'Quiz', 'Review', 'Test', 'Revision', or 'Study'.\n"
+        "- Be specific — the title should identify the actual subject matter.\n"
+        "- Output ONLY the title. No explanation, no punctuation at the end, no quotes.\n"
+        "Example good titles: 'Cell Division and Mitosis', 'The French Revolution Causes', "
+        "'Organic Chemistry Reaction Types', 'Newton Laws of Motion'"
+    )
+    response = await _client.aio.models.generate_content(
+        model=MODEL_LITE,
+        contents=prompt,
+        config=types.GenerateContentConfig(max_output_tokens=30, temperature=0.3),
+    )
+    input_t, output_t = _extract_usage(response)
+    raw = getattr(response, 'text', None) or ''
+    title = raw.strip().strip('"').strip("'")
+    words = title.split()
+    if not words:
+        return "Revision Quiz", input_t, output_t
+    if len(words) > 7:
+        title = " ".join(words[:7])
+    return title, input_t, output_t
+
 
 def _needs_pdf_context(question: str, highlighted_text: str) -> bool:
     """

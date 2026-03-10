@@ -1,6 +1,6 @@
 import logging
 from fastapi import APIRouter, HTTPException, Request
-from models.schemas import QuizRequest, QuizQuestion, ValidateAnswerRequest, ValidateAnswerResponse
+from models.schemas import QuizRequest, QuizQuestion, ValidateAnswerRequest, ValidateAnswerResponse, GenerateQuizTitleRequest, GenerateQuizTitleResponse
 from rate_limiter import limiter
 from services import gemini_service
 from services.gemini_service import MODEL_FLASH, MODEL_LITE
@@ -88,3 +88,27 @@ async def validate_answer(request: Request, payload: ValidateAnswerRequest):
     except Exception as e:
         logger.error("Answer validation failed: %s", e)
         raise HTTPException(status_code=500, detail="Answer validation failed.")
+
+
+@router.post("/generate-quiz-title", response_model=GenerateQuizTitleResponse)
+@limiter.limit("30/minute; 300/hour")
+async def generate_quiz_title(request: Request, payload: GenerateQuizTitleRequest):
+    """
+    Generate a 2-7 word descriptive title for a completed revision quiz session.
+    Uses MODEL_LITE — fast and cheap.
+    """
+    try:
+        title, in_t, out_t = await gemini_service.generate_quiz_title(
+            source_type=payload.source_type,
+            questions=payload.questions,
+            page_index=payload.page_index,
+        )
+        return GenerateQuizTitleResponse(
+            title=title,
+            model_used=MODEL_LITE,
+            input_tokens=in_t,
+            output_tokens=out_t,
+        )
+    except Exception as e:
+        logger.error("Quiz title generation failed: %s", e)
+        raise HTTPException(status_code=500, detail="Quiz title generation failed.")

@@ -36,6 +36,7 @@ import LeftToolbar from './LeftToolbar'
 import AskGeminiPopup from './AskGeminiPopup'
 import QuestionModal from './QuestionModal'
 import RevisionModal from './RevisionModal'
+import QuizHistoryModal from './QuizHistoryModal'
 import ToolsModal from './ToolsModal'
 import PdfUploadPopup from './PdfUploadPopup'
 import { DrawingCanvas, DrawingToolbar, TextNode } from './whiteboard'
@@ -44,7 +45,7 @@ import { useCanvasStore } from '../store/canvasStore'
 import { extractPageImageBase64 } from '../utils/pdfImageExtractor'
 import { streamQuery, streamPageSummary, generateTitle, generatePageQuiz, gradeAnswer, generateFlashcards, parseStreamChunk } from '../api/studyApi'
 import { getNewNodePosition, recalculateSiblingPositions, resolveOverlaps, isOverlapping, rerouteEdgeHandles, getQuizNodePositions, getFlashcardPositions, findNonOverlappingPosition } from '../utils/positioning'
-import type { AnswerNodeData, QuizQuestionNodeData, FlashcardNodeData, TextNodeData, CustomPromptNodeData, ImageNodeData, StickyNoteNodeData, TimerNodeData, SummaryNodeData, TranscriptionNodeData, ChatMessage, CodeEditorNodeData } from '../types'
+import type { AnswerNodeData, QuizQuestionNodeData, FlashcardNodeData, TextNodeData, CustomPromptNodeData, ImageNodeData, StickyNoteNodeData, TimerNodeData, SummaryNodeData, TranscriptionNodeData, ChatMessage, CodeEditorNodeData, QuizHistoryEntry, QuizQuestion } from '../types'
 import { extractCodeBlocks } from '../utils/codeDetection'
 import { pdf } from '@react-pdf/renderer'
 import { buildQATree } from '../utils/buildQATree'
@@ -208,6 +209,8 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
     const [showSaveSubmenu, setShowSaveSubmenu] = useState(false)
     const [showRevisionMenu, setShowRevisionMenu] = useState(false)
     const [revisionSource, setRevisionSource] = useState<{ sourceType: 'struggling' | 'page'; pageIndex: number; pageContent?: string } | null>(null)
+    const [showQuizHistory, setShowQuizHistory] = useState(false)
+    const [retakeEntry, setRetakeEntry] = useState<QuizHistoryEntry | null>(null)
     const [isGeneratingFlashcards, setIsGeneratingFlashcards] = useState(false)
     const [generationProgress, setGenerationProgress] = useState<{
         type: 'quiz' | 'flashcards'
@@ -298,6 +301,8 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
     const persistToLocalStorage = useCanvasStore((s) => s.persistToLocalStorage)
     const canvasViewport = useCanvasStore((s) => s.canvasViewport)
     const setCanvasViewport = useCanvasStore((s) => s.setCanvasViewport)
+    const quizHistory = useCanvasStore((s) => s.quizHistory)
+    const addQuizHistoryEntry = useCanvasStore((s) => s.addQuizHistoryEntry)
 
     // Whiteboard state
     const activeTool = useCanvasStore((s) => s.activeTool)
@@ -2340,6 +2345,26 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
         setShowRevision(true)
     }, [getStrugglingPayload, showToast, currentPage, pageMarkdowns])
 
+    // Save a completed quiz session to history
+    const handleQuizComplete = useCallback((entry: QuizHistoryEntry) => {
+        addQuizHistoryEntry(entry)
+        useCanvasStore.getState().persistToLocalStorage()
+    }, [addQuizHistoryEntry])
+
+    // Open RevisionModal in retake mode from quiz history
+    const handleRetake = useCallback((entry: QuizHistoryEntry) => {
+        setShowQuizHistory(false)
+        setRetakeEntry(entry)
+        setRevisionSource({
+            sourceType: entry.sourceType,
+            pageIndex: entry.pageIndex ?? currentPage,
+            pageContent: entry.sourceType === 'page'
+                ? pageMarkdowns[(entry.pageIndex ?? 1) - 1]
+                : undefined,
+        })
+        setShowRevision(true)
+    }, [currentPage, pageMarkdowns])
+
     // Create flashcards from struggling nodes
     const handleCreateFlashCards = useCallback(async (sourceType: 'struggling' | 'page' = 'struggling') => {
         setShowRevisionMenu(false)
@@ -3134,11 +3159,22 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
                         nodes={nodes}
                         rawText={revisionSource.pageContent || pageMarkdowns[currentPage - 1] || (fileData.raw_text ?? '').slice(0, 50000)}
                         pdfId={fileData.pdf_id}
-                        onClose={() => setShowRevision(false)}
+                        onClose={() => { setShowRevision(false); setRetakeEntry(null) }}
                         sourceType={revisionSource.sourceType}
                         pageIndex={revisionSource.pageIndex - 1}
                         pageContent={revisionSource.pageContent}
                         canvasContext={collectCanvasContext(nodes) || undefined}
+                        initialQuestions={retakeEntry?.questions as QuizQuestion[] | undefined}
+                        retakeSourceTitle={retakeEntry?.title}
+                        onQuizComplete={handleQuizComplete}
+                    />
+                )}
+
+                {showQuizHistory && (
+                    <QuizHistoryModal
+                        entries={quizHistory}
+                        onClose={() => setShowQuizHistory(false)}
+                        onRetake={handleRetake}
                     />
                 )}
 
@@ -3404,13 +3440,27 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
                             <button
                                 onClick={() => handleCreateFlashCards('page')}
                                 disabled={isGeneratingFlashcards}
-                                className="text-left px-3 py-2 mb-1 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                             >
                                 <span className="flex items-center gap-1.5 pl-2">
                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                         <rect x="2" y="5" width="20" height="14" rx="2" />
                                     </svg>
                                     Current Page
+                                </span>
+                            </button>
+
+                            <div className="my-1 border-t border-gray-100" />
+
+                            <button
+                                onClick={() => { setShowRevisionMenu(false); setShowQuizHistory(true) }}
+                                className="text-left px-3 py-2 mb-1 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors"
+                            >
+                                <span className="flex items-center gap-1.5 pl-2">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
+                                    </svg>
+                                    Quiz History
                                 </span>
                             </button>
                         </div>

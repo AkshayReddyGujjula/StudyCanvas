@@ -159,6 +159,24 @@ export const generateTitle = async (raw_text: string): Promise<string> => {
 }
 
 /**
+ * Generate a short 2-7 word title for a completed revision quiz session.
+ * Uses MODEL_LITE on the backend — fast and cheap.
+ */
+export const generateQuizTitle = async (
+    source_type: 'struggling' | 'page',
+    questions: string[],
+    page_index?: number,
+): Promise<string> => {
+    const response = await api.post<{
+        title: string; model_used: string
+        input_tokens?: number; output_tokens?: number
+    }>('/api/generate-quiz-title', { source_type, questions, page_index })
+    const { input_tokens = 0, output_tokens = 0, model_used = LITE_MODEL_ID } = response.data
+    recordUsage(model_used, input_tokens, output_tokens, 'title')
+    return response.data.title
+}
+
+/**
  * Generate 3-5 short-answer quiz questions for a single page's content.
  */
 export const generatePageQuiz = async (
