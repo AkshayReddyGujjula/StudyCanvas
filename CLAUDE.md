@@ -118,10 +118,12 @@ See `.claude/commands/add-api-route.md` for the full step-by-step.
 |---|---|---|
 | `useCanvasStore` | `store/canvasStore.ts` | Current canvas: nodes, edges, PDF data, drawing strokes |
 | `useAppStore` | `store/appStore.ts` | Global: canvas list, folders, directory handle, user context |
+| `useUsageStore` | `store/usageStore.ts` | Gemini API token usage — persisted to localStorage AND `usage_stats.json` in workspace root for cross-device sync |
 
 - **Never use local `useState` for cross-component state** — use the Zustand stores.
 - After mutating nodes/edges, call `persistToLocalStorage()` to save.
 - `updateNodeData(nodeId, partialData)` merges into the node's existing data — you only need to pass changed fields.
+- `useUsageStore.mergeFromFile(entries)` is called automatically when a workspace folder is opened — do not call it manually elsewhere.
 
 ---
 
@@ -195,6 +197,53 @@ Store the `AbortController` in `canvasStore.activeAbortController` so it can be 
 - Wrap expensive computations with `useMemo`.
 - Node components should be wrapped with `React.memo`.
 - Canvas.tsx is ~3000 lines — don't add state that belongs in a store.
+
+---
+
+## Node Positioning Rules
+
+Always use the utilities in `frontend/src/utils/positioning.ts` — never hardcode canvas coordinates.
+
+| Function | Use For |
+|---|---|
+| `getNewNodePosition(parentId, allNodes, contentNodeId)` | Answer nodes spawned from Ask Gemini |
+| `findNonOverlappingPosition(centerXY, w, h, allNodes)` | Any programmatically spawned node that must not overlap existing nodes |
+| `getQuizNodePositions(...)` | Quiz cards from "Page Quiz" button |
+| `getFlashcardPositions(...)` | Flashcard sets |
+
+**Critical stale-closure pitfall with `setNodes`:** `setNodes(...)` is async-batched by React. If you immediately read the `nodes` variable from a `useCallback` closure after calling `setNodes`, it still contains the **old** node list. To get the freshest list for collision detection, either:
+
+- Filter `nodes` manually: `const freshNodes = nodes.filter(n => !removedIds.has(n.id))`
+- Or read from the store: `useCanvasStore.getState().nodes`
+
+**React Flow node DOM selector:** Use `[data-id="${nodeId}"]` — **not** `[data-nodeid]`.
+
+---
+
+## Code Detection & Auto-Spawn Pattern
+
+When a Gemini stream completes and the response may contain code, use `extractCodeBlocks()` to detect Python, Java, and C code, then spawn a `codeEditorNode` in the nearest non-overlapping space:
+
+```typescript
+import { extractCodeBlocks } from '../utils/codeDetection'
+import { findNonOverlappingPosition } from '../utils/positioning'
+
+const codeBlocks = extractCodeBlocks(fullText)
+if (codeBlocks.length > 0) {
+    const primary = codeBlocks[0]
+    const codeNodeW = 520, codeNodeH = 340
+    const idealCenter = {
+        x: sourceNode.position.x + sourceNodeWidth + codeNodeW / 2 + 30,
+        y: sourceNode.position.y + codeNodeH / 2,
+    }
+    const codePos = findNonOverlappingPosition(idealCenter, codeNodeW, codeNodeH, useCanvasStore.getState().nodes)
+    // then setNodes / setEdges as usual
+}
+```
+
+- Only Python (` ```python `), Java (` ```java `), and C (` ```c `) are detected — not C++, C#, JS, etc.
+- The AnswerNode/CustomPromptNode keeps the full Markdown (with inline code). The CodeEditorNode gets the extracted, editable code.
+- This is implemented in Canvas.tsx (Ask Gemini flow) and CustomPromptNode.tsx.
 
 ---
 
