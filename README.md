@@ -31,6 +31,7 @@ The result is a **visual knowledge map** of exactly what you understood, what co
 | **Branching Q&A Tree** | Ask follow-up questions on any answer. Each response spawns a new node, building a visual tree of understanding. |
 | **Page Comprehension Checks** | Generate 2–4 adaptive questions on any individual page with instant, personalised feedback. Gemini intelligently scales the count to the richness of the page content. |
 | **Revision Quiz Mode** | Generate a personalised mixed MCQ + short-answer quiz from struggling nodes or the current page. |
+| **Quiz History** | Track all completed quizzes with scores and source pages. Search, sort (by date/score/page), and retake any quiz to focus on struggling areas. |
 | **Flashcard Mode** | Turn struggling nodes or the current page into AI-generated flashcards for rapid-fire review. |
 | **Custom Flashcard Node** | Create blank flashcards manually from the left toolbar. Each side is independently edited via an inline edit mode — click the pencil icon to type, click the checkmark to save. |
 | **AI Answer Validation** | Short-answer quiz responses are graded by Gemini with constructive feedback. MCQ answers are validated instantly client-side. |
@@ -112,7 +113,7 @@ StudyCanvas/
 │   ├── routes/
 │   │   ├── upload.py           # POST /api/upload & /api/upload-text — PDF ingestion
 │   │   ├── query.py            # POST /api/query (streaming) & /api/generate-title
-│   │   ├── quiz.py             # POST /api/quiz & /api/validate
+│   │   ├── quiz.py             # POST /api/quiz & /api/validate & /api/generate-quiz-title
 │   │   ├── flashcards.py       # POST /api/flashcards
 │   │   ├── page_quiz.py        # POST /api/page-quiz & /api/grade-answer
 │   │   ├── ocr.py              # POST /api/vision — Gemini Vision OCR
@@ -164,6 +165,7 @@ StudyCanvas/
         │   ├── AskGeminiPopup.tsx      # Floating "Ask Gemini" popup on text select
         │   ├── QuestionModal.tsx       # Full question input modal
         │   ├── RevisionModal.tsx       # Revision quiz modal (MCQ + short-answer)
+        │   ├── QuizHistoryModal.tsx    # Quiz history browser with search, sort, and retake
         │   ├── PdfUploadPopup.tsx      # PDF/DOCX/PPTX upload popup with drag-and-drop
         │   ├── ModelIndicator.tsx      # Shows which Gemini model was used
         │   ├── OnboardingModal.tsx     # Tutorial entry point & persistent choice
@@ -276,6 +278,7 @@ The app will be available at `http://localhost:5173`.
 | `POST` | `/api/convert-to-pdf` | Convert a DOCX or PPTX file to PDF |
 | `POST` | `/api/query` | Stream AI answer for a highlighted-text question |
 | `POST` | `/api/generate-title` | Generate a concise document title from content |
+| `POST` | `/api/generate-quiz-title` | Generate a title for a completed quiz for history tracking |
 | `POST` | `/api/quiz` | Generate mixed MCQ + short-answer quiz (page or struggling mode) |
 | `POST` | `/api/validate` | Validate a quiz answer (short-answer via Gemini, MCQ by index) |
 | `POST` | `/api/flashcards` | Generate flashcards (page or struggling mode) |
