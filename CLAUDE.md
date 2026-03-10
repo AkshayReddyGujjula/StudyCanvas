@@ -75,10 +75,13 @@ StudyCanvas/
 │   ├── api/studyApi.ts            # ALL HTTP calls go here (Axios + fetch)
 │   ├── store/
 │   │   ├── canvasStore.ts         # Per-canvas state (nodes, edges, PDF, drawing)
-│   │   └── appStore.ts            # Global state (canvas list, folders, user)
+│   │   ├── appStore.ts            # Global state (canvas list, folders, user)
+│   │   └── usageStore.ts          # Gemini API usage stats (localStorage + file sync)
 │   ├── components/
 │   │   └── Canvas.tsx             # NODE_TYPES registry lives here (line ~90)
-│   └── utils/positioning.ts       # Node placement algorithm — import from here
+│   └── utils/
+│       ├── positioning.ts         # Node placement algorithm — import from here
+│       └── codeDetection.ts       # Extracts Python/Java/C code blocks from Markdown
 └── .claude/commands/              # AI skill files (add-node-type, etc.)
 ```
 

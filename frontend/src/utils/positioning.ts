@@ -461,7 +461,7 @@ export function getQuizNodePositions(
 ): Array<{ x: number; y: number }> {
     const nodeWidth = 360
     const horizontalGap = 380
-    const verticalGap = 1
+    const verticalGap = 40           // clear visual gap below the content node
     const estimatedQuizHeight = 260  // conservative estimate for an unanswered quiz card
     const padding = 1                // minimum gap around each quiz node
 

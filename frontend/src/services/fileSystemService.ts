@@ -5,6 +5,7 @@
  * Folder structure:
  *   [User-chosen location]/StudyCanvas/
  *     ├── manifest.json          ← canvas registry + user info
+ *     ├── usage_stats.json       ← Gemini API usage stats (synced cross-device)
  *     ├── canvas_<id>/
  *     │   ├── state.json         ← serialised canvas state (nodes, edges, etc.)
  *     │   ├── document.pdf       ← uploaded PDF
@@ -14,6 +15,8 @@
  * NOTE: The File System Access API is only supported in Chromium browsers
  *       (Chrome ≥86, Edge ≥86, Opera ≥72). Firefox and Safari are NOT supported.
  */
+
+import type { UsageEntry } from '../types'
 
 // ─── IndexedDB helpers for persisting the directory handle across sessions ────
 
@@ -640,4 +643,35 @@ export async function loadThumbnail(rootHandle: FileSystemDirectoryHandle, canva
     } catch {
         return null
     }
+}
+
+// ─── Usage stats persistence (cross-device sync) ─────────────────────────────
+
+const USAGE_FILE = 'usage_stats.json'
+
+/**
+ * Load Gemini API usage stats from the workspace root folder.
+ * Returns an empty array if the file doesn't exist yet.
+ */
+export async function loadUsageStats(rootHandle: FileSystemDirectoryHandle): Promise<UsageEntry[]> {
+    try {
+        const fileHandle = await rootHandle.getFileHandle(USAGE_FILE)
+        const file = await fileHandle.getFile()
+        const text = await file.text()
+        const parsed = JSON.parse(text)
+        return Array.isArray(parsed) ? (parsed as UsageEntry[]) : []
+    } catch {
+        return []
+    }
+}
+
+/**
+ * Persist Gemini API usage stats to the workspace root folder so they sync
+ * across devices when the folder is shared (e.g. via OneDrive / Google Drive).
+ */
+export async function saveUsageStats(rootHandle: FileSystemDirectoryHandle, entries: UsageEntry[]): Promise<void> {
+    const fileHandle = await rootHandle.getFileHandle(USAGE_FILE, { create: true })
+    const writable = await fileHandle.createWritable()
+    await writable.write(JSON.stringify(entries))
+    await writable.close()
 }

@@ -15,8 +15,10 @@ import {
     deleteFolderOnDisk,
     moveCanvasOnDisk,
     moveFolderOnDisk,
+    loadUsageStats,
     type Manifest,
 } from '../services/fileSystemService'
+import { useUsageStore } from './usageStore'
 import {
     readManifestIDB,
     writeManifestIDB,
@@ -200,6 +202,10 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
                 isLoading: false,
                 userContext: updatedCtx,
             })
+            // Load usage stats from workspace file and merge with local stats
+            loadUsageStats(handle).then((fileEntries) => {
+                if (fileEntries.length > 0) useUsageStore.getState().mergeFromFile(fileEntries)
+            }).catch(() => {})
         } catch (err) {
             console.error('[appStore] initialize failed:', err)
             set({ isLoading: false })
@@ -247,6 +253,10 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
                 canvasList: manifest.canvases,
                 folderList: manifest.folders ?? [],
             })
+            // Load usage stats from workspace file and merge with local stats
+            loadUsageStats(handle).then((fileEntries) => {
+                if (fileEntries.length > 0) useUsageStore.getState().mergeFromFile(fileEntries)
+            }).catch(() => {})
         }
     },
 

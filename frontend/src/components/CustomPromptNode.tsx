@@ -8,6 +8,8 @@ import rehypeSanitize, { defaultSchema, type Options as SanitizeOptions } from '
 import type { CustomPromptNodeData, ChatMessage, PromptModel } from '../types'
 import { useCanvasStore } from '../store/canvasStore'
 import { streamQuery, parseStreamChunk } from '../api/studyApi'
+import { extractCodeBlocks } from '../utils/codeDetection'
+import { findNonOverlappingPosition } from '../utils/positioning'
 import { extractPageImageBase64 } from '../utils/pdfImageExtractor'
 import ModelIndicator from './ModelIndicator'
 
@@ -167,6 +169,45 @@ function CustomPromptNode({ id, data }: CustomPromptNodeProps) {
             }
 
             updateNodeData(id, { isStreaming: false, status: data.status === 'loading' ? 'unread' : data.status })
+
+            // Auto-spawn a CodeEditorNode if the response contains Python, Java, or C code
+            const codeBlocks = extractCodeBlocks(streamingAnswer)
+            if (codeBlocks.length > 0) {
+                const primary = codeBlocks[0]
+                const codeNodeId = crypto.randomUUID()
+                const langLabel = primary.language.charAt(0).toUpperCase() + primary.language.slice(1)
+                const allNodes = useCanvasStore.getState().nodes
+                const thisNode = allNodes.find((n) => n.id === id)
+                if (thisNode) {
+                    const codeNodeW = 520
+                    const codeNodeH = 340
+                    const sourceW = typeof thisNode.style?.width === 'number' ? thisNode.style.width : size.width
+                    // Ideal placement: immediately to the right of this node.
+                    // findNonOverlappingPosition spirals outward if that spot is occupied.
+                    const idealCenter = {
+                        x: thisNode.position.x + sourceW + codeNodeW / 2 + 30,
+                        y: thisNode.position.y + codeNodeH / 2,
+                    }
+                    const codePos = findNonOverlappingPosition(idealCenter, codeNodeW, codeNodeH, allNodes)
+                    setNodes((prev) => [...prev, {
+                        id: codeNodeId,
+                        type: 'codeEditorNode',
+                        position: codePos,
+                        data: {
+                            title: `${langLabel} Code`,
+                            code: primary.code,
+                            language: primary.language,
+                        } as unknown as Record<string, unknown>,
+                    }])
+                    setEdges((prev) => [...prev, {
+                        id: `edge-code-${id}-${codeNodeId}`,
+                        source: id,
+                        target: codeNodeId,
+                        type: 'smoothstep',
+                        animated: false,
+                    }])
+                }
+            }
         } catch (err) {
             console.error('Custom prompt error:', err)
             updateNodeData(id, {
@@ -181,7 +222,7 @@ function CustomPromptNode({ id, data }: CustomPromptNodeProps) {
             setIsLoading(false)
             persistToLocalStorage()
         }
-    }, [input, isLoading, data, fileData, userDetails, currentPage, pageMarkdowns, pdfArrayBuffer, updateNodeData, persistToLocalStorage, id])
+    }, [input, isLoading, data, fileData, userDetails, currentPage, pageMarkdowns, pdfArrayBuffer, updateNodeData, persistToLocalStorage, id, setNodes, setEdges, size.width])
 
     const toggleModel = useCallback(() => {
         const newModel: PromptModel = data.selectedModel === 'gemini-3.1-flash-lite' ? 'gemini-2.5-flash-lite' : 'gemini-3.1-flash-lite'

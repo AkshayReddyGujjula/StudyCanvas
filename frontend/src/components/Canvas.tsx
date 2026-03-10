@@ -44,7 +44,8 @@ import { useCanvasStore } from '../store/canvasStore'
 import { extractPageImageBase64 } from '../utils/pdfImageExtractor'
 import { streamQuery, streamPageSummary, generateTitle, generatePageQuiz, gradeAnswer, generateFlashcards, parseStreamChunk } from '../api/studyApi'
 import { getNewNodePosition, recalculateSiblingPositions, resolveOverlaps, isOverlapping, rerouteEdgeHandles, getQuizNodePositions, getFlashcardPositions, findNonOverlappingPosition } from '../utils/positioning'
-import type { AnswerNodeData, QuizQuestionNodeData, FlashcardNodeData, TextNodeData, CustomPromptNodeData, ImageNodeData, StickyNoteNodeData, TimerNodeData, SummaryNodeData, TranscriptionNodeData, ChatMessage } from '../types'
+import type { AnswerNodeData, QuizQuestionNodeData, FlashcardNodeData, TextNodeData, CustomPromptNodeData, ImageNodeData, StickyNoteNodeData, TimerNodeData, SummaryNodeData, TranscriptionNodeData, ChatMessage, CodeEditorNodeData } from '../types'
+import { extractCodeBlocks } from '../utils/codeDetection'
 import { pdf } from '@react-pdf/renderer'
 import { buildQATree } from '../utils/buildQATree'
 import StudyNotePDF from './StudyNotePDF'
@@ -580,14 +581,17 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
     const handleTestMePage = useCallback(async () => {
         if (!fileData) return
         const existingQuizNodes = getQuizNodesForPage(currentPage)
+        // IDs of quiz nodes being replaced — used later to exclude them from collision detection
+        // since setNodes is async-batched and `nodes` in this closure will still contain them.
+        const replacedQuizIds = new Set<string>()
         if (existingQuizNodes.length > 0) {
             const confirmed = window.confirm(
                 `This page already has ${existingQuizNodes.length} quiz question${existingQuizNodes.length !== 1 ? 's' : ''}. Replace with a fresh quiz?`
             )
             if (!confirmed) return
-            const existingIds = new Set(existingQuizNodes.map((n) => n.id))
-            setNodes((prev) => prev.filter((n) => !existingIds.has(n.id)))
-            setEdges((prev) => prev.filter((e) => !existingIds.has(e.source) && !existingIds.has(e.target)))
+            for (const n of existingQuizNodes) replacedQuizIds.add(n.id)
+            setNodes((prev) => prev.filter((n) => !replacedQuizIds.has(n.id)))
+            setEdges((prev) => prev.filter((e) => !replacedQuizIds.has(e.source) && !replacedQuizIds.has(e.target)))
         }
         startGenProgress('quiz', 'Generating quiz questions…')
 
@@ -633,12 +637,20 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
         // ContentNode (which uses maxHeight: 80vh internally) is measured correctly.
         // cNode.measured?.height can be stale because isExpanded is local to ContentNode
         // and React Flow's ResizeObserver may not have propagated yet.
-        const domEl = document.querySelector(`[data-nodeid="${cNode.id}"]`) as HTMLElement | null
+        const domEl = document.querySelector(`[data-id="${cNode.id}"]`) as HTMLElement | null
         const cHeight = domEl ? domEl.offsetHeight : (cNode.measured?.height ?? 600)
         const cWidth = typeof cNode.style?.width === 'number' ? cNode.style.width : 700
+
+        // Exclude the old quiz nodes that were just removed above. Because setNodes is
+        // async-batched, `nodes` in this closure still contains them. Passing them to
+        // getQuizNodePositions would make collision-detection push new cards far below.
+        const freshNodes = replacedQuizIds.size > 0
+            ? nodes.filter((n) => !replacedQuizIds.has(n.id))
+            : nodes
+
         const positions = getQuizNodePositions(
             cNode.position.x, cNode.position.y, cHeight, cWidth as number, questions.length,
-            nodes
+            freshNodes
         )
 
         const quizNodes: Node[] = questions.map((question, i) => ({
@@ -1962,6 +1974,44 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
                     status: 'unread',
                     modelUsed,
                 })
+
+                // Auto-spawn a CodeEditorNode if the response contains Python, Java, or C code
+                const codeBlocks = extractCodeBlocks(fullText)
+                if (codeBlocks.length > 0) {
+                    const primary = codeBlocks[0]
+                    const codeNodeId = crypto.randomUUID()
+                    const langLabel = primary.language.charAt(0).toUpperCase() + primary.language.slice(1)
+                    const codeNodeW = 520
+                    const codeNodeH = 340
+                    // Ideal placement: immediately to the right of the answer node.
+                    // findNonOverlappingPosition spirals outward if that spot is occupied.
+                    const answerNodeW = 360
+                    const idealCenter = {
+                        x: newNode.position.x + answerNodeW + codeNodeW / 2 + 30,
+                        y: newNode.position.y + codeNodeH / 2,
+                    }
+                    const currentNodes = useCanvasStore.getState().nodes
+                    const codePos = findNonOverlappingPosition(idealCenter, codeNodeW, codeNodeH, currentNodes)
+                    setNodes((prev) => [...prev, {
+                        id: codeNodeId,
+                        type: 'codeEditorNode',
+                        position: codePos,
+                        data: {
+                            title: `${langLabel} Code`,
+                            code: primary.code,
+                            language: primary.language,
+                            pageIndex: currentPage,
+                        } satisfies CodeEditorNodeData as unknown as Record<string, unknown>,
+                    }])
+                    setEdges((prev) => [...prev, {
+                        id: `edge-code-${preGeneratedNodeId}-${codeNodeId}`,
+                        source: preGeneratedNodeId,
+                        target: codeNodeId,
+                        type: 'smoothstep',
+                        animated: false,
+                        style: buildEdgeStyle(preGeneratedNodeId),
+                    }])
+                }
 
                 // Update edge to solid
                 setEdges((prev) =>
