@@ -25,6 +25,7 @@ import { savePdfToLocal, loadPdfFromLocal } from '../utils/pdfStorage'
 import { extractPdfPagesTextFromBuffer } from '../utils/pdfTextExtractor'
 import { saveCanvasBackup, loadCanvasBackup } from '../utils/canvasBackup'
 import { saveAudio, loadAudio } from '../utils/audioStorage'
+import { computeProgressCounts } from '../utils/progressUtils'
 import { toPng } from 'html-to-image'
 
 /**
@@ -208,7 +209,7 @@ export default function CanvasPage() {
 
             // Shared post-save steps
             onProgress?.(86, 'Updating manifest…')
-            await touchCanvas(canvasId)
+            await touchCanvas(canvasId, computeProgressCounts(nodes))
 
             onProgress?.(93, 'Finishing up…')
             store.persistToLocalStorage()

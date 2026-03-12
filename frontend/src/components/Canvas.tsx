@@ -47,7 +47,7 @@ import { useCanvasStore } from '../store/canvasStore'
 import { extractPageImageBase64 } from '../utils/pdfImageExtractor'
 import { streamQuery, streamPageSummary, generateTitle, generatePageQuiz, gradeAnswer, generateFlashcards, parseStreamChunk } from '../api/studyApi'
 import { getNewNodePosition, recalculateSiblingPositions, resolveOverlaps, isOverlapping, rerouteEdgeHandles, getQuizNodePositions, getFlashcardPositions, findNonOverlappingPosition } from '../utils/positioning'
-import type { AnswerNodeData, QuizQuestionNodeData, FlashcardNodeData, TextNodeData, CustomPromptNodeData, ImageNodeData, StickyNoteNodeData, TimerNodeData, SummaryNodeData, TranscriptionNodeData, ChatMessage, CodeEditorNodeData, QuizHistoryEntry, QuizQuestion } from '../types'
+import type { AnswerNodeData, QuizQuestionNodeData, FlashcardNodeData, TextNodeData, CustomPromptNodeData, ImageNodeData, StickyNoteNodeData, TimerNodeData, SummaryNodeData, TranscriptionNodeData, ChatMessage, CodeEditorNodeData, QuizHistoryEntry, QuizQuestion, WrongQuestionData } from '../types'
 import { extractCodeBlocks } from '../utils/codeDetection'
 import { pdf } from '@react-pdf/renderer'
 import { buildQATree } from '../utils/buildQATree'
@@ -2546,7 +2546,166 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
         }
     }, [nodes, fileData, currentPage, setNodes, setEdges, persistToLocalStorage, setCenter, getZoom, showToast, buildEdgeStyle, startGenProgress, finishGenProgress, cancelGenProgress, getStrugglingPayload])
 
-    // Download Q&A as a PDF (text-based export — legacy)
+    // Generate personalised flashcards from quiz mistakes (called from RevisionModal score screen)
+    const handleMakeFlashcardsFromQuiz = useCallback(async (wrongQuestions: WrongQuestionData[]) => {
+        if (!fileData || wrongQuestions.length === 0) return
+
+        const existingPageFlashcardCount = nodes.filter(
+            (n) => n.type === 'flashcardNode' &&
+                ((n.data as unknown as FlashcardNodeData).pageIndex === currentPage ||
+                    (n.data as unknown as FlashcardNodeData).isPinned === true)
+        ).length
+
+        if (existingPageFlashcardCount >= 20) {
+            showToast('Maximum of 20 flashcards per page reached. Delete some to generate more.')
+            return
+        }
+
+        startGenProgress('flashcards', 'Generating flashcards from quiz mistakes…')
+        setIsGeneratingFlashcards(true)
+
+        // Build struggling_nodes payload from each wrong question, embedding feedback
+        // and any follow-up chat as enriched context for more personalised flashcards
+        const payload = wrongQuestions.map((q) => {
+            const followUpContext = q.followUpHistory.length > 0
+                ? '\n\nFollow-up clarifications:\n' + q.followUpHistory
+                    .map((m) => `${m.role === 'user' ? 'Student' : 'AI Tutor'}: ${m.content}`)
+                    .join('\n')
+                : ''
+            return {
+                highlighted_text: q.question,
+                question: q.question,
+                answer: (q.feedback + followUpContext).trim(),
+                page_index: q.pageIndex !== undefined ? q.pageIndex - 1 : undefined,
+            }
+        })
+
+        const currentFlashcards = nodes
+            .filter((n) => n.type === 'flashcardNode')
+            .map((n) => (n.data as unknown as FlashcardNodeData).question)
+
+        const scopedRawText = pageMarkdowns[currentPage - 1] || (fileData.raw_text ?? '').slice(0, 50000)
+
+        let cards: { question: string; answer: string }[]
+        let flashcardModelUsed: string | undefined
+        try {
+            const fcResult = await generateFlashcards(
+                payload,
+                scopedRawText,
+                fileData.pdf_id,
+                'struggling',
+                undefined,
+                undefined,
+                currentFlashcards.length > 0 ? currentFlashcards : undefined,
+                undefined,
+                undefined,
+            )
+            cards = fcResult.flashcards
+            flashcardModelUsed = fcResult.model_used
+        } catch (err: unknown) {
+            console.error('Quiz flashcard generation error:', err)
+            const axErr = err as { response?: { status?: number; data?: { detail?: string } }; message?: string }
+            let msg = 'Failed to generate flashcards from quiz.'
+            if (axErr?.response?.status === 429) {
+                msg = 'Rate limit reached — please wait a moment and try again.'
+            } else if (!axErr?.response) {
+                msg = 'Cannot reach backend server — is it running?'
+            } else {
+                msg += ' ' + (axErr.response.data?.detail ?? axErr.message ?? '')
+            }
+            cancelGenProgress()
+            showToast(msg)
+            setIsGeneratingFlashcards(false)
+            throw err  // re-throw so RevisionModal keeps its loading state accurate
+        }
+
+        if (!cards.length) {
+            cancelGenProgress()
+            showToast('No flashcards were generated — try again.')
+            setIsGeneratingFlashcards(false)
+            return
+        }
+
+        // Enforce 20-flashcard-per-page limit
+        const slotsRemaining = 20 - existingPageFlashcardCount
+        if (cards.length > slotsRemaining) {
+            cards = cards.slice(0, slotsRemaining)
+        }
+
+        // Place flashcards above content node (same layout as regular flashcard generation)
+        const cNode = nodes.find((n) => n.type === 'contentNode')
+        const contentX = cNode ? cNode.position.x : 0
+        const contentY = cNode ? cNode.position.y : 0
+        const contentW = cNode && typeof cNode.style?.width === 'number' ? cNode.style.width as number : 700
+        const cardWidth = 380
+        const gap = 40
+
+        const currentVisibleNodes = nodes.filter((n) => {
+            if (n.type === 'contentNode') return true
+            const d = n.data as unknown as AnswerNodeData
+            return d.isPinned === true || d.pageIndex === currentPage
+        })
+
+        const flashcardPositions = getFlashcardPositions(
+            contentX,
+            contentY,
+            contentW,
+            cards.length,
+            cardWidth,
+            gap,
+            currentVisibleNodes,
+        )
+
+        const cardNodeIds: string[] = []
+        const flashcardNodes: Node[] = cards.map((card, i) => {
+            const nodeId = `flashcard-quiz-${currentPage}-${Date.now()}-${i}`
+            cardNodeIds.push(nodeId)
+            return {
+                id: nodeId,
+                type: 'flashcardNode',
+                position: flashcardPositions[i] ?? { x: contentX + i * (cardWidth + gap), y: contentY - 300 },
+                data: {
+                    question: card.question,
+                    answer: card.answer,
+                    isFlipped: false,
+                    status: 'unread',
+                    isMinimized: false,
+                    isPinned: false,
+                    pageIndex: currentPage,
+                    isLoading: false,
+                    modelUsed: flashcardModelUsed,
+                } as unknown as Record<string, unknown>,
+                style: { width: cardWidth },
+            }
+        })
+
+        // Chain flashcards left-to-right with smoothstep edges
+        const chainEdges = cardNodeIds
+            .slice(0, -1)
+            .map((srcId, i) => ({
+                id: `edge-fc-quiz-${currentPage}-${i}-${i + 1}-${Date.now()}`,
+                source: srcId,
+                target: cardNodeIds[i + 1],
+                sourceHandle: 'right',
+                targetHandle: 'left',
+                type: 'smoothstep',
+                animated: true,
+                style: buildEdgeStyle(srcId),
+            }))
+
+        setNodes((prev) => [...prev, ...flashcardNodes])
+        setEdges((prev) => [...prev, ...chainEdges])
+        finishGenProgress()
+        persistToLocalStorage()
+        setIsGeneratingFlashcards(false)
+
+        if (flashcardNodes.length > 0) {
+            const mid = flashcardNodes[Math.floor(flashcardNodes.length / 2)]
+            setCenter(mid.position.x + cardWidth / 2, mid.position.y + 100, { zoom: getZoom(), duration: 700 })
+        }
+
+        showToast(`${cards.length} flashcard${cards.length !== 1 ? 's' : ''} created from your quiz mistakes!`)
+    }, [nodes, fileData, currentPage, pageMarkdowns, setNodes, setEdges, persistToLocalStorage, setCenter, getZoom, showToast, buildEdgeStyle, startGenProgress, finishGenProgress, cancelGenProgress])
     const handleDownloadPDF = useCallback(async () => {
         setShowMenu(false)
         setShowRevisionMenu(false)
@@ -3171,6 +3330,7 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
                         initialQuestions={retakeEntry?.questions as QuizQuestion[] | undefined}
                         retakeSourceTitle={retakeEntry?.title}
                         onQuizComplete={handleQuizComplete}
+                        onMakeFlashcards={handleMakeFlashcardsFromQuiz}
                     />
                 )}
 

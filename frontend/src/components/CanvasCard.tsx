@@ -3,6 +3,7 @@ import { loadThumbnail, resolveParentHandle } from '../services/fileSystemServic
 import { loadThumbnailIDB } from '../services/idbStorageService'
 import { useAppStore } from '../store/appStore'
 import type { CanvasMeta } from '../types'
+import ProgressBar from './ProgressBar'
 
 interface Props {
     canvas: CanvasMeta
@@ -118,6 +119,9 @@ export default function CanvasCard({ canvas, onOpen, onSelect, isSelected, onDra
                         </svg>
                     )}
                 </div>
+
+                {/* Comprehension progress bar */}
+                <ProgressBar progressCounts={canvas.progressCounts} />
 
                 {/* Info area */}
                 <div className="p-3 flex items-center justify-between">

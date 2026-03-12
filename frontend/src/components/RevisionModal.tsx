@@ -3,7 +3,7 @@ import type { Node } from '@xyflow/react'
 import { useCanvasStore } from '../store/canvasStore'
 import { extractPageImageBase64 } from '../utils/pdfImageExtractor'
 import { generateQuiz, validateAnswer, streamQuizFollowUp, parseStreamChunk, generateQuizTitle } from '../api/studyApi'
-import type { AnswerNodeData, QuizQuestion, ValidateAnswerResponse, QuizHistoryEntry } from '../types'
+import type { AnswerNodeData, QuizQuestion, ValidateAnswerResponse, QuizHistoryEntry, WrongQuestionData } from '../types'
 import ModelIndicator from './ModelIndicator'
 
 interface RevisionModalProps {
@@ -22,6 +22,8 @@ interface RevisionModalProps {
     retakeSourceTitle?: string
     /** Callback fired when the quiz completes — receives the finished history entry */
     onQuizComplete?: (entry: QuizHistoryEntry) => void
+    /** Callback to generate personalised flashcards from wrong answers — only shown when score < 100% */
+    onMakeFlashcards?: (wrongQuestions: WrongQuestionData[]) => Promise<void>
 }
 
 interface QuestionState {
@@ -54,6 +56,7 @@ export default function RevisionModal({
     initialQuestions,
     retakeSourceTitle,
     onQuizComplete,
+    onMakeFlashcards,
 }: RevisionModalProps) {
     const [questions, setQuestions] = useState<QuizQuestion[] | null>(null)
     const [loading, setLoading] = useState(true)
@@ -67,6 +70,9 @@ export default function RevisionModal({
     const [validating, setValidating] = useState(false)
 
     const [showScore, setShowScore] = useState(false)
+
+    // Track whether "Make Flashcards" is in progress
+    const [isMakingFlashcards, setIsMakingFlashcards] = useState(false)
 
     // Track which model was used for quiz generation and validation
     const [quizModelUsed, setQuizModelUsed] = useState<string | undefined>(undefined)
@@ -310,6 +316,32 @@ export default function RevisionModal({
         }
     }
 
+    // Build wrong/partial questions into WrongQuestionData for personalised flashcard generation
+    const handleMakeFlashcards = async () => {
+        if (!questions || !onMakeFlashcards) return
+        const wrongQuestions: WrongQuestionData[] = questions
+            .flatMap((q, i) => {
+                const state = questionStates[i]
+                if (!state?.validationResult) return []
+                if (state.validationResult.status === 'correct') return []
+                return [{
+                    question: q.question,
+                    feedback: state.validationResult.explanation,
+                    followUpHistory: followUpHistories[i] ?? [],
+                    pageIndex: typeof pageIndex === 'number' ? pageIndex + 1 : undefined,
+                }]
+            })
+
+        if (wrongQuestions.length === 0) return
+        setIsMakingFlashcards(true)
+        try {
+            await onMakeFlashcards(wrongQuestions)
+            onClose()
+        } finally {
+            setIsMakingFlashcards(false)
+        }
+    }
+
     // ── Follow-up chat submission ─────────────────────────────────────────
     const handleFollowUpSubmit = useCallback(async (e?: React.FormEvent) => {
         if (e) e.preventDefault()
@@ -464,12 +496,37 @@ export default function RevisionModal({
                                     ? 'Good effort! Keep reviewing the topics you missed.'
                                     : "Keep studying — you'll get there!"}
                         </p>
-                        <button
-                            onClick={onClose}
-                            className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors"
-                        >
-                            Finish
-                        </button>
+                        <div className="flex flex-col items-center gap-3">
+                            {onMakeFlashcards && score < (questions?.length ?? 0) && (
+                                <button
+                                    onClick={handleMakeFlashcards}
+                                    disabled={isMakingFlashcards}
+                                    className="px-6 py-2 bg-secondary text-white rounded-lg font-medium hover:opacity-90 transition-opacity disabled:opacity-60 flex items-center gap-2"
+                                    style={{ backgroundColor: '#2D9CDB' }}
+                                >
+                                    {isMakingFlashcards ? (
+                                        <>
+                                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                            Generating Flashcards…
+                                        </>
+                                    ) : (
+                                        <>
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                <rect x="2" y="5" width="20" height="14" rx="2" />
+                                                <line x1="2" y1="10" x2="22" y2="10" />
+                                            </svg>
+                                            Make Flashcards
+                                        </>
+                                    )}
+                                </button>
+                            )}
+                            <button
+                                onClick={onClose}
+                                className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors"
+                            >
+                                Finish
+                            </button>
+                        </div>
                     </div>
                 )}
 

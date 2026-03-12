@@ -22,6 +22,7 @@ export default function HomePage() {
     const setDirectoryHandle = useAppStore((s) => s.setDirectoryHandle)
     const resetApp = useAppStore((s) => s.resetApp)
     const storageMode = useAppStore((s) => s.storageMode)
+    const refreshAllProgressCounts = useAppStore((s) => s.refreshAllProgressCounts)
 
     const tutorialCompleted = useTutorialStore((s) => s.tutorialCompleted)
     const replayTutorial = useTutorialStore((s) => s.replayTutorial)
@@ -81,6 +82,11 @@ export default function HomePage() {
         document.addEventListener('keydown', handler)
         return () => document.removeEventListener('keydown', handler)
     }, [])
+
+    // Recompute progress counts for all canvases on homepage load
+    useEffect(() => {
+        refreshAllProgressCounts()
+    }, [refreshAllProgressCounts])
 
     const handleNewCanvas = () => {
         setNewItemName('')

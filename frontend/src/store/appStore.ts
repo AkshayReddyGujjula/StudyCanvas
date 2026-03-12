@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { CanvasMeta, FolderMeta } from '../types'
+import type { CanvasMeta, FolderMeta, ProgressCounts } from '../types'
 import {
     loadDirectoryHandle,
     storeDirectoryHandle,
@@ -16,6 +16,7 @@ import {
     moveCanvasOnDisk,
     moveFolderOnDisk,
     loadUsageStats,
+    loadCanvasState,
     type Manifest,
 } from '../services/fileSystemService'
 import { useUsageStore } from './usageStore'
@@ -25,10 +26,12 @@ import {
     deleteCanvasStateIDB,
     deleteThumbnailIDB,
     clearAllIDB,
+    loadCanvasStateIDB,
 } from '../services/idbStorageService'
 import { deletePdfFromLocal } from '../utils/pdfStorage'
 import { getStorageMode, type StorageMode } from '../utils/browserDetection'
 import { clearTutorialStorage, useTutorialStore } from './tutorialStore'
+import { computeProgressCounts } from '../utils/progressUtils'
 
 // ─── App store — global state for multi-canvas homepage ──────────────────────
 
@@ -96,12 +99,14 @@ interface AppActions {
     removeCanvas: (canvasId: string) => Promise<void>
     /** Rename a canvas. */
     renameCanvas: (canvasId: string, newTitle: string) => Promise<void>
-    /** Update the modifiedAt timestamp for a canvas. */
-    touchCanvas: (canvasId: string) => Promise<void>
+    /** Update the modifiedAt timestamp (and optional progress counts) for a canvas. */
+    touchCanvas: (canvasId: string, progressCounts?: ProgressCounts) => Promise<void>
     setActiveCanvasId: (id: string | null) => void
     setDirty: (dirty: boolean) => void
     /** Re-read manifest from disk and refresh canvasList + folderList. */
     refreshManifest: () => Promise<void>
+    /** Load every canvas's saved state and recompute progress counts into the manifest. */
+    refreshAllProgressCounts: () => Promise<void>
     /** Reset the entire app state (e.g. logout). */
     resetApp: () => Promise<void>
     /** Restore from an existing StudyCanvas folder (validates + loads manifest). */
@@ -324,10 +329,14 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
         set({ canvasList: updated })
     },
 
-    touchCanvas: async (canvasId) => {
+    touchCanvas: async (canvasId, progressCounts?) => {
         const { storageMode, directoryHandle, canvasList, folderList } = get()
         const now = new Date().toISOString()
-        const updated = canvasList.map((c) => (c.id === canvasId ? { ...c, modifiedAt: now } : c))
+        const updated = canvasList.map((c) =>
+            c.id === canvasId
+                ? { ...c, modifiedAt: now, ...(progressCounts ? { progressCounts } : {}) }
+                : c
+        )
         if (storageMode === 'indexeddb') {
             const manifest = await readManifestIDB()
             manifest.canvases = updated; manifest.folders = folderList
@@ -357,6 +366,43 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
         const updatedCtx = { ...prevCtx, name: manifest.user.name }
         persistUserContext(updatedCtx)
         set({ canvasList: manifest.canvases, folderList: manifest.folders ?? [], userName: manifest.user.name, userContext: updatedCtx })
+    },
+
+    refreshAllProgressCounts: async () => {
+        const { storageMode, directoryHandle, canvasList, folderList } = get()
+        if (storageMode !== 'indexeddb' && !directoryHandle) return
+
+        const updatedList = [...canvasList]
+        let changed = false
+
+        await Promise.all(updatedList.map(async (canvas, i) => {
+            try {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                let state: Record<string, any> | null = null
+                if (storageMode === 'indexeddb') {
+                    state = await loadCanvasStateIDB(canvas.id)
+                } else {
+                    const parentHandle = await resolveParentHandle(directoryHandle!, folderList, canvas.parentFolderId)
+                    state = await loadCanvasState(parentHandle, canvas.id)
+                }
+                if (!state?.nodes) return
+                const counts = computeProgressCounts(state.nodes)
+                updatedList[i] = { ...canvas, progressCounts: counts }
+                changed = true
+            } catch { /* skip unreadable canvases */ }
+        }))
+
+        if (!changed) return
+        if (storageMode === 'indexeddb') {
+            const manifest = await readManifestIDB()
+            manifest.canvases = updatedList; manifest.folders = folderList
+            await writeManifestIDB(manifest)
+        } else {
+            const manifest = await readManifest(directoryHandle!)
+            manifest.canvases = updatedList; manifest.folders = folderList
+            await writeManifest(directoryHandle!, manifest)
+        }
+        set({ canvasList: updatedList })
     },
 
     resetApp: async () => {

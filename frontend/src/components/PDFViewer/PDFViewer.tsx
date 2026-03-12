@@ -191,9 +191,27 @@ export default function PDFViewer({
                 setFitViewerHeight(fh)
                 onLoadRef.current?.({ width: vp.width, height: vp.height })
                 onFitHeightChange?.(fh)
-                // Use restored scale if provided, otherwise fit-to-width
-                const startScale = initialScaleRef.current ?? fit
-                setScale(startScale)
+                // If a saved scale is being restored, use it as-is.
+                // Otherwise auto-apply fit-entire-page (same as the ↺ button) so the
+                // full page is visible on first open without any manual adjustment.
+                // We intentionally do NOT persist the auto-calculated scale so that
+                // every fresh open recalculates it for the current viewer dimensions.
+                if (initialScaleRef.current) {
+                    setScale(initialScaleRef.current)
+                } else {
+                    const outer = outerRef.current
+                    let startScale = fit  // fallback: fit-to-width
+                    if (outer && pdfNaturalWidthRef.current && pdfNaturalHeightRef.current) {
+                        const availW = outer.clientWidth - 32
+                        const availH = outer.clientHeight - 32
+                        if (availW > 0 && availH > 0) {
+                            const scaleW = availW / pdfNaturalWidthRef.current
+                            const scaleH = availH / pdfNaturalHeightRef.current
+                            startScale = Math.min(scaleW, scaleH) * 0.99
+                        }
+                    }
+                    setScale(startScale)
+                }
             } catch (e) {
                 if (!cancelled) setError('Failed to load PDF. Please try again.')
             } finally {

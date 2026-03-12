@@ -110,6 +110,34 @@ export const tutorialSteps: TutorialStep[] = [
 
     // ── 6 ──────────────────────────────────────────────────────────
     {
+        id: 'quiz-history',
+        phaseLabel: 'AI Tools',
+        phaseIconKey: 'refresh-cw',
+        title: 'Quiz History — Track Your Progress',
+        description:
+            'After completing a quiz, your results are automatically saved in Quiz History (inside the Revision menu). Review past scores, see which questions you missed, and retake any quiz with one click.',
+        proTip: 'If you scored less than 100%, a "Make Flashcards" button appears — it auto-generates personalised flashcards from every question you got wrong!',
+        targetSelector: '[data-tutorial="revision-btn"]',
+        tooltipPosition: 'left',
+        highlightPadding: 10,
+    },
+
+    // ── 7 ──────────────────────────────────────────────────────────
+    {
+        id: 'all-flashcards',
+        phaseLabel: 'AI Tools',
+        phaseIconKey: 'refresh-cw',
+        title: 'All Flashcards — Your Revision Hub',
+        description:
+            'The "All Flashcards" button in the Revision menu opens a hub showing every flashcard across all pages. Search, filter by page, and launch an Anki-style spaced-repetition session to drill the cards you find hardest.',
+        proTip: 'Cards marked as "Struggling" are automatically prioritised in revision sessions',
+        targetSelector: '[data-tutorial="revision-btn"]',
+        tooltipPosition: 'left',
+        highlightPadding: 10,
+    },
+
+    // ── 8 ──────────────────────────────────────────────────────────
+    {
         id: 'ai-chat',
         phaseLabel: 'AI Tools',
         phaseIconKey: 'bot',

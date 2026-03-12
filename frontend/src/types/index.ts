@@ -95,6 +95,18 @@ export interface ValidateAnswerResponse {
     model_used?: string
 }
 
+/** A question the user got wrong/partially wrong in a revision quiz (used to generate personalised flashcards) */
+export interface WrongQuestionData {
+    /** The original quiz question text */
+    question: string
+    /** AI grading feedback for the student's answer */
+    feedback: string
+    /** Follow-up Q&A the student had with the AI tutor for extra context */
+    followUpHistory: { role: 'user' | 'model'; content: string }[]
+    /** 1-based page index the question came from (if known) */
+    pageIndex?: number
+}
+
 export interface QuizNodeInput {
     highlighted_text: string
     question: string
@@ -383,6 +395,13 @@ export const DEFAULT_SAVED_COLORS: string[] = [
 
 // ─── Multi-canvas / Homepage types ───────────────────────────────────────────
 
+/** Progress counts for a canvas — understood/struggling/total status-bearing nodes */
+export interface ProgressCounts {
+    understood: number
+    struggling: number
+    total: number
+}
+
 /** Metadata for a single canvas entry stored in manifest.json */
 export interface CanvasMeta {
     id: string
@@ -393,6 +412,8 @@ export interface CanvasMeta {
     pageCount?: number
     /** ID of the parent folder (null/undefined = root level) */
     parentFolderId?: string | null
+    /** Comprehension progress — updated on every canvas save */
+    progressCounts?: ProgressCounts
 }
 
 /** Metadata for a folder entry stored in manifest.json */

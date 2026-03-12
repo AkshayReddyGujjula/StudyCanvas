@@ -1,6 +1,30 @@
 import { useState, useEffect, useRef } from 'react'
 import { useAppStore } from '../store/appStore'
-import type { FolderMeta } from '../types'
+import type { FolderMeta, CanvasMeta, ProgressCounts } from '../types'
+import ProgressBar from './ProgressBar'
+
+/** Recursively sum progress counts for all canvases inside a folder (including nested subfolders) */
+function getFolderProgressCounts(
+    folderId: string,
+    canvasList: CanvasMeta[],
+    folderList: FolderMeta[]
+): ProgressCounts {
+    const counts: ProgressCounts = { understood: 0, struggling: 0, total: 0 }
+    for (const c of canvasList.filter(c => c.parentFolderId === folderId)) {
+        if (c.progressCounts) {
+            counts.understood += c.progressCounts.understood
+            counts.struggling += c.progressCounts.struggling
+            counts.total += c.progressCounts.total
+        }
+    }
+    for (const f of folderList.filter(f => f.parentFolderId === folderId)) {
+        const sub = getFolderProgressCounts(f.id, canvasList, folderList)
+        counts.understood += sub.understood
+        counts.struggling += sub.struggling
+        counts.total += sub.total
+    }
+    return counts
+}
 
 interface Props {
     folder: FolderMeta
@@ -15,6 +39,9 @@ interface Props {
 export default function FolderCard({ folder, onOpen, onSelect, isSelected, onDragStart, onDropItem }: Props) {
     const renameFolder = useAppStore((s) => s.renameFolder)
     const removeFolder = useAppStore((s) => s.removeFolder)
+    const canvasList = useAppStore((s) => s.canvasList)
+    const folderList = useAppStore((s) => s.folderList)
+    const folderProgress = getFolderProgressCounts(folder.id, canvasList, folderList)
     const [showMenu, setShowMenu] = useState(false)
     const [isRenaming, setIsRenaming] = useState(false)
     const [renameValue, setRenameValue] = useState(folder.name)
@@ -111,6 +138,9 @@ export default function FolderCard({ folder, onOpen, onSelect, isSelected, onDra
                         </span>
                     )}
                 </div>
+
+                {/* Comprehension progress bar */}
+                <ProgressBar progressCounts={folderProgress} />
 
                 {/* Info area */}
                 <div className="p-3 flex items-center justify-between">
