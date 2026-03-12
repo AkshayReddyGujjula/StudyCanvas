@@ -78,6 +78,40 @@ function replaceOutsideCodeBlocks(
 
 type ContentNodeProps = NodeProps & { data: ExtendedContentNodeData }
 
+// ── PDF text-layer highlight helpers (used by Ctrl+F search) ────────────────
+function injectSpanHighlights(spans: HTMLElement[], searchText: string) {
+    const lower = searchText.toLowerCase().trim()
+    if (!lower) return
+    let pos = 0
+    const positions = spans.map(el => {
+        const start = pos
+        pos += (el.textContent ?? '').length
+        return { el, start, end: pos }
+    })
+    const full = spans.map(s => s.textContent ?? '').join('').toLowerCase()
+    let idx = full.indexOf(lower)
+    while (idx !== -1) {
+        const matchEnd = idx + lower.length
+        for (const { el, start, end: spanEnd } of positions) {
+            if (start < matchEnd && spanEnd > idx) {
+                el.style.backgroundColor = 'rgba(255, 250, 100, 0.35)'
+                el.classList.add('canvas-search-highlight')
+            }
+        }
+        idx = full.indexOf(lower, idx + 1)
+    }
+}
+
+function clearSpanHighlights(spans: HTMLElement[]) {
+    for (const el of spans) {
+        if (el.classList.contains('canvas-search-highlight')) {
+            el.style.backgroundColor = ''
+            el.classList.remove('canvas-search-highlight')
+        }
+    }
+}
+
+
 function ContentNode({ id, data }: ContentNodeProps) {
     const { setCenter } = useReactFlow()
     const { onTestMePage, onManualSelection } = useCanvasCallbacks()
@@ -271,6 +305,40 @@ function ContentNode({ id, data }: ContentNodeProps) {
             if (persistTimerRef.current) clearTimeout(persistTimerRef.current)
         }
     }, [nodeWidth, userNodeHeight, viewMode, isExpanded, isLocked, renderDpr, id, updateNodeData])
+
+    // ── Canvas search highlight: switch to PDF view and inject yellow highlight ──
+    useEffect(() => {
+        const highlight = data.searchHighlight
+        const timestamp = data.searchHighlightTimestamp
+        if (!highlight || !timestamp) return
+
+        // Switch to PDF view so the text layer is rendered
+        setViewMode('pdf')
+
+        // Poll for the text layer — PDF.js renders it asynchronously
+        let attempts = 0
+        let clearTimer: ReturnType<typeof setTimeout> | null = null
+        const tryHighlight = () => {
+            const nodeEl = document.querySelector(`[data-id="${id}"]`)
+            const textLayer = nodeEl?.querySelector('.textLayer')
+            const spans = textLayer ? Array.from(textLayer.querySelectorAll<HTMLElement>('span')) : []
+            if (!spans.length) {
+                if (++attempts < 12) setTimeout(tryHighlight, 250)
+                return
+            }
+            injectSpanHighlights(spans, highlight)
+            clearTimer = setTimeout(() => {
+                clearSpanHighlights(spans)
+                updateNodeData(id, { searchHighlight: undefined, searchHighlightTimestamp: undefined })
+            }, 10_000)
+        }
+        const initTimer = setTimeout(tryHighlight, 200)
+        return () => {
+            clearTimeout(initTimer)
+            if (clearTimer) clearTimeout(clearTimer)
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [data.searchHighlight, data.searchHighlightTimestamp])
 
     // ── Core resize logic (called directly or after warning confirmation) ──
     const executeResize = useCallback((startX: number, startY: number, startW: number, startH: number, minW: number, mode: 'w' | 'h' | 'wh', cursor?: string) => {

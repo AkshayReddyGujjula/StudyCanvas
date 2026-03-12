@@ -222,6 +222,20 @@ export const tutorialSteps: TutorialStep[] = [
 
     // ── 11 ─────────────────────────────────────────────────────────
     {
+        id: 'canvas-search',
+        phaseLabel: 'Navigation',
+        phaseIconKey: 'layers',
+        title: 'Ctrl+F — Search Your Entire Canvas',
+        description:
+            'Press Ctrl+F (or Cmd+F on Mac) to open the canvas-wide search bar. It instantly searches every node — answers, flashcards, sticky notes, code, summaries — and every page of your PDF. Click any result to jump straight to it.',
+        proTip: 'PDF text results highlight the matched word in yellow for 10 seconds so you can spot it instantly',
+        targetSelector: null,
+        tooltipPosition: 'center',
+        highlightPadding: 0,
+    },
+
+    // ── 12 ─────────────────────────────────────────────────────────
+    {
         id: 'save',
         phaseLabel: 'Organisation',
         phaseIconKey: 'save',

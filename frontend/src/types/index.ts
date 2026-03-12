@@ -19,6 +19,10 @@ export interface ContentNodeData {
     filename: string
     page_count: number
     pdf_id?: string
+    /** Text to highlight in the PDF text layer (set by canvas Ctrl+F search) */
+    searchHighlight?: string
+    /** Epoch ms — changing this re-triggers the highlight effect in ContentNode */
+    searchHighlightTimestamp?: number
 }
 
 export interface ChatMessage {

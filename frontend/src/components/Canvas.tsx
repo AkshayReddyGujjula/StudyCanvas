@@ -39,6 +39,7 @@ import RevisionModal from './RevisionModal'
 import QuizHistoryModal from './QuizHistoryModal'
 import AllFlashcardsModal from './AllFlashcardsModal'
 import FlashcardRevisionPopup from './FlashcardRevisionPopup'
+import CanvasSearchModal from './CanvasSearchModal'
 import ToolsModal from './ToolsModal'
 import PdfUploadPopup from './PdfUploadPopup'
 import { DrawingCanvas, DrawingToolbar, TextNode } from './whiteboard'
@@ -215,6 +216,7 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
     const [retakeEntry, setRetakeEntry] = useState<QuizHistoryEntry | null>(null)
     const [showAllFlashcards, setShowAllFlashcards] = useState(false)
     const [flashcardRevisionSession, setFlashcardRevisionSession] = useState<{ cards: FlashcardNodeData[]; nodeIds: string[] } | null>(null)
+    const [isSearchOpen, setIsSearchOpen] = useState(false)
     const [isGeneratingFlashcards, setIsGeneratingFlashcards] = useState(false)
     const [generationProgress, setGenerationProgress] = useState<{
         type: 'quiz' | 'flashcards'
@@ -930,6 +932,42 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
         setCenter(node.position.x + w / 2, node.position.y + h / 2, { zoom, duration: 600 })
     }, [getViewport, setCenter])
 
+    // ── Canvas search navigation callbacks ───────────────────────────────────
+    const handleSearchNavigateToNode = useCallback((nodeId: string, pageIndex: number) => {
+        setIsSearchOpen(false)
+        if (pageIndex !== currentPage) goToPage(pageIndex)
+        setTimeout(() => {
+            const n = useCanvasStore.getState().nodes.find(nd => nd.id === nodeId)
+            if (!n) return
+            const { zoom } = getViewport()
+            const w = n.measured?.width ?? 200
+            const h = n.measured?.height ?? 100
+            setCenter(n.position.x + w / 2, n.position.y + h / 2, { zoom, duration: 600 })
+        }, pageIndex !== currentPage ? 200 : 50)
+    }, [goToPage, currentPage, getViewport, setCenter])
+
+    const handleSearchNavigateToPdf = useCallback((pageIndex: number, matchText: string) => {
+        setIsSearchOpen(false)
+        goToPage(pageIndex)
+        if (contentNodeId) {
+            updateNodeData(contentNodeId, {
+                searchHighlight: matchText,
+                searchHighlightTimestamp: Date.now(),
+            })
+        }
+        setTimeout(() => {
+            const cn = useCanvasStore.getState().nodes.find(n => n.type === 'contentNode')
+            if (!cn) return
+            const { zoom } = getViewport()
+            const w = cn.measured?.width ?? 600
+            const h = cn.measured?.height ?? 800
+            setCenter(cn.position.x + w / 2, cn.position.y + h / 2, {
+                zoom: Math.min(zoom, 0.9),
+                duration: 600,
+            })
+        }, 150)
+    }, [goToPage, contentNodeId, updateNodeData, getViewport, setCenter])
+
     // ── Left Toolbar node spawning ──────────────────────────────────────────
     const getViewportCenter = useCallback(() => {
         const container = containerRef.current
@@ -1278,6 +1316,12 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
                 const state = useCanvasStore.getState()
                 // Toggle global snipping mode — works anywhere on the canvas
                 state.setIsSnippingMode(!state.isSnippingMode)
+            }
+            // Ctrl+F / Cmd+F — open (or close) canvas search
+            if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'f') {
+                e.preventDefault()
+                setIsSearchOpen(prev => !prev)
+                return
             }
             // Escape exits snipping mode
             if (e.key === 'Escape') {
@@ -3358,6 +3402,18 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
                         nodeIds={flashcardRevisionSession.nodeIds}
                         onClose={() => setFlashcardRevisionSession(null)}
                         onFinish={() => { setFlashcardRevisionSession(null); setShowAllFlashcards(true) }}
+                    />
+                )}
+
+                {/* Ctrl+F canvas-wide search */}
+                {isSearchOpen && (
+                    <CanvasSearchModal
+                        nodes={nodes}
+                        pageMarkdowns={pageMarkdowns}
+                        currentPage={currentPage}
+                        onNavigateToNode={handleSearchNavigateToNode}
+                        onNavigateToPdfText={handleSearchNavigateToPdf}
+                        onClose={() => setIsSearchOpen(false)}
                     />
                 )}
 
