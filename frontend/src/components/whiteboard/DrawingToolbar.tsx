@@ -5,6 +5,52 @@ import ColorPicker from './ColorPicker'
 
 type ToolPanel = 'pen1' | 'pen2' | 'highlighter' | 'eraser' | 'text' | null
 
+// ── Drag-to-reorder types and persistence ──────────────────────────────────
+
+type DrawingToolId = 'cursor' | 'pen1' | 'pen2' | 'highlighter' | 'lasso' | 'eraser' | 'text'
+
+const DEFAULT_TOOL_ORDER: DrawingToolId[] = [
+    'cursor', 'pen1', 'pen2', 'highlighter', 'lasso', 'eraser', 'text',
+]
+
+const STORAGE_KEY = 'studycanvas_right_toolbar_order'
+
+function loadOrder(): DrawingToolId[] {
+    try {
+        const saved = localStorage.getItem(STORAGE_KEY)
+        if (!saved) return [...DEFAULT_TOOL_ORDER]
+        const parsed = JSON.parse(saved) as string[]
+        const valid = parsed.filter((id): id is DrawingToolId =>
+            (DEFAULT_TOOL_ORDER as string[]).includes(id)
+        )
+        const missing = DEFAULT_TOOL_ORDER.filter(id => !valid.includes(id))
+        return [...valid, ...missing]
+    } catch {
+        return [...DEFAULT_TOOL_ORDER]
+    }
+}
+
+function persistOrder(order: DrawingToolId[]) {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(order)) } catch { /* ignore */ }
+}
+
+function reorderItems(
+    arr: DrawingToolId[],
+    draggedId: DrawingToolId,
+    targetId: DrawingToolId,
+    dropPosition: 'before' | 'after',
+): DrawingToolId[] {
+    const fromIdx = arr.indexOf(draggedId)
+    let insertIdx = arr.indexOf(targetId)
+    if (dropPosition === 'after') insertIdx++
+    const next = arr.filter(id => id !== draggedId)
+    const finalIdx = Math.max(0, Math.min(next.length, fromIdx < insertIdx ? insertIdx - 1 : insertIdx))
+    next.splice(finalIdx, 0, draggedId)
+    return next
+}
+
+// ── Component ─────────────────────────────────────────────────────────────
+
 export default function DrawingToolbar() {
     const [openPanel, setOpenPanel] = useState<ToolPanel>(null)
     const toolbarRef = useRef<HTMLDivElement>(null)
@@ -24,11 +70,9 @@ export default function DrawingToolbar() {
 
     const selectTool = useCallback((tool: WhiteboardTool) => {
         if (activeTool === tool && tool !== 'cursor') {
-            // Toggle panel open/close if clicking already-active tool
             setOpenPanel((prev) => (prev === tool ? null : tool as ToolPanel))
         } else {
             setActiveTool(tool)
-            // Close panel when switching to a different tool
             setOpenPanel(null)
         }
     }, [activeTool, setActiveTool])
@@ -44,8 +88,7 @@ export default function DrawingToolbar() {
         return () => document.removeEventListener('mousedown', handler)
     }, [])
 
-    // A panel only makes sense when its tool is active — derive instead of syncing via effect.
-    // This handles programmatic tool changes (e.g. text → cursor after placement) without setState in effects.
+    // A panel only makes sense when its tool is active
     const effectiveOpenPanel: ToolPanel = (openPanel === activeTool) ? openPanel : null
 
     // Collapse hover detection — show when cursor is near the right edge
@@ -115,6 +158,129 @@ export default function DrawingToolbar() {
 
     const isVisible = !isCollapsed || isHovering
 
+    // ── Drag-to-reorder state ──────────────────────────────────────────────
+    const [toolOrder, setToolOrder] = useState<DrawingToolId[]>(() => loadOrder())
+    const [draggedId, setDraggedId] = useState<DrawingToolId | null>(null)
+    const [dragOverId, setDragOverId] = useState<DrawingToolId | null>(null)
+    const [dropPosition, setDropPosition] = useState<'before' | 'after'>('before')
+
+    const handleDragStart = useCallback((e: React.DragEvent<HTMLDivElement>, id: DrawingToolId) => {
+        e.dataTransfer.effectAllowed = 'move'
+        e.dataTransfer.setData('text/plain', id)
+        setDraggedId(id)
+    }, [])
+
+    const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>, id: DrawingToolId) => {
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'move'
+        setDragOverId(id)
+        const rect = e.currentTarget.getBoundingClientRect()
+        setDropPosition(e.clientY < rect.top + rect.height / 2 ? 'before' : 'after')
+    }, [])
+
+    const handleDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+            setDragOverId(null)
+        }
+    }, [])
+
+    const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>, targetId: DrawingToolId) => {
+        e.preventDefault()
+        if (!draggedId || draggedId === targetId) {
+            setDraggedId(null)
+            setDragOverId(null)
+            return
+        }
+        const newOrder = reorderItems(toolOrder, draggedId, targetId, dropPosition)
+        setToolOrder(newOrder)
+        persistOrder(newOrder)
+        setDraggedId(null)
+        setDragOverId(null)
+    }, [draggedId, toolOrder, dropPosition])
+
+    const handleDragEnd = useCallback(() => {
+        setDraggedId(null)
+        setDragOverId(null)
+    }, [])
+
+    // ── Tool button renderer ───────────────────────────────────────────────
+    const renderTool = (id: DrawingToolId) => {
+        switch (id) {
+            case 'cursor':
+                return (
+                    <button onClick={() => selectTool('cursor')} className={toolBtnClass('cursor')} title="Cursor (select & move)">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z" />
+                            <path d="M13 13l6 6" />
+                        </svg>
+                    </button>
+                )
+            case 'pen1':
+                return (
+                    <button onClick={() => selectTool('pen1')} className={toolBtnClass('pen1')} title="Pen 1">
+                        <div className="relative">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+                            </svg>
+                            <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-white" style={{ backgroundColor: toolSettings.pen1.color }} />
+                        </div>
+                    </button>
+                )
+            case 'pen2':
+                return (
+                    <button onClick={() => selectTool('pen2')} className={toolBtnClass('pen2')} title="Pen 2">
+                        <div className="relative">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+                            </svg>
+                            <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-white" style={{ backgroundColor: toolSettings.pen2.color }} />
+                        </div>
+                    </button>
+                )
+            case 'highlighter':
+                return (
+                    <button onClick={() => selectTool('highlighter')} className={toolBtnClass('highlighter')} title="Highlighter">
+                        <div className="relative">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M9 11l-6 6v3h9l3-3" />
+                                <path d="M22 12l-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4" />
+                            </svg>
+                            <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-white" style={{ backgroundColor: toolSettings.highlighter.color, opacity: toolSettings.highlighter.opacity }} />
+                        </div>
+                    </button>
+                )
+            case 'lasso':
+                return (
+                    <button onClick={() => selectTool('lasso')} className={toolBtnClass('lasso')} title="Lasso Select — draw a circle to select strokes, then drag or Delete">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M12 3C7 3 3 6.5 3 11c0 3.3 2 6 5 7.5" strokeDasharray="3 1.5" />
+                            <path d="M12 3c5 0 9 3.5 9 8s-4 8-9 8c-1.2 0-2.4-.2-3.5-.6" strokeDasharray="3 1.5" />
+                            <path d="M8.5 19l2 3 2-3" />
+                        </svg>
+                    </button>
+                )
+            case 'eraser':
+                return (
+                    <button onClick={() => selectTool('eraser')} className={toolBtnClass('eraser')} title="Eraser">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M20 20H7L3 16c-.8-.8-.8-2 0-2.8L13.4 2.8c.8-.8 2-.8 2.8 0L21 7.6c.8.8.8 2 0 2.8L16 15" />
+                            <path d="M6 11l4 4" />
+                        </svg>
+                    </button>
+                )
+            case 'text':
+                return (
+                    <button onClick={() => selectTool('text')} className={toolBtnClass('text')} title="Text">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="4 7 4 4 20 4 20 7" />
+                            <line x1="9" y1="20" x2="15" y2="20" />
+                            <line x1="12" y1="4" x2="12" y2="20" />
+                        </svg>
+                    </button>
+                )
+        }
+    }
+
     return (
         <>
         {/* Thin edge indicator strip — visible only when collapsed and not peeking */}
@@ -149,7 +315,6 @@ export default function DrawingToolbar() {
                     className="bg-white/95 backdrop-blur-sm border border-gray-200 rounded-xl shadow-lg p-3 min-w-[200px] max-w-[240px] select-none"
                     style={{ marginRight: 4 }}
                 >
-                    {/* Pen 1 settings */}
                     {effectiveOpenPanel === 'pen1' && (
                         <PenPanel
                             label="Pen 1"
@@ -158,7 +323,6 @@ export default function DrawingToolbar() {
                             onWidthChange={(w) => handlePenWidthChange('pen1', w)}
                         />
                     )}
-                    {/* Pen 2 settings */}
                     {effectiveOpenPanel === 'pen2' && (
                         <PenPanel
                             label="Pen 2"
@@ -167,7 +331,6 @@ export default function DrawingToolbar() {
                             onWidthChange={(w) => handlePenWidthChange('pen2', w)}
                         />
                     )}
-                    {/* Highlighter settings */}
                     {effectiveOpenPanel === 'highlighter' && (
                         <div className="flex flex-col gap-3">
                             <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Highlighter</div>
@@ -188,7 +351,6 @@ export default function DrawingToolbar() {
                             </div>
                         </div>
                     )}
-                    {/* Eraser settings */}
                     {effectiveOpenPanel === 'eraser' && (
                         <div className="flex flex-col gap-3">
                             <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Eraser</div>
@@ -231,7 +393,6 @@ export default function DrawingToolbar() {
                             </div>
                         </div>
                     )}
-                    {/* Text settings */}
                     {effectiveOpenPanel === 'text' && (
                         <div className="flex flex-col gap-3">
                             <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Text</div>
@@ -253,78 +414,44 @@ export default function DrawingToolbar() {
 
             {/* Main vertical toolbar */}
             <div className="flex flex-col gap-1 p-1.5 bg-white/95 backdrop-blur-sm border border-gray-200 rounded-xl shadow-lg select-none">
-                {/* Cursor */}
-                <button onClick={() => selectTool('cursor')} className={toolBtnClass('cursor')} title="Cursor (select & move)">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z" />
-                        <path d="M13 13l6 6" />
-                    </svg>
-                </button>
+
+                {/* Draggable tool buttons */}
+                {toolOrder.map(id => {
+                    const isDragging = draggedId === id
+                    const isDragTarget = dragOverId === id
+                    return (
+                        <div
+                            key={id}
+                            draggable
+                            onDragStart={(e) => handleDragStart(e, id)}
+                            onDragOver={(e) => handleDragOver(e, id)}
+                            onDragLeave={handleDragLeave}
+                            onDrop={(e) => handleDrop(e, id)}
+                            onDragEnd={handleDragEnd}
+                            className="relative cursor-grab active:cursor-grabbing"
+                            style={{ opacity: isDragging ? 0.4 : 1 }}
+                            title={isDragTarget ? undefined : 'Drag to reorder'}
+                        >
+                            {isDragTarget && dropPosition === 'before' && (
+                                <div
+                                    className="absolute inset-x-1 h-0.5 bg-blue-400 rounded-full pointer-events-none z-10"
+                                    style={{ top: -3 }}
+                                />
+                            )}
+                            {renderTool(id)}
+                            {isDragTarget && dropPosition === 'after' && (
+                                <div
+                                    className="absolute inset-x-1 h-0.5 bg-blue-400 rounded-full pointer-events-none z-10"
+                                    style={{ bottom: -3 }}
+                                />
+                            )}
+                        </div>
+                    )
+                })}
 
                 <div className="h-px bg-gray-200 mx-1" />
 
-                {/* Pen 1 */}
-                <button onClick={() => selectTool('pen1')} className={toolBtnClass('pen1')} title="Pen 1">
-                    <div className="relative">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
-                        </svg>
-                        <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-white" style={{ backgroundColor: toolSettings.pen1.color }} />
-                    </div>
-                </button>
-
-                {/* Pen 2 */}
-                <button onClick={() => selectTool('pen2')} className={toolBtnClass('pen2')} title="Pen 2">
-                    <div className="relative">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
-                        </svg>
-                        <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-white" style={{ backgroundColor: toolSettings.pen2.color }} />
-                    </div>
-                </button>
-
-                {/* Highlighter */}
-                <button onClick={() => selectTool('highlighter')} className={toolBtnClass('highlighter')} title="Highlighter">
-                    <div className="relative">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M9 11l-6 6v3h9l3-3" />
-                            <path d="M22 12l-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4" />
-                        </svg>
-                        <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-white" style={{ backgroundColor: toolSettings.highlighter.color, opacity: toolSettings.highlighter.opacity }} />
-                    </div>
-                </button>
-
-                <div className="h-px bg-gray-200 mx-1" />
-
-                {/* Lasso Select */}
-                <button onClick={() => selectTool('lasso')} className={toolBtnClass('lasso')} title="Lasso Select — draw a circle to select strokes, then drag or Delete">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M12 3C7 3 3 6.5 3 11c0 3.3 2 6 5 7.5" strokeDasharray="3 1.5" />
-                        <path d="M12 3c5 0 9 3.5 9 8s-4 8-9 8c-1.2 0-2.4-.2-3.5-.6" strokeDasharray="3 1.5" />
-                        <path d="M8.5 19l2 3 2-3" />
-                    </svg>
-                </button>
-
-                {/* Eraser */}
-                <button onClick={() => selectTool('eraser')} className={toolBtnClass('eraser')} title="Eraser">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M20 20H7L3 16c-.8-.8-.8-2 0-2.8L13.4 2.8c.8-.8 2-.8 2.8 0L21 7.6c.8.8.8 2 0 2.8L16 15" />
-                        <path d="M6 11l4 4" />
-                    </svg>
-                </button>
-
-                {/* Text */}
-                <button onClick={() => selectTool('text')} className={toolBtnClass('text')} title="Text">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="4 7 4 4 20 4 20 7" />
-                        <line x1="9" y1="20" x2="15" y2="20" />
-                        <line x1="12" y1="4" x2="12" y2="20" />
-                    </svg>
-                </button>
-
-                <div className="h-px bg-gray-200 mx-1" />
-
-                {/* Undo */}
+                {/* Undo — fixed, not reorderable */}
                 <button
                     onClick={whiteboardUndo}
                     disabled={whiteboardUndoStack.length === 0}
@@ -337,7 +464,7 @@ export default function DrawingToolbar() {
                     </svg>
                 </button>
 
-                {/* Redo */}
+                {/* Redo — fixed */}
                 <button
                     onClick={whiteboardRedo}
                     disabled={whiteboardRedoStack.length === 0}
@@ -352,7 +479,7 @@ export default function DrawingToolbar() {
 
                 <div className="h-px bg-gray-200 mx-1" />
 
-                {/* Clear page drawings */}
+                {/* Clear page drawings — fixed */}
                 <button
                     onClick={handleClearPage}
                     className="flex items-center justify-center w-9 h-9 rounded-lg text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors"
@@ -366,7 +493,7 @@ export default function DrawingToolbar() {
 
                 <div className="h-px bg-gray-200 mx-1" />
 
-                {/* Collapse toggle */}
+                {/* Collapse toggle — fixed */}
                 <button
                     onClick={() => { setIsCollapsed(!isCollapsed); setIsHovering(false); setOpenPanel(null) }}
                     className="flex items-center justify-center w-full h-4 rounded px-2 transition-all duration-150 text-gray-400 hover:bg-gray-100 hover:text-gray-600"

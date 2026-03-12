@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { useAppStore } from '../store/appStore'
 import { useTutorialStore } from '../store/tutorialStore'
 import { TutorialWelcomeModal } from './tutorial'
@@ -11,6 +11,7 @@ import { ensurePermission, reselectRootFolder } from '../services/fileSystemServ
 
 export default function HomePage() {
     const navigate = useNavigate()
+    const location = useLocation()
     const userName = useAppStore((s) => s.userName)
     const canvasList = useAppStore((s) => s.canvasList)
     const folderList = useAppStore((s) => s.folderList)
@@ -48,7 +49,10 @@ export default function HomePage() {
     const settingsRef = useRef<HTMLDivElement>(null)
 
     // ─── Folder navigation state ─────────────────────────────────────────
-    const [currentFolderId, setCurrentFolderId] = useState<string | null>(null)
+    // When navigating back from a canvas (Save & Home), restore the parent folder context
+    const [currentFolderId, setCurrentFolderId] = useState<string | null>(
+        (location.state as { folderId?: string | null } | null)?.folderId ?? null
+    )
     const [dragError, setDragError] = useState<string | null>(null)
     const [isDragOverBack, setIsDragOverBack] = useState(false)
 

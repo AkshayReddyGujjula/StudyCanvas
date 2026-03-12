@@ -486,8 +486,11 @@ export default function CanvasPage() {
         } catch {
             // Save failed — still navigate home
         }
-        navigate('/')
-    }, [navigate, saveCanvas])
+        // Navigate back to the folder that contains this canvas (if any)
+        const canvasMeta = useAppStore.getState().canvasList.find(c => c.id === canvasId)
+        const parentFolderId = canvasMeta?.parentFolderId ?? null
+        navigate('/', { state: { folderId: parentFolderId } })
+    }, [navigate, saveCanvas, canvasId])
 
     if (loading) {
         return (
