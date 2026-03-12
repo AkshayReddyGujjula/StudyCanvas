@@ -45,6 +45,11 @@ class GenerateTitleRequest(BaseModel):
     raw_text: str = Field(..., max_length=500000, description="The raw document text")
 
 
+class PageTitleRequest(BaseModel):
+    page_text: str = Field(..., max_length=20000, description="Text content of the page")
+    image_base64: Optional[str] = Field(None, description="Page screenshot as base64 JPEG for visual context")
+
+
 class QueryRequest(BaseModel):
     question: str = Field(..., max_length=2000, description="The student's question")
     highlighted_text: str = Field(..., max_length=10000, description="The text selected by the student")

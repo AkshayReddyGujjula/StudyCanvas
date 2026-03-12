@@ -50,6 +50,10 @@ interface CanvasState {
     pdfArrayBuffer: ArrayBuffer | null
     /** Completed revision quiz sessions for this canvas, newest first */
     quizHistory: QuizHistoryEntry[]
+    /** Maps flashcard node ID → Unix ms of last flip (for "last revised" display) */
+    flashcardLastFlipped: Record<string, number>
+    /** Maps 1-based page index → AI-generated page title (persisted so it is not re-fetched on every open) */
+    pageTitles: Record<number, string>
 
     // ── Whiteboard / Drawing state ──────────────────────────────────────────
     drawingStrokes: DrawingStroke[]
@@ -99,6 +103,14 @@ interface CanvasActions {
     addQuizHistoryEntry: (entry: QuizHistoryEntry) => void
     /** Replace the full quiz history (used when loading saved state) */
     setQuizHistory: (entries: QuizHistoryEntry[]) => void
+    /** Record a flashcard flip event (updates last-flipped timestamp for that node) */
+    recordFlashcardFlip: (nodeId: string) => void
+    /** Replace the full flip-timestamp map (used when loading saved state) */
+    setFlashcardLastFlipped: (map: Record<string, number>) => void
+    /** Store an AI-generated title for a single page (1-based index) */
+    setPageTitle: (pageIndex: number, title: string) => void
+    /** Replace the full page-title map (used when loading saved state) */
+    setPageTitles: (map: Record<number, string>) => void
 
     // ── Whiteboard / Drawing actions ────────────────────────────────────────
     addStroke: (stroke: DrawingStroke) => void
@@ -140,6 +152,8 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
     isSnippingMode: false,
     pdfArrayBuffer: null,
     quizHistory: [],
+    flashcardLastFlipped: {},
+    pageTitles: {},
 
     // Whiteboard defaults
     drawingStrokes: [],
@@ -220,6 +234,8 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
             isSnippingMode: false,
             pdfArrayBuffer: null,
             quizHistory: [],
+            flashcardLastFlipped: {},
+            pageTitles: {},
             drawingStrokes: [],
             whiteboardUndoStack: [],
             whiteboardRedoStack: [],
@@ -245,6 +261,8 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
             isSnippingMode: false,
             pdfArrayBuffer: null,
             quizHistory: [],
+            flashcardLastFlipped: {},
+            pageTitles: {},
             drawingStrokes: [],
             whiteboardUndoStack: [],
             whiteboardRedoStack: [],
@@ -260,7 +278,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
         if (_persistTimer) clearTimeout(_persistTimer)
         _persistTimer = setTimeout(() => {
             _persistTimer = null
-            const { nodes, edges, fileData, highlights, userDetails, currentPage, pageMarkdowns, zoomLevel, scrollPositions, canvasViewport, drawingStrokes, savedColors, toolSettings, quizHistory } = get()
+            const { nodes, edges, fileData, highlights, userDetails, currentPage, pageMarkdowns, zoomLevel, scrollPositions, canvasViewport, drawingStrokes, savedColors, toolSettings, quizHistory, flashcardLastFlipped, pageTitles } = get()
             // Strip large recoverable fields to stay under the ~5MB localStorage quota.
             // raw_text & markdown_content are re-derived from the PDF on next load.
             // Image data URLs are kept (needed for display) but could be stripped in future.
@@ -269,7 +287,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
                 raw_text: '',
                 markdown_content: '',
             } : null
-            const state = { nodes, edges, fileData: lightFileData, highlights, userDetails, currentPage, pageMarkdowns, zoomLevel, scrollPositions, canvasViewport, drawingStrokes, savedColors, toolSettings, quizHistory }
+            const state = { nodes, edges, fileData: lightFileData, highlights, userDetails, currentPage, pageMarkdowns, zoomLevel, scrollPositions, canvasViewport, drawingStrokes, savedColors, toolSettings, quizHistory, flashcardLastFlipped, pageTitles }
             try {
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
             } catch (e) {
@@ -283,7 +301,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
                         }
                         return n
                     })
-                    const minState = { nodes: minimalNodes, edges, fileData: lightFileData, highlights, userDetails, currentPage, pageMarkdowns, zoomLevel, scrollPositions, canvasViewport, drawingStrokes: [], savedColors, toolSettings, quizHistory }
+                    const minState = { nodes: minimalNodes, edges, fileData: lightFileData, highlights, userDetails, currentPage, pageMarkdowns, zoomLevel, scrollPositions, canvasViewport, drawingStrokes: [], savedColors, toolSettings, quizHistory, flashcardLastFlipped, pageTitles }
                     localStorage.setItem(STORAGE_KEY, JSON.stringify(minState))
                 } catch {
                     console.error('[canvasStore] localStorage write failed even with minimal state')
@@ -321,6 +339,18 @@ export const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => 
         set((state) => ({ quizHistory: [entry, ...state.quizHistory] })),
 
     setQuizHistory: (entries) => set({ quizHistory: entries }),
+
+    recordFlashcardFlip: (nodeId) =>
+        set((state) => ({
+            flashcardLastFlipped: { ...state.flashcardLastFlipped, [nodeId]: Date.now() },
+        })),
+
+    setFlashcardLastFlipped: (map) => set({ flashcardLastFlipped: map }),
+
+    setPageTitle: (pageIndex, title) =>
+        set((state) => ({ pageTitles: { ...state.pageTitles, [pageIndex]: title } })),
+
+    setPageTitles: (map) => set({ pageTitles: map }),
 
     setIsSnippingMode: (isSnipping) => set({ isSnippingMode: isSnipping }),
 

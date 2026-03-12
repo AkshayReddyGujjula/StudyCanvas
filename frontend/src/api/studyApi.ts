@@ -377,6 +377,19 @@ export const streamCodeAssist = async (
 /**
  * Extract text from an image using Gemini Vision OCR.
  */
+export const fetchPageTitle = async (
+    page_text: string,
+    image_base64?: string,
+): Promise<string> => {
+    const response = await api.post<{ title: string; model_used?: string; input_tokens?: number; output_tokens?: number }>(
+        '/api/page-title',
+        { page_text, image_base64 },
+    )
+    const { title, model_used = 'gemini-2.5-flash-lite', input_tokens = 0, output_tokens = 0 } = response.data
+    recordUsage(model_used, input_tokens, output_tokens, 'page-title')
+    return title ?? ''
+}
+
 export const extractTextFromImage = async (
     image_base64: string,
 ): Promise<{ text: string; model_used: string }> => {

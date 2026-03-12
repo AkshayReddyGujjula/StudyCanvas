@@ -127,6 +127,59 @@ async def generate_title(raw_text: str) -> str:
     return title, input_t, output_t
 
 
+async def generate_page_title(
+    page_text: str,
+    image_base64: str | None = None,
+) -> tuple[str, int, int]:
+    """
+    Generate a concise 3-7 word title for a single PDF page.
+    Uses MODEL_LITE with optional page screenshot for visual context (diagrams, charts, etc.).
+    Returns (title, input_tokens, output_tokens).
+    """
+    import base64 as _base64
+
+    excerpt = page_text[:4000]
+    prompt_text = (
+        "You are an academic page titling assistant.\n\n"
+        "Your task: read the page content below (and the page screenshot if provided) and produce "
+        "a SINGLE, SHORT, SPECIFIC TITLE that accurately captures the main topic on this page.\n\n"
+        "Rules (follow every one):\n"
+        "- The title MUST be between 3 and 7 words.\n"
+        "- The title must describe the SPECIFIC topic on this page — not the document as a whole.\n"
+        "- Do NOT use generic titles like 'Study Notes', 'Page Content', 'Introduction', 'Overview', 'Summary'.\n"
+        "- Use title case (capitalise main words).\n"
+        "- Output ONLY the title. No explanation, no punctuation at the end, no quotes, no markdown.\n\n"
+        "Examples of GOOD titles: 'Krebs Cycle Enzyme Reactions', 'Newton Third Law Applications', "
+        "'SQL Joins and Aggregation', 'French Revolution Key Causes', 'Binary Search Tree Traversal'\n\n"
+        f"Page content:\n\n{excerpt}"
+    )
+
+    contents: list = []
+    if image_base64:
+        contents.append(
+            types.Part.from_bytes(
+                data=_base64.b64decode(image_base64),
+                mime_type="image/jpeg",
+            )
+        )
+    contents.append(prompt_text)
+
+    response = await _client.aio.models.generate_content(
+        model=MODEL_LITE,
+        contents=contents,
+        config=types.GenerateContentConfig(max_output_tokens=50, temperature=0.3),
+    )
+    input_t, output_t = _extract_usage(response)
+    raw = response.text
+    if not raw:
+        return "", input_t, output_t
+    title = raw.strip().strip('"').strip("'")
+    words = title.split()
+    if len(words) > 7:
+        title = " ".join(words[:7])
+    return title, input_t, output_t
+
+
 async def generate_quiz_title(
     source_type: str,
     questions: list[str],

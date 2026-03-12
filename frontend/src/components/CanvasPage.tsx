@@ -65,7 +65,7 @@ export default function CanvasPage() {
             const {
                 nodes, edges, fileData, highlights, userDetails,
                 currentPage, pageMarkdowns, zoomLevel, scrollPositions, canvasViewport,
-                drawingStrokes, savedColors, toolSettings, quizHistory,
+                drawingStrokes, savedColors, toolSettings, quizHistory, flashcardLastFlipped, pageTitles,
             } = store
 
             // Build the state object (strip large recoverable fields)
@@ -80,7 +80,7 @@ export default function CanvasPage() {
                 }
                 return n
             })
-            const stateObj = { nodes: lightNodes, edges, fileData: lightFileData, highlights, userDetails, currentPage, pageMarkdowns, zoomLevel, scrollPositions, canvasViewport, drawingStrokes, savedColors, toolSettings, quizHistory }
+            const stateObj = { nodes: lightNodes, edges, fileData: lightFileData, highlights, userDetails, currentPage, pageMarkdowns, zoomLevel, scrollPositions, canvasViewport, drawingStrokes, savedColors, toolSettings, quizHistory, flashcardLastFlipped, pageTitles }
 
             onProgress?.(20, 'Serializing canvas…')
 
@@ -301,6 +301,8 @@ export default function CanvasPage() {
                     if (stateObj.toolSettings) store.setToolSettings(stateObj.toolSettings)
                     if (stateObj.pageMarkdowns && Array.isArray(stateObj.pageMarkdowns)) store.setPageMarkdowns(stateObj.pageMarkdowns)
                     if (stateObj.quizHistory && Array.isArray(stateObj.quizHistory)) store.setQuizHistory(stateObj.quizHistory)
+                    if (stateObj.flashcardLastFlipped && typeof stateObj.flashcardLastFlipped === 'object' && !Array.isArray(stateObj.flashcardLastFlipped)) store.setFlashcardLastFlipped(stateObj.flashcardLastFlipped as Record<string, number>)
+                    if (stateObj.pageTitles && typeof stateObj.pageTitles === 'object' && !Array.isArray(stateObj.pageTitles)) store.setPageTitles(stateObj.pageTitles as Record<number, string>)
                 }
 
                 // Always hydrate canvasStore.userDetails from the global user context

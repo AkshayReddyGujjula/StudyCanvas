@@ -37,6 +37,8 @@ import AskGeminiPopup from './AskGeminiPopup'
 import QuestionModal from './QuestionModal'
 import RevisionModal from './RevisionModal'
 import QuizHistoryModal from './QuizHistoryModal'
+import AllFlashcardsModal from './AllFlashcardsModal'
+import FlashcardRevisionPopup from './FlashcardRevisionPopup'
 import ToolsModal from './ToolsModal'
 import PdfUploadPopup from './PdfUploadPopup'
 import { DrawingCanvas, DrawingToolbar, TextNode } from './whiteboard'
@@ -211,6 +213,8 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
     const [revisionSource, setRevisionSource] = useState<{ sourceType: 'struggling' | 'page'; pageIndex: number; pageContent?: string } | null>(null)
     const [showQuizHistory, setShowQuizHistory] = useState(false)
     const [retakeEntry, setRetakeEntry] = useState<QuizHistoryEntry | null>(null)
+    const [showAllFlashcards, setShowAllFlashcards] = useState(false)
+    const [flashcardRevisionSession, setFlashcardRevisionSession] = useState<{ cards: FlashcardNodeData[]; nodeIds: string[] } | null>(null)
     const [isGeneratingFlashcards, setIsGeneratingFlashcards] = useState(false)
     const [generationProgress, setGenerationProgress] = useState<{
         type: 'quiz' | 'flashcards'
@@ -3178,6 +3182,25 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
                     />
                 )}
 
+                {showAllFlashcards && (
+                    <AllFlashcardsModal
+                        onClose={() => setShowAllFlashcards(false)}
+                        onStartRevision={(cards, nodeIds) => {
+                            setFlashcardRevisionSession({ cards, nodeIds })
+                            setShowAllFlashcards(false)
+                        }}
+                    />
+                )}
+
+                {flashcardRevisionSession && (
+                    <FlashcardRevisionPopup
+                        cards={flashcardRevisionSession.cards}
+                        nodeIds={flashcardRevisionSession.nodeIds}
+                        onClose={() => setFlashcardRevisionSession(null)}
+                        onFinish={() => { setFlashcardRevisionSession(null); setShowAllFlashcards(true) }}
+                    />
+                )}
+
                 {/* Tools modal */}
                 {showTools && (
                     <ToolsModal onClose={() => setShowTools(false)} />
@@ -3454,13 +3477,27 @@ export default function Canvas({ onGoHome, onSave, lastAutoSave, autoSaveInterva
 
                             <button
                                 onClick={() => { setShowRevisionMenu(false); setShowQuizHistory(true) }}
-                                className="text-left px-3 py-2 mb-1 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors"
+                                className="text-left px-3 py-2 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors"
                             >
                                 <span className="flex items-center gap-1.5 pl-2">
                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                         <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
                                     </svg>
                                     Quiz History
+                                </span>
+                            </button>
+
+                            <button
+                                onClick={() => { setShowRevisionMenu(false); setShowAllFlashcards(true) }}
+                                className="text-left px-3 py-2 mb-1 hover:bg-gray-100 rounded-md text-sm text-gray-700 transition-colors"
+                            >
+                                <span className="flex items-center gap-1.5 pl-2">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <rect x="2" y="5" width="20" height="14" rx="2" />
+                                        <line x1="2" y1="10" x2="22" y2="10" />
+                                        <line x1="7" y1="15" x2="17" y2="15" />
+                                    </svg>
+                                    All Flashcards
                                 </span>
                             </button>
                         </div>

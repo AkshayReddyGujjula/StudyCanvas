@@ -19,6 +19,7 @@ type FlashcardNodeProps = NodeProps & { data: FlashcardNodeData }
 function FlashcardNode({ id, data }: FlashcardNodeProps) {
     const updateNodeData = useCanvasStore((s) => s.updateNodeData)
     const persistToLocalStorage = useCanvasStore((s) => s.persistToLocalStorage)
+    const recordFlashcardFlip = useCanvasStore((s) => s.recordFlashcardFlip)
     const setNodes = useCanvasStore((s) => s.setNodes)
     const setEdges = useCanvasStore((s) => s.setEdges)
     const [confirmDelete, setConfirmDelete] = useState(false)
@@ -55,8 +56,9 @@ function FlashcardNode({ id, data }: FlashcardNodeProps) {
     const handleFlip = useCallback(() => {
         if (data.isLoading || data.isEditing) return
         updateNodeData(id, { isFlipped: !data.isFlipped })
+        recordFlashcardFlip(id)
         persistToLocalStorage()
-    }, [id, data.isFlipped, data.isLoading, data.isEditing, updateNodeData, persistToLocalStorage])
+    }, [id, data.isFlipped, data.isLoading, data.isEditing, updateNodeData, recordFlashcardFlip, persistToLocalStorage])
 
     const handleEditToggle = useCallback(() => {
         if (!data.isEditing) {
