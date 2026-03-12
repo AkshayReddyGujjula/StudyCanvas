@@ -60,11 +60,27 @@ export default function HomePage() {
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
     const [lastSelectedId, setLastSelectedId] = useState<string | null>(null)
 
+    // ─── Search state ─────────────────────────────────────────────────────
+    const [searchQuery, setSearchQuery] = useState('')
+    const [searchOpen, setSearchOpen] = useState(false)
+    const searchRef = useRef<HTMLDivElement>(null)
+
     // Close settings menu on click outside
     useEffect(() => {
         const handler = (e: MouseEvent) => {
             if (settingsRef.current && !settingsRef.current.contains(e.target as Node)) {
                 setShowSettingsMenu(false)
+            }
+        }
+        document.addEventListener('mousedown', handler)
+        return () => document.removeEventListener('mousedown', handler)
+    }, [])
+
+    // Close search dropdown on click outside
+    useEffect(() => {
+        const handler = (e: MouseEvent) => {
+            if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+                setSearchOpen(false)
             }
         }
         document.addEventListener('mousedown', handler)
@@ -190,6 +206,49 @@ export default function HomePage() {
         ...foldersInView.map(f => ({ id: f.id, type: 'folder' as const })),
         ...canvasesInView.map(c => ({ id: c.id, type: 'canvas' as const })),
     ], [foldersInView, canvasesInView])
+
+    // ─── Global search ───────────────────────────────────────────────────
+
+    type SearchResult = { type: 'canvas' | 'folder'; id: string; name: string; path: string }
+
+    const getItemPath = useCallback((parentFolderId: string | null | undefined): string => {
+        const stack: string[] = []
+        let id = parentFolderId ?? null
+        const visited = new Set<string>()
+        while (id) {
+            if (visited.has(id)) break
+            visited.add(id)
+            const f = folderList.find(folder => folder.id === id)
+            if (!f) break
+            stack.unshift(f.name)
+            id = f.parentFolderId ?? null
+        }
+        return ['Home', ...stack].join(' › ')
+    }, [folderList])
+
+    const searchResults: SearchResult[] = useMemo(() => {
+        const q = searchQuery.trim().toLowerCase()
+        if (!q) return []
+        const results: SearchResult[] = []
+        folderList
+            .filter(f => f.name.toLowerCase().includes(q))
+            .forEach(f => results.push({ type: 'folder', id: f.id, name: f.name, path: getItemPath(f.parentFolderId) }))
+        canvasList
+            .filter(c => c.title.toLowerCase().includes(q))
+            .forEach(c => results.push({ type: 'canvas', id: c.id, name: c.title, path: getItemPath(c.parentFolderId) }))
+        return results.slice(0, 12)
+    }, [searchQuery, folderList, canvasList, getItemPath])
+
+    const handleSearchSelect = useCallback((result: SearchResult) => {
+        setSearchQuery('')
+        setSearchOpen(false)
+        if (result.type === 'canvas') {
+            navigate(`/canvas/${result.id}`)
+        } else {
+            setCurrentFolderId(result.id)
+            setSelectedIds(new Set())
+        }
+    }, [navigate])
 
     // ─── Selection handler ───────────────────────────────────────────────
 
@@ -526,6 +585,7 @@ export default function HomePage() {
                     {/* Back button when in a folder — also a drop target */}
                     {currentFolderId && (
                         <button
+                            type="button"
                             onClick={(e) => {
                                 e.stopPropagation()
                                 const currentFolder = folderList.find(f => f.id === currentFolderId)
@@ -547,6 +607,79 @@ export default function HomePage() {
                             {isDragOverBack ? 'Drop to move here' : 'Back'}
                         </button>
                     )}
+
+                    {/* Global search bar */}
+                    <div ref={searchRef} className="relative">
+                        <div className="flex items-center h-[52px] px-4 gap-2 bg-white border border-gray-200 rounded-xl shadow-sm focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-100 transition-all w-64">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-gray-400 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <circle cx="11" cy="11" r="8" />
+                                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                            </svg>
+                            <input
+                                type="text"
+                                placeholder="Search canvases & folders…"
+                                value={searchQuery}
+                                onChange={e => { setSearchQuery(e.target.value); setSearchOpen(true) }}
+                                onFocus={() => setSearchOpen(true)}
+                                className="flex-1 text-sm text-gray-700 placeholder-gray-400 bg-transparent outline-none min-w-0"
+                            />
+                            {searchQuery && (
+                                <button
+                                    type="button"
+                                    onClick={() => { setSearchQuery(''); setSearchOpen(false) }}
+                                    className="flex-shrink-0 text-gray-400 hover:text-gray-600 transition-colors"
+                                    aria-label="Clear search"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <line x1="18" y1="6" x2="6" y2="18" />
+                                        <line x1="6" y1="6" x2="18" y2="18" />
+                                    </svg>
+                                </button>
+                            )}
+                        </div>
+
+                        {/* Search results dropdown */}
+                        {searchOpen && searchQuery.trim() && (
+                            <div className="absolute top-[56px] left-0 w-[440px] bg-white border border-gray-200 rounded-xl shadow-lg z-50 overflow-hidden">
+                                {searchResults.length === 0 ? (
+                                    <div className="px-4 py-6 text-center text-sm text-gray-400">
+                                        No results for &ldquo;{searchQuery}&rdquo;
+                                    </div>
+                                ) : (
+                                    <ul className="divide-y divide-gray-50">
+                                        {searchResults.map(result => (
+                                            <li key={result.id}>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleSearchSelect(result)}
+                                                    className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors text-left"
+                                                >
+                                                    {/* Type icon */}
+                                                    <span className={`flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center ${result.type === 'folder' ? 'bg-amber-100 text-amber-600' : 'bg-indigo-100 text-indigo-600'}`}>
+                                                        {result.type === 'folder' ? (
+                                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                                                            </svg>
+                                                        ) : (
+                                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                                <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6" />
+                                                                <line x1="8" y1="2" x2="8" y2="18" />
+                                                                <line x1="16" y1="6" x2="16" y2="22" />
+                                                            </svg>
+                                                        )}
+                                                    </span>
+                                                    {/* Name */}
+                                                    <span className="flex-1 text-sm font-medium text-gray-800 truncate">{result.name}</span>
+                                                    {/* Path */}
+                                                    <span className="text-xs text-gray-400 truncate max-w-[160px] flex-shrink-0" title={result.path}>{result.path}</span>
+                                                </button>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                )}
+                            </div>
+                        )}
+                    </div>
                 </div>
 
                 {/* Error toast */}
