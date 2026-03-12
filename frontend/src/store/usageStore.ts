@@ -39,9 +39,11 @@ export const useUsageStore = create<UsageState>((set, get) => ({
         // Also persist to workspace file for cross-device sync (fire-and-forget)
         // Import appStore lazily to avoid circular dependency at module load time
         import('./appStore').then(({ useAppStore }) => {
-            const { directoryHandle } = useAppStore.getState()
-            if (directoryHandle) {
-                saveUsageStats(directoryHandle, entries).catch(() => {})
+            const { directoryHandle, hasPermission } = useAppStore.getState()
+            if (directoryHandle && hasPermission) {
+                saveUsageStats(directoryHandle, entries).catch((e) => {
+                    console.warn('[usageStore] failed to write usage_stats.json:', e)
+                })
             }
         }).catch(() => {})
     },

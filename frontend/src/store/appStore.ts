@@ -16,6 +16,7 @@ import {
     moveCanvasOnDisk,
     moveFolderOnDisk,
     loadUsageStats,
+    saveUsageStats,
     loadCanvasState,
     type Manifest,
 } from '../services/fileSystemService'
@@ -207,9 +208,16 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
                 isLoading: false,
                 userContext: updatedCtx,
             })
-            // Load usage stats from workspace file and merge with local stats
+            // Load usage stats from workspace file, merge with localStorage, then write
+            // the merged result back so the file is always the authoritative source.
             loadUsageStats(handle).then((fileEntries) => {
-                if (fileEntries.length > 0) useUsageStore.getState().mergeFromFile(fileEntries)
+                useUsageStore.getState().mergeFromFile(fileEntries)
+                const merged = useUsageStore.getState().entries
+                if (merged.length > 0) {
+                    saveUsageStats(handle, merged).catch((e) => {
+                        console.warn('[usageStore] failed to bootstrap usage_stats.json:', e)
+                    })
+                }
             }).catch(() => {})
         } catch (err) {
             console.error('[appStore] initialize failed:', err)
@@ -258,9 +266,16 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
                 canvasList: manifest.canvases,
                 folderList: manifest.folders ?? [],
             })
-            // Load usage stats from workspace file and merge with local stats
+            // Load usage stats from workspace file, merge with localStorage, then write
+            // the merged result back so the file is always the authoritative source.
             loadUsageStats(handle).then((fileEntries) => {
-                if (fileEntries.length > 0) useUsageStore.getState().mergeFromFile(fileEntries)
+                useUsageStore.getState().mergeFromFile(fileEntries)
+                const merged = useUsageStore.getState().entries
+                if (merged.length > 0) {
+                    saveUsageStats(handle, merged).catch((e) => {
+                        console.warn('[usageStore] failed to bootstrap usage_stats.json:', e)
+                    })
+                }
             }).catch(() => {})
         }
     },
